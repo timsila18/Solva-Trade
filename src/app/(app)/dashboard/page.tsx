@@ -43,6 +43,16 @@ const ownerCards = [
   ["Current VAT balance", "KES 0.00"],
   ["Suspense-account balance", "KES 0.00"],
   ["Current accounting period", "No open period"],
+  ["Revenue", "KES 0.00"],
+  ["Gross profit", "KES 0.00"],
+  ["Net profit", "KES 0.00"],
+  ["Cash available", "KES 0.00"],
+  ["Customer debt", "KES 0.00"],
+  ["Supplier debt", "KES 0.00"],
+  ["Working capital", "KES 0.00"],
+  ["Budget performance", "No active budget"],
+  ["Projected year-end profit", "No active forecast"],
+  ["Current ratio", "Not enough data"],
 ];
 
 export default function DashboardPage() {
@@ -114,6 +124,8 @@ export default function DashboardPage() {
           ["Cash controls", "Large payments, owner drawings, cash variances, unreconciled items and overdue advances will appear from real treasury records."],
           ["Accounting controls", "Failed postings, missing mappings, control differences, backdated journals and period status will appear from real accounting records."],
           ["Period-close readiness", "Prompt 9 financial statements will build on posted journals, reconciled subledgers and locked accounting periods."],
+          ["Financial reporting", "Profit and Loss, Balance Sheet, Cash Flow, budgets, forecasts, ratios and management packs use posted accounting entries only."],
+          ["Major financial risks", "Budget variance, cash shortages, branch margin drops, owner drawings and close blockers will appear from real reporting records."],
         ].map(([title, body]) => (
           <article key={title} className="rounded-lg border border-slate-200 bg-white p-5">
             <h3 className="font-semibold">{title}</h3>

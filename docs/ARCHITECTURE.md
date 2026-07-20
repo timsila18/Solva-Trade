@@ -79,3 +79,19 @@ Financial years and accounting periods are separate from inventory or treasury o
 General ledger and trial-balance views read from posted journal lines only. Subledger reconciliations compare control-account balances to customer, supplier, inventory, treasury, VAT, owner, staff, driver-cash and packaging ledgers without duplicating those operational ledgers.
 
 Accounting imports, attachments, diagnostics and accounting audit trail tables are tenant-scoped and protected by RLS. The UI exposes setup, chart, mappings, queue, manual journals, opening balances, reversals, general ledger, trial balance, journal register, reconciliation, diagnostics, imports and reports under `/accounting`.
+
+## Prompt 9 Financial Reporting Engine
+
+Financial statements are generated from posted `journal_entries` and `journal_lines` only. Draft, rejected, cancelled and failed operational records are excluded from official reporting; reversal journals are included according to their posting dates.
+
+Statement layouts are configurable per business for Profit and Loss, Balance Sheet, Cash Flow, Changes in Equity, management income statements, branch performance and profitability foundations. Sections support account classes, account roles, account filters, subtotals, calculated rows, percentage rows and notes. Formula text is constrained so report layouts cannot become SQL execution surfaces.
+
+`financial_statement_account_activity` is the reporting aggregation base. Profit and Loss, Balance Sheet and Cash Flow summary views group posted journal lines by account class, statement section, cash-flow category, period and branch. Current-year earnings are calculated dynamically from posted revenue, cost-of-sales, expense, other-income and other-expense lines until a year-end closing journal transfers profit or loss to equity.
+
+Budgets are versioned by financial year and scenario. Approved or active budgets are immutable; revisions create a new version. Forecasts are stored separately with assumptions and superseding links, so estimates do not change approved budgets or transactional data.
+
+Period close is controlled through `period_close_cycles` and `period_close_tasks`. Close tasks cover failed accounting events, bank and M-Pesa reconciliation, customer and supplier controls, inventory-to-GL, trial balance and management review. Soft close and hard close functions update accounting-period locks; reopening requires a reason and creates a superseding-report expectation.
+
+Financial statement snapshots are immutable and preserve the generated payload, layout, period, status, data hash and report-file reference. Snapshots are created for approved management packs, hard-closed periods, closed financial years and formally issued reports.
+
+The `/financials` workspace exposes Profit and Loss, Balance Sheet, Cash Flow, Changes in Equity, management accounts, ratios, working capital, branch performance, product/customer profitability, route and vehicle profitability foundations, budgets, forecasts, close, adjustments, snapshots and reports.

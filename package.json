@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test": "node tests/permissions.test.mjs && node tests/configuration.test.mjs && node tests/inventory.test.mjs && node tests/purchasing.test.mjs && node tests/distribution.test.mjs && node tests/treasury.test.mjs && node tests/accounting.test.mjs"
+    "test": "node tests/permissions.test.mjs && node tests/configuration.test.mjs && node tests/inventory.test.mjs && node tests/purchasing.test.mjs && node tests/distribution.test.mjs && node tests/treasury.test.mjs && node tests/accounting.test.mjs && node tests/financial-reporting.test.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.4.0",
