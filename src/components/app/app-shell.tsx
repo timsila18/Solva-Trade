@@ -1,7 +1,34 @@
 import Link from "next/link";
+import {
+  Bell,
+  CircleHelp,
+  Home,
+  PackagePlus,
+  Plus,
+  ReceiptText,
+  Settings,
+  UserPlus,
+} from "lucide-react";
+import { QuickCommand } from "@/components/app/quick-command";
 import { navigationItems } from "@/lib/navigation";
 import { canPerformAction } from "@/lib/permissions";
 import { demoBranches, demoBusinesses, demoMemberships } from "@/lib/mock-data";
+
+const priorityNav = [
+  "Dashboard",
+  "Sales",
+  "Customers",
+  "Inventory",
+  "Cash & Bank",
+  "Reports",
+  "Support",
+];
+
+const quickCreate = [
+  { label: "New Sale", href: "/sales/invoices", icon: ReceiptText },
+  { label: "New Customer", href: "/customers/new", icon: UserPlus },
+  { label: "Receive Stock", href: "/purchases/goods-received", icon: PackagePlus },
+];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const business = demoBusinesses[0];
@@ -10,22 +37,37 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const nav = navigationItems.filter(
     (item) => !item.permission || canPerformAction(membership, item.permission),
   );
+  const mainNav = nav.filter((item) => priorityNav.includes(item.label));
+  const moreNav = nav.filter((item) => !priorityNav.includes(item.label));
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-950">
-      <aside className="fixed inset-y-0 left-0 hidden w-72 border-r border-slate-200 bg-white px-5 py-6 lg:block">
-        <Link href="/dashboard" className="block">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-700">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,#ecfdf5_0,#f8fafc_32rem)] text-slate-950">
+      <aside className="fixed inset-y-0 left-0 hidden w-72 border-r border-slate-200/80 bg-white/90 px-4 py-5 shadow-sm backdrop-blur lg:block">
+        <Link href="/dashboard" className="block rounded-lg px-2 py-2">
+          <p className="text-xs font-semibold uppercase text-emerald-700">
             Solva Trade
           </p>
-          <h1 className="mt-2 text-2xl font-semibold">Run Your Business Smarter.</h1>
+          <h1 className="mt-2 text-2xl font-semibold tracking-normal">Run Your Business Smarter.</h1>
         </Link>
-        <nav className="mt-8 space-y-1">
-          {nav.map((item) => (
+
+        <div className="mt-5 rounded-lg border border-emerald-100 bg-emerald-50 p-3">
+          <p className="text-xs font-semibold uppercase text-emerald-800">Today&apos;s next step</p>
+          <p className="mt-2 text-sm leading-5 text-emerald-950">Start with one sale, one payment, or one stock receipt.</p>
+          <Link
+            href="/sales/invoices"
+            className="mt-3 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md bg-emerald-700 px-3 text-sm font-semibold text-white"
+          >
+            <Plus className="h-4 w-4" />
+            New Sale
+          </Link>
+        </div>
+
+        <nav className="mt-5 space-y-1">
+          {mainNav.map((item) => (
             <Link
               key={item.href}
               href={item.href}
-              className="flex items-center justify-between rounded-md px-3 py-2 text-sm font-medium text-slate-700 hover:bg-emerald-50 hover:text-emerald-800"
+              className="flex min-h-10 items-center justify-between rounded-md px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-emerald-50 hover:text-emerald-800"
             >
               <span>{item.label}</span>
               {item.status === "next_phase" ? (
@@ -34,44 +76,74 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </Link>
           ))}
         </nav>
+
+        <div className="mt-5 border-t border-slate-100 pt-4">
+          <p className="px-3 text-xs font-semibold uppercase text-slate-400">More tools</p>
+          <div className="mt-2 grid gap-1">
+            {moreNav.slice(0, 10).map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                className="rounded-md px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-950"
+              >
+                {item.label}
+              </Link>
+            ))}
+          </div>
+        </div>
       </aside>
       <div className="lg:pl-72">
-        <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-xs font-medium text-slate-500">Active business</p>
-              <button className="mt-1 rounded-md border border-slate-200 bg-white px-3 py-2 text-left text-sm font-semibold shadow-sm">
-                {business.tradingName}
-                <span className="ml-2 text-xs font-normal text-emerald-700">Owner</span>
-              </button>
-            </div>
-            <div className="hidden sm:block">
-              <p className="text-xs font-medium text-slate-500">Active branch</p>
-              <button className="mt-1 rounded-md border border-slate-200 bg-white px-3 py-2 text-left text-sm font-semibold shadow-sm">
-                {branch.name}
-                <span className="ml-2 text-xs font-normal text-slate-500">{branch.code}</span>
-              </button>
-            </div>
-            <div className="hidden flex-1 justify-center md:flex">
-              <div className="w-full max-w-xl rounded-md border border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-500">
-                Search customers, invoices, stock, reports
+        <header className="sticky top-0 z-20 border-b border-slate-200/80 bg-white/85 px-4 py-3 backdrop-blur-xl">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+            <div className="flex items-center gap-3">
+              <Link href="/dashboard" className="grid h-10 w-10 place-items-center rounded-md bg-slate-950 text-white lg:hidden">
+                <Home className="h-4 w-4" />
+              </Link>
+              <div>
+                <p className="text-xs font-medium text-slate-500">You are working in</p>
+                <p className="text-sm font-semibold text-slate-950">
+                  {business.tradingName}
+                  <span className="ml-2 rounded bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">Owner</span>
+                </p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <Link href="/notifications" className="rounded-md border border-slate-200 px-3 py-2 text-sm">
-                Notifications
+            <div className="min-w-0 flex-1 xl:max-w-2xl">
+              <QuickCommand />
+            </div>
+            <div className="flex items-center gap-2 overflow-x-auto">
+              <span className="hidden rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 sm:inline">
+                {branch.name} · {branch.code}
+              </span>
+              {quickCreate.map((action) => {
+                const Icon = action.icon;
+                return (
+                  <Link
+                    key={action.href}
+                    href={action.href}
+                    className="inline-flex min-h-10 shrink-0 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-emerald-300 hover:text-emerald-800"
+                  >
+                    <Icon className="h-4 w-4" />
+                    <span className="hidden sm:inline">{action.label}</span>
+                  </Link>
+                );
+              })}
+              <Link href="/support" className="grid h-10 w-10 shrink-0 place-items-center rounded-md border border-slate-200 bg-white text-slate-600 shadow-sm">
+                <CircleHelp className="h-4 w-4" />
               </Link>
-              <Link href="/settings" className="rounded-md bg-slate-950 px-3 py-2 text-sm text-white">
-                Profile
+              <Link href="/notifications" className="grid h-10 w-10 shrink-0 place-items-center rounded-md border border-slate-200 bg-white text-slate-600 shadow-sm">
+                <Bell className="h-4 w-4" />
+              </Link>
+              <Link href="/settings" className="grid h-10 w-10 shrink-0 place-items-center rounded-md bg-slate-950 text-white shadow-sm">
+                <Settings className="h-4 w-4" />
               </Link>
             </div>
           </div>
         </header>
-        <main className="px-4 py-6 sm:px-6 lg:px-8">{children}</main>
+        <main className="px-4 py-5 sm:px-6 lg:px-8">{children}</main>
       </div>
-      <nav className="fixed inset-x-0 bottom-0 grid grid-cols-5 border-t border-slate-200 bg-white lg:hidden">
-        {nav.slice(0, 5).map((item) => (
-          <Link key={item.href} href={item.href} className="px-2 py-3 text-center text-xs font-medium">
+      <nav className="fixed inset-x-0 bottom-0 grid grid-cols-5 border-t border-slate-200 bg-white/95 backdrop-blur lg:hidden">
+        {mainNav.slice(0, 5).map((item) => (
+          <Link key={item.href} href={item.href} className="px-2 py-3 text-center text-xs font-semibold text-slate-700">
             {item.label}
           </Link>
         ))}

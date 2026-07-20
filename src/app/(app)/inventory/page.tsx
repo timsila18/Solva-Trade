@@ -1,88 +1,75 @@
-import Link from "next/link";
+import { PackagePlus } from "lucide-react";
+import { EmptyState, MetricCard, PageHero, PlainCard } from "@/components/ui/premium";
 import { inventorySummary, inventoryWorkflows } from "@/lib/inventory-data";
 
-export default function InventoryPage() {
-  const cards = [
-    ["Total active products", inventorySummary.activeProducts.toString()],
-    ["Total stock quantity", inventorySummary.totalStockQuantity.toString()],
-    ["Inventory value", inventorySummary.inventoryValue],
-    ["Low-stock products", inventorySummary.lowStockProducts.toString()],
-    ["Out-of-stock products", inventorySummary.outOfStockProducts.toString()],
-    ["Near-expiry value", inventorySummary.nearExpiryValue],
-    ["Expired-stock value", inventorySummary.expiredStockValue],
-    ["Transfers in progress", inventorySummary.transfersInProgress.toString()],
-  ];
+const cards = [
+  ["Products you sell", inventorySummary.activeProducts.toString(), "Add products once, then track buying, selling and stock."],
+  ["Items in stock", inventorySummary.totalStockQuantity.toString(), "Stock appears after opening stock, purchases or transfers."],
+  ["Stock value", inventorySummary.inventoryValue, "This tells you how much money is sitting in goods."],
+  ["Low-stock products", inventorySummary.lowStockProducts.toString(), "Solva will point out what may run out soon."],
+  ["Out of stock", inventorySummary.outOfStockProducts.toString(), "Products needing urgent reorder show here."],
+  ["Expiry risk", inventorySummary.nearExpiryValue, "Near-expiry stock is highlighted before it becomes a loss."],
+  ["Expired stock", inventorySummary.expiredStockValue, "Expired value stays separate so it cannot hide in normal stock."],
+  ["Transfers moving", inventorySummary.transfersInProgress.toString(), "Branch and warehouse moves are tracked until received."],
+];
 
+export default function InventoryPage() {
   return (
-    <div className="pb-20">
-      <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
-        <div>
-          <p className="text-sm font-semibold text-emerald-700">Inventory</p>
-          <h1 className="mt-1 text-3xl font-semibold">Inventory Overview</h1>
-          <p className="mt-2 max-w-3xl text-slate-600">
-            Products, stock balances, movements, batches, expiry, transfers, counts and valuation are powered by the stock ledger. Empty values mean no inventory has been posted yet.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Link href="/inventory/products/new" className="rounded-md bg-emerald-700 px-4 py-3 text-sm font-semibold text-white">
-            Add product
-          </Link>
-          <Link href="/inventory/opening-stock" className="rounded-md border border-slate-200 bg-white px-4 py-3 text-sm font-semibold">
-            Enter opening stock
-          </Link>
-        </div>
-      </div>
+    <div className="pb-24">
+      <PageHero
+        eyebrow="Inventory"
+        title="Know what you have, what is running out, and what needs reordering."
+        description="Products, stock, batches, expiry and transfers stay simple on the surface, with detailed controls available when needed."
+        primaryAction={{ label: "Receive Stock", href: "/purchases/goods-received", icon: PackagePlus }}
+        secondaryAction={{ label: "Add Product", href: "/inventory/products/new" }}
+        insight="I will warn you when fast-moving items are about to run out or when stock is sitting too long."
+      />
 
       <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {cards.map(([label, value]) => (
-          <article key={label} className="rounded-lg border border-slate-200 bg-white p-5">
-            <p className="text-sm text-slate-500">{label}</p>
-            <p className="mt-3 text-2xl font-semibold">{value}</p>
-          </article>
+        {cards.map(([label, value, story], index) => (
+          <MetricCard key={label} label={label} value={value} story={story} tone={index === 3 || index === 4 ? "warning" : "neutral"} />
         ))}
       </section>
 
-      <section className="mt-6 rounded-lg border border-slate-200 bg-white p-5">
-        <div className="grid gap-3 md:grid-cols-[1fr_160px_160px_160px]">
-          <input className="rounded-md border border-slate-300 px-3 py-2 text-sm" placeholder="Search products, SKU, barcode or movement reference" />
-          <select className="rounded-md border border-slate-300 px-3 py-2 text-sm" defaultValue="all">
+      <section className="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <h2 className="font-semibold">Find stock instantly</h2>
+        <p className="mt-2 text-sm text-slate-600">Search by product, SKU, barcode, batch or movement reference.</p>
+        <div className="mt-5 grid gap-3 md:grid-cols-[1fr_160px_160px_180px]">
+          <input className="min-h-11 rounded-md border border-slate-300 px-3 py-2 text-sm" placeholder="Search products, SKU or barcode" />
+          <select className="min-h-11 rounded-md border border-slate-300 px-3 py-2 text-sm" defaultValue="all">
             <option value="all">All branches</option>
             <option value="nrb">Nairobi Depot</option>
           </select>
-          <select className="rounded-md border border-slate-300 px-3 py-2 text-sm" defaultValue="all">
+          <select className="min-h-11 rounded-md border border-slate-300 px-3 py-2 text-sm" defaultValue="all">
             <option value="all">All warehouses</option>
-            <option value="main">Main Stock Location</option>
+            <option value="main">Main Stock</option>
           </select>
-          <select className="rounded-md border border-slate-300 px-3 py-2 text-sm" defaultValue="all">
-            <option value="all">All stock statuses</option>
-            <option value="low">Low Stock</option>
-            <option value="out">Out of Stock</option>
-            <option value="over">Overstocked</option>
+          <select className="min-h-11 rounded-md border border-slate-300 px-3 py-2 text-sm" defaultValue="all">
+            <option value="all">All stock levels</option>
+            <option value="low">Running low</option>
+            <option value="out">Out of stock</option>
+            <option value="over">Too much stock</option>
           </select>
         </div>
       </section>
 
       <section className="mt-6 grid gap-4 lg:grid-cols-3">
         {inventoryWorkflows.map((workflow) => (
-          <Link key={workflow.href} href={workflow.href} className="rounded-lg border border-slate-200 bg-white p-5 hover:border-emerald-300">
-            <h2 className="font-semibold">{workflow.title}</h2>
-            <p className="mt-2 text-sm text-slate-600">{workflow.description}</p>
-          </Link>
+          <PlainCard key={workflow.href} href={workflow.href} title={workflow.title} description={workflow.description} action="Open" />
         ))}
       </section>
 
       <section className="mt-6 grid gap-4 lg:grid-cols-2">
-        {[
-          ["Recent movement timeline", "No stock movements have been posted yet."],
-          ["Smart inventory insights", "Insights will appear from real stock balances, movements, batches and reorder settings."],
-          ["Top-value products", "Valuation appears after opening stock or purchase receipts are posted."],
-          ["Stock by branch and warehouse", "Branch and warehouse summaries are ready for ledger-backed data."],
-        ].map(([title, body]) => (
-          <article key={title} className="rounded-lg border border-slate-200 bg-white p-5">
-            <h2 className="font-semibold">{title}</h2>
-            <p className="mt-2 text-sm text-slate-600">{body}</p>
-          </article>
-        ))}
+        <EmptyState
+          title="No stock has been added yet"
+          description="Receive stock or enter opening balances so Solva can track value, low stock and reorder timing."
+          action={{ label: "Receive First Stock", href: "/purchases/goods-received" }}
+        />
+        <EmptyState
+          title="No product list yet"
+          description="Products are the foundation for sales, purchasing, stock counts and profit tracking."
+          action={{ label: "Add First Product", href: "/inventory/products/new" }}
+        />
       </section>
     </div>
   );
