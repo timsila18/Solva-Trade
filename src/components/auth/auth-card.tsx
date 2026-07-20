@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import { ArrowRight, ShieldCheck, Sparkles } from "lucide-react";
 import {
   createAccountAction,
@@ -31,9 +32,16 @@ export function AuthCard({
     <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,#064e3b_0,#0f172a_36rem,#020617_100%)] px-4 py-10 text-white">
       <section className="mx-auto grid min-h-[calc(100vh-5rem)] max-w-6xl items-center gap-8 lg:grid-cols-[1fr_460px]">
         <div>
-          <p className="text-sm font-semibold uppercase text-emerald-300">
-            Solva Trade
-          </p>
+          <div className="max-w-md overflow-hidden rounded-lg border border-cyan-300/20 bg-[#03111f] p-3 shadow-2xl shadow-blue-950/40">
+            <Image
+              src="/solva-trade-logo.png"
+              alt="Solva Trade"
+              width={920}
+              height={458}
+              priority
+              className="h-auto w-full"
+            />
+          </div>
           <h1 className="mt-5 max-w-2xl text-4xl font-semibold tracking-normal sm:text-5xl">
             Run sales, stock and money without learning accounting software.
           </h1>

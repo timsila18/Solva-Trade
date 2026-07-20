@@ -1,3 +1,4 @@
+import Image from "next/image";
 import { completeOnboardingAction } from "./actions";
 
 const steps = [
@@ -29,7 +30,17 @@ export default function OnboardingPage() {
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-8">
       <section className="mx-auto max-w-6xl">
-        <p className="text-sm font-semibold uppercase text-emerald-700">Solva Trade onboarding</p>
+        <div className="w-56 overflow-hidden rounded-lg bg-[var(--solva-navy-900)] p-2 shadow-sm">
+          <Image
+            src="/solva-trade-logo.png"
+            alt="Solva Trade"
+            width={460}
+            height={229}
+            priority
+            className="h-auto w-full"
+          />
+        </div>
+        <p className="mt-4 text-sm font-semibold uppercase text-emerald-700">Workspace onboarding</p>
         <h1 className="mt-2 text-4xl font-semibold">Create your business workspace</h1>
         <p className="mt-3 max-w-2xl text-slate-600">
           Save and resume setup while creating the Owner membership and active business context.

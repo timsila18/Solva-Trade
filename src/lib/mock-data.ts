@@ -39,7 +39,7 @@ export const demoMemberships: Membership[] = [
 
 export const setupChecklist = [
   { label: "Complete business profile", complete: true, phase: "ready" },
-  { label: "Upload logo", complete: false, phase: "ready" },
+  { label: "Upload logo", complete: true, phase: "ready" },
   { label: "Configure tax status", complete: true, phase: "ready" },
   { label: "Add first branch", complete: true, phase: "ready" },
   { label: "Add first stock location", complete: true, phase: "ready" },

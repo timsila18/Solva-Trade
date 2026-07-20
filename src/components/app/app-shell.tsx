@@ -1,10 +1,10 @@
 import Link from "next/link";
+import Image from "next/image";
 import {
   Bell,
   CircleHelp,
   LogIn,
   LogOut,
-  Home,
   PackagePlus,
   Plus,
   ReceiptText,
@@ -52,10 +52,17 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
       <aside className="fixed inset-y-0 left-0 hidden w-72 border-r border-white/10 bg-[var(--solva-navy-900)] text-white shadow-2xl lg:flex lg:flex-col">
         <div className="border-b border-white/10 px-4 py-5">
           <Link href="/dashboard" className="block rounded-lg px-2 py-2">
-            <p className="text-xs font-semibold uppercase text-cyan-300">
-              Solva Trade
-            </p>
-            <h1 className="mt-2 text-2xl font-semibold tracking-normal">Run Your Business Smarter.</h1>
+            <span className="block overflow-hidden rounded-md border border-cyan-300/20 bg-[#03111f] p-2 shadow-lg shadow-blue-950/30">
+              <Image
+                src="/solva-trade-logo.png"
+                alt="Solva Trade"
+                width={460}
+                height={229}
+                priority
+                className="h-auto w-full"
+              />
+            </span>
+            <h1 className="mt-3 text-xl font-semibold tracking-normal">Run. Grow. Lead.</h1>
           </Link>
         </div>
 
@@ -132,8 +139,14 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
         <header className="sticky top-0 z-20 border-b border-slate-200/80 bg-white/85 px-4 py-3 backdrop-blur-xl">
           <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
             <div className="flex items-center gap-3">
-              <Link href="/dashboard" className="grid h-10 w-10 place-items-center rounded-md bg-slate-950 text-white lg:hidden">
-                <Home className="h-4 w-4" />
+              <Link href="/dashboard" className="relative h-10 w-20 shrink-0 overflow-hidden rounded-md bg-[var(--solva-navy-900)] lg:hidden">
+                <Image
+                  src="/solva-trade-logo.png"
+                  alt="Solva Trade"
+                  fill
+                  sizes="80px"
+                  className="object-cover object-left"
+                />
               </Link>
               <div>
                 <p className="text-xs font-medium text-slate-500">You are working in</p>
