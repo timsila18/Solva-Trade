@@ -65,3 +65,17 @@ Deposits, withdrawals and account transfers create linked ledger entries. Same-a
 Statement imports create immutable batches, rows and statement lines. Reconciliation sessions and matches support one-to-one, one-to-many, many-to-one, partial and manual matching, with unidentified receipts preserved until allocated.
 
 Owner transactions are deliberately separated from expenses: capital, loans, drawings, repayments and reimbursements feed the owner-current ledger and prepare accounting events for Prompt 8.
+
+## Prompt 8 Accounting Engine
+
+Accounting is journal-led. Operational modules emit standardized `accounting_events`; the posting engine resolves account roles and mappings, creates `journal_entries` and `journal_lines`, validates total debits equal total credits, and posts only inside valid accounting periods. Posted journal lines are immutable, and reversals are new offsetting journals.
+
+The chart of accounts is tenant-scoped and supports account classes, normal balances, parent hierarchy, control accounts, posting flags, system protection, branch and currency restrictions, cash-flow categories and financial-statement sections. The recommended Kenyan SME chart is installable per business through `install_default_chart_of_accounts`, so a business can edit permitted accounts or import its own chart while keeping protected roles mapped.
+
+Account roles are independent of account codes. Posting rules use roles such as `CUSTOMER_RECEIVABLES`, `SUPPLIER_PAYABLES`, `INVENTORY_ASSET`, `OUTPUT_VAT`, `BANK_ACCOUNT`, `OWNER_CAPITAL` and `STAFF_ADVANCES`; role mappings connect those roles to actual accounts. Account mappings add precedence for transaction, product, category, customer, supplier, branch, tax, payment-account and business-default scopes.
+
+Financial years and accounting periods are separate from inventory or treasury operational periods. A posted journal date must fall inside a valid period, and closed or locked periods reject normal postings while diagnostics record blocked attempts.
+
+General ledger and trial-balance views read from posted journal lines only. Subledger reconciliations compare control-account balances to customer, supplier, inventory, treasury, VAT, owner, staff, driver-cash and packaging ledgers without duplicating those operational ledgers.
+
+Accounting imports, attachments, diagnostics and accounting audit trail tables are tenant-scoped and protected by RLS. The UI exposes setup, chart, mappings, queue, manual journals, opening balances, reversals, general ledger, trial balance, journal register, reconciliation, diagnostics, imports and reports under `/accounting`.

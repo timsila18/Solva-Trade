@@ -32,6 +32,17 @@ const ownerCards = [
   ["Unreconciled bank items", "0"],
   ["Unreconciled M-Pesa items", "0"],
   ["Staff advances overdue", "0"],
+  ["Accounting records up to date", "Not activated"],
+  ["Failed posting events", "0"],
+  ["Trial balance", "No posted journals"],
+  ["Customer-control difference", "KES 0.00"],
+  ["Supplier-control difference", "KES 0.00"],
+  ["Inventory-control difference", "KES 0.00"],
+  ["Cash and bank difference", "KES 0.00"],
+  ["Unreviewed manual journals", "0"],
+  ["Current VAT balance", "KES 0.00"],
+  ["Suspense-account balance", "KES 0.00"],
+  ["Current accounting period", "No open period"],
 ];
 
 export default function DashboardPage() {
@@ -101,6 +112,8 @@ export default function DashboardPage() {
           ["Distribution exceptions", "Failed deliveries, stock variances, cash shortfalls, proof gaps and packaging variances will appear from delivery records."],
           ["Treasury recommendations", "Create financial accounts, post opening balances, import statements and reconcile cash, bank and M-Pesa accounts."],
           ["Cash controls", "Large payments, owner drawings, cash variances, unreconciled items and overdue advances will appear from real treasury records."],
+          ["Accounting controls", "Failed postings, missing mappings, control differences, backdated journals and period status will appear from real accounting records."],
+          ["Period-close readiness", "Prompt 9 financial statements will build on posted journals, reconciled subledgers and locked accounting periods."],
         ].map(([title, body]) => (
           <article key={title} className="rounded-lg border border-slate-200 bg-white p-5">
             <h3 className="font-semibold">{title}</h3>

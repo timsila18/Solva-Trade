@@ -15,8 +15,8 @@ export const navigationItems: NavigationItem[] = [
   },
   { label: "Cash & Bank", href: "/cash-bank", permission: "finance.view_cashbook", status: "ready" },
   { label: "Expenses", href: "/cash-bank/expenses", permission: "finance.record_expenses", status: "ready" },
-  { label: "Accounting", href: "/accounting", permission: "finance.view_profit", status: "next_phase" },
-  { label: "Reports", href: "/reports", permission: "finance.export_financial_reports", status: "next_phase" },
+  { label: "Accounting", href: "/accounting", permission: "accounting.view_general_ledger", status: "ready" },
+  { label: "Reports", href: "/accounting/reports", permission: "accounting.view_accounting_reports", status: "ready" },
   {
     label: "Insights",
     href: "/insights",
