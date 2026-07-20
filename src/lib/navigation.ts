@@ -1,7 +1,7 @@
 import type { NavigationItem } from "./types";
 
 export const navigationItems: NavigationItem[] = [
-  { label: "Dashboard", href: "/dashboard", status: "ready" },
+  { label: "Dashboard", href: "/dashboard", permission: "dashboard.view_command_centre", status: "ready" },
   { label: "Sales", href: "/sales", permission: "sales.view", status: "ready" },
   { label: "Purchases", href: "/purchases", permission: "purchases.view", status: "ready" },
   { label: "Inventory", href: "/inventory", permission: "inventory.view_stock", status: "ready" },
@@ -18,12 +18,12 @@ export const navigationItems: NavigationItem[] = [
   { label: "Accounting", href: "/accounting", permission: "accounting.view_general_ledger", status: "ready" },
   { label: "Financials", href: "/financials", permission: "financial_reporting.view_statements", status: "ready" },
   { label: "Tax", href: "/tax", permission: "tax.view_tax_reports", status: "ready" },
-  { label: "Reports", href: "/financials/reports", permission: "financial_reporting.export_financial_reports", status: "ready" },
+  { label: "Reports", href: "/reports", permission: "dashboard.view_business_insights", status: "ready" },
   {
     label: "Insights",
     href: "/insights",
     permission: "dashboard.view_business_insights",
-    status: "next_phase",
+    status: "ready",
   },
   { label: "Team", href: "/team", permission: "administration.manage_users", status: "ready" },
   {

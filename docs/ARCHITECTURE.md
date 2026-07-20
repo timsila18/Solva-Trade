@@ -107,3 +107,17 @@ The eTIMS architecture is provider-neutral. The database stores canonical payloa
 Tax returns are prepared from posted `tax_ledger_entries`, then reconciled back to source tax documents and posted journal lines. Closed tax periods block new tax documents and tax ledger entries unless a controlled reopening records the approver and reason.
 
 The `/tax` workspace exposes setup, branch outlets, tax rules, VAT codes, product mappings, customer and supplier tax profiles, VAT calculations, sales/purchase tax documents, credit/debit notes, eTIMS configuration and queue, external registry, VAT ledgers, VAT return preparation, withholding tax and withholding VAT, turnover/excise/levy foundations, compliance calendar, tax periods, audit evidence, imports, reports and integration health.
+
+## Prompt 11 Business Operating System
+
+The command centre is an intelligence layer over the existing modules, not a replacement calculation engine. KPI definitions, snapshots, health scores, briefs, alerts, recommendations, timeline events, widget layouts, trend snapshots, forecast indicators, data-quality checks, system-health checks and report schedules are stored as tenant-scoped records with RLS. Widgets read cached or materialized summaries wherever possible and preserve source references so the UI can avoid fabricated explanations.
+
+Morning briefs are historical records. Each statement stores source-backed facts and a generated summary for a specific business, branch and audience. If no posted operating data exists, the brief says so instead of inventing movement.
+
+Business Health is a configurable weighted score from KPI snapshots. Components include sales, profitability, cash, liquidity, inventory, debtors, creditors, tax, accounting, delivery, stock accuracy, budget, collections, supplier performance, staff productivity, system usage, data quality and security. Each component stores score, trend, explanation and recommendation.
+
+Timeline, alerts and recommendations share source module and source record references. Recommendations are advisory only and never perform transactions automatically. Alert status supports open, acknowledged, resolved, expired and muted states.
+
+Dashboard customization is persisted through dashboard layouts and dashboard widgets. Widgets support move, resize, hide, favourite, personal layouts and restore-default behavior. The reusable widget catalog covers KPI cards, charts, gauges, tables, timelines, calendars, alerts, tasks, heatmaps, leaderboards, sparklines and map foundations.
+
+The `/dashboard` page is the owner command centre. `/insights` exposes role dashboards, business memory, health, alerts, recommendations, trends, forecasts, data quality and system health. `/reports` is the unified reporting hub for executive, operational, financial, inventory, sales, purchasing, treasury, accounting, tax, budget and scheduled-report foundations.
