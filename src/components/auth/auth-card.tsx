@@ -12,10 +12,14 @@ export function AuthCard({
   title,
   subtitle,
   mode,
+  error,
+  message,
 }: {
   title: string;
   subtitle: string;
   mode: "sign-in" | "create-account" | "forgot" | "reset" | "invitation";
+  error?: string;
+  message?: string;
 }) {
   const action =
     mode === "sign-in"
@@ -64,6 +68,16 @@ export function AuthCard({
         <form action={action} className="rounded-lg border border-white/40 bg-white p-6 text-slate-950 shadow-2xl">
           <h2 className="text-2xl font-semibold">{title}</h2>
           <p className="mt-2 text-sm text-slate-600">{subtitle}</p>
+          {error ? (
+            <p className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700">
+              {error}
+            </p>
+          ) : null}
+          {message ? (
+            <p className="mt-4 rounded-md border border-cyan-200 bg-cyan-50 px-3 py-2 text-sm font-medium text-cyan-800">
+              {message}
+            </p>
+          ) : null}
           {mode !== "forgot" && mode !== "reset" ? (
             <label className="mt-5 block text-sm font-medium">
               Email
