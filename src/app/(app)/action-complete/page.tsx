@@ -12,8 +12,11 @@ export default async function ActionCompletePage({
   const intent = String(params.intent ?? "Completed");
   const returnTo = String(params.returnTo ?? "/dashboard");
   const next = String(params.next ?? "Open Dashboard");
-  const exportHref = `/api/exports?module=${encodeURIComponent(moduleName)}&process=${encodeURIComponent(processName)}&format=csv`;
-  const pdfHref = `/api/exports?module=${encodeURIComponent(moduleName)}&process=${encodeURIComponent(processName)}&format=pdf`;
+  const party = String(params.customer ?? params.company ?? params.user ?? "");
+  const exportBase = `/api/exports?module=${encodeURIComponent(moduleName)}&process=${encodeURIComponent(processName)}${party ? `&party=${encodeURIComponent(party)}` : ""}`;
+  const exportHref = `${exportBase}&format=csv`;
+  const excelHref = `${exportBase}&format=excel`;
+  const pdfHref = `${exportBase}&format=pdf`;
 
   return (
     <div className="mx-auto max-w-3xl pb-24">
@@ -35,6 +38,10 @@ export default async function ActionCompletePage({
           <a href={exportHref} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700">
             <Download className="h-4 w-4" />
             Export CSV
+          </a>
+          <a href={excelHref} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700">
+            <Download className="h-4 w-4" />
+            Export Excel
           </a>
           <a href={pdfHref} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700">
             <Download className="h-4 w-4" />
