@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { completeProcessAction } from "@/app/(app)/actions";
 import { treasuryReports } from "@/lib/treasury";
 import { accountTypes, expenseCategories, reconciliationMatchTypes } from "@/lib/treasury-data";
 
@@ -161,7 +162,11 @@ export default async function CashBankWorkflowPage({
       <p className="mt-2 max-w-3xl text-slate-600">{config.description}</p>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_320px]">
-        <section className="rounded-lg border border-slate-200 bg-white p-5">
+        <form action={completeProcessAction} className="rounded-lg border border-slate-200 bg-white p-5">
+          <input type="hidden" name="module" value="Cash and Bank" />
+          <input type="hidden" name="process" value={config.title} />
+          <input type="hidden" name="returnTo" value={`/cash-bank/${workflow}`} />
+          <input type="hidden" name="next" value={`Continue ${config.title}`} />
           <div className="grid gap-4 md:grid-cols-2">
             {config.fields.map((field) => (
               <label key={field} className="text-sm font-medium">
@@ -171,11 +176,11 @@ export default async function CashBankWorkflowPage({
             ))}
           </div>
           <div className="mt-6 flex flex-wrap gap-3">
-            <button className="rounded-md border border-slate-200 px-4 py-2 text-sm font-semibold">Save draft</button>
-            <button className="rounded-md border border-slate-200 px-4 py-2 text-sm font-semibold">Preview checks</button>
-            <button className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-semibold text-white">Post or submit</button>
+            <button name="intent" value="Draft saved" className="rounded-md border border-slate-200 px-4 py-2 text-sm font-semibold">Save draft</button>
+            <button name="intent" value="Checks previewed" className="rounded-md border border-slate-200 px-4 py-2 text-sm font-semibold">Preview checks</button>
+            <button name="intent" value="Posted or submitted" className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-semibold text-white">Post or submit</button>
           </div>
-        </section>
+        </form>
 
         <aside className="rounded-lg border border-slate-200 bg-white p-5">
           <h2 className="font-semibold">{config.sideTitle}</h2>

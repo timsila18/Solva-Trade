@@ -1,15 +1,18 @@
+import Link from "next/link";
+import { completeProcessAction } from "@/app/(app)/actions";
+
 const notifications = [
-  { title: "Business setup incomplete", module: "System", priority: "normal", state: "unread", action: "Open settings" },
-  { title: "Supplier bill approval pending", module: "Approvals", priority: "high", state: "unread", action: "Review approval" },
-  { title: "Failed posting event", module: "Accounting", priority: "urgent", state: "unread", action: "Open diagnostics" },
-  { title: "Low stock alert", module: "Inventory", priority: "high", state: "pinned", action: "Review stock" },
-  { title: "Customer payment overdue", module: "Sales", priority: "high", state: "unread", action: "Follow up" },
-  { title: "Purchase order expected today", module: "Purchasing", priority: "normal", state: "read", action: "Open PO" },
-  { title: "Bank reconciliation due", module: "Treasury", priority: "normal", state: "read", action: "Reconcile" },
-  { title: "VAT filing due soon", module: "Tax", priority: "urgent", state: "pinned", action: "Prepare VAT" },
-  { title: "Budget variance watch", module: "Budget", priority: "normal", state: "muted", action: "Open budget" },
-  { title: "Executive pack ready", module: "Reports", priority: "normal", state: "archived", action: "Open report" },
-  { title: "Role permission changed", module: "Security", priority: "high", state: "unread", action: "Review audit" },
+  { title: "Business setup incomplete", module: "System", priority: "normal", state: "unread", action: "Open settings", href: "/settings/business-profile" },
+  { title: "Supplier bill approval pending", module: "Approvals", priority: "high", state: "unread", action: "Review approval", href: "/purchases/supplier-bills" },
+  { title: "Failed posting event", module: "Accounting", priority: "urgent", state: "unread", action: "Open diagnostics", href: "/accounting/journals" },
+  { title: "Low stock alert", module: "Inventory", priority: "high", state: "pinned", action: "Review stock", href: "/inventory/reorder" },
+  { title: "Customer payment overdue", module: "Sales", priority: "high", state: "unread", action: "Follow up", href: "/customers" },
+  { title: "Purchase order expected today", module: "Purchasing", priority: "normal", state: "read", action: "Open PO", href: "/purchases/purchase-orders" },
+  { title: "Bank reconciliation due", module: "Treasury", priority: "normal", state: "read", action: "Reconcile", href: "/cash-bank/reconciliation" },
+  { title: "VAT filing due soon", module: "Tax", priority: "urgent", state: "pinned", action: "Prepare VAT", href: "/tax" },
+  { title: "Budget variance watch", module: "Budget", priority: "normal", state: "muted", action: "Open budget", href: "/financials/budgets" },
+  { title: "Executive pack ready", module: "Reports", priority: "normal", state: "archived", action: "Open report", href: "/reports" },
+  { title: "Role permission changed", module: "Security", priority: "high", state: "unread", action: "Review audit", href: "/settings/data-security" },
 ];
 
 const filters = ["All", "Unread", "Pinned", "Archived", "Muted", "High priority"];
@@ -25,14 +28,25 @@ export default function NotificationsPage() {
             Centralised operating notifications for system, approvals, accounting, inventory, sales, purchasing, treasury, tax, budget, reports and security.
           </p>
         </div>
-        <button className="rounded-md border border-slate-200 bg-white px-4 py-3 text-sm font-semibold">Mark all as read</button>
+        <form action={completeProcessAction}>
+          <input type="hidden" name="module" value="Notifications" />
+          <input type="hidden" name="process" value="Notification centre" />
+          <input type="hidden" name="intent" value="Notifications marked as read" />
+          <input type="hidden" name="returnTo" value="/notifications" />
+          <input type="hidden" name="next" value="Back to notifications" />
+          <button className="rounded-md border border-slate-200 bg-white px-4 py-3 text-sm font-semibold">Mark all as read</button>
+        </form>
       </div>
 
       <section className="mt-6 flex flex-wrap gap-2">
         {filters.map((filter) => (
-          <button key={filter} className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold">
+          <Link
+            key={filter}
+            href={`/notifications?filter=${encodeURIComponent(filter.toLowerCase().replaceAll(" ", "-"))}`}
+            className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold"
+          >
             {filter}
-          </button>
+          </Link>
         ))}
       </section>
 
@@ -46,7 +60,7 @@ export default function NotificationsPage() {
             <span className="text-sm text-slate-600">{notification.module}</span>
             <span className="text-sm font-semibold text-slate-700">{notification.priority}</span>
             <span className="text-sm text-slate-600">{notification.state}</span>
-            <button className="rounded-md bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800">{notification.action}</button>
+            <Link href={notification.href} className="rounded-md bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800">{notification.action}</Link>
           </div>
         ))}
       </section>

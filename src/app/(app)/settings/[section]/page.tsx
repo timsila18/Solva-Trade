@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { completeProcessAction } from "@/app/(app)/actions";
 import {
   buildDocumentPreview,
   findSettingsSection,
@@ -38,15 +39,24 @@ export default async function SettingsSectionPage({
           <p className="mt-2 max-w-3xl text-slate-600">{section.description}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button className="rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-semibold">
+          <Link
+            href={`/api/exports?module=Settings&process=${encodeURIComponent(section.title)}&format=csv`}
+            className="rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-semibold"
+          >
             Export CSV
-          </button>
-          <button className="rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-semibold">
+          </Link>
+          <Link
+            href={`/api/exports?module=Settings&process=${encodeURIComponent(`${section.title} import template`)}&format=excel`}
+            className="rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-semibold"
+          >
             Import template
-          </button>
-          <button className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-semibold text-white">
+          </Link>
+          <Link
+            href="#configuration-fields"
+            className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-semibold text-white"
+          >
             Save changes
-          </button>
+          </Link>
         </div>
       </div>
 
@@ -82,7 +92,12 @@ export default async function SettingsSectionPage({
       </section>
 
       <section className="mt-6 grid gap-6 lg:grid-cols-[1fr_360px]">
-        <form className="rounded-lg border border-slate-200 bg-white p-5">
+        <form id="configuration-fields" action={completeProcessAction} className="rounded-lg border border-slate-200 bg-white p-5">
+          <input type="hidden" name="module" value="Settings" />
+          <input type="hidden" name="process" value={section.title} />
+          <input type="hidden" name="intent" value="Settings saved" />
+          <input type="hidden" name="returnTo" value={`/settings/${slug}`} />
+          <input type="hidden" name="next" value="Continue settings" />
           <h2 className="text-lg font-semibold">Configuration fields</h2>
           <p className="mt-1 text-sm text-slate-600">
             Validated server actions will persist these values tenant-scoped and record audit events.
@@ -109,6 +124,9 @@ export default async function SettingsSectionPage({
               Tenant scoped
             </label>
           </div>
+          <button className="mt-6 rounded-md bg-emerald-700 px-5 py-3 text-sm font-semibold text-white">
+            Save configuration
+          </button>
         </form>
 
         <aside className="space-y-4">
@@ -175,7 +193,7 @@ export default async function SettingsSectionPage({
             <span className="font-medium">{field}</span>
             <span className="text-slate-600">{field.toLowerCase().replaceAll(" ", "_")}</span>
             <span className="text-emerald-700">{index < 2 ? "Configured" : "Ready"}</span>
-            <button className="w-fit text-sm font-semibold text-emerald-700">Edit</button>
+            <Link href="#configuration-fields" className="w-fit text-sm font-semibold text-emerald-700">Edit</Link>
           </div>
         ))}
       </section>

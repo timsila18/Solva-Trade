@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Phone, Search, UserPlus } from "lucide-react";
 import { EmptyState, MetricCard, PageHero } from "@/components/ui/premium";
 import { customerSetupSections, salesSummary } from "@/lib/sales-data";
@@ -94,10 +95,10 @@ export default function CustomersPage() {
               <h2 className="font-semibold">Customer list</h2>
               <p className="mt-2 text-sm text-slate-600">Your saved customers will appear here with phone, balance and last purchase.</p>
             </div>
-            <button className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-slate-950 px-4 py-3 text-sm font-semibold text-white">
+            <Link href="/customers/new" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-slate-950 px-4 py-3 text-sm font-semibold text-white">
               <Phone className="h-4 w-4" />
               Add by Phone
-            </button>
+            </Link>
           </div>
           <div className="mt-5">
             <EmptyState

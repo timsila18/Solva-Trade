@@ -1,3 +1,4 @@
+import { completeProcessAction } from "@/app/(app)/actions";
 import { distributorQuickSetup, productSetupSections, productTypes } from "@/lib/inventory-data";
 
 export default function NewProductPage() {
@@ -19,7 +20,12 @@ export default function NewProductPage() {
           ))}
         </aside>
 
-        <form className="rounded-lg border border-slate-200 bg-white p-5">
+        <form action={completeProcessAction} className="rounded-lg border border-slate-200 bg-white p-5">
+          <input type="hidden" name="module" value="Inventory" />
+          <input type="hidden" name="process" value="New Product" />
+          <input type="hidden" name="intent" value="Product saved" />
+          <input type="hidden" name="returnTo" value="/inventory/products/new" />
+          <input type="hidden" name="next" value="Add another product" />
           <h2 className="text-lg font-semibold">Basic product details</h2>
           <div className="mt-5 grid gap-4 md:grid-cols-2">
             {["Product name", "Short name", "Product code", "SKU", "Barcode", "Manufacturer"].map((field) => (

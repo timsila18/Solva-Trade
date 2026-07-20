@@ -1,3 +1,4 @@
+import { completeProcessAction } from "@/app/(app)/actions";
 import { supplierSetupSections, supplierTypes } from "@/lib/purchasing-data";
 
 export default function NewSupplierPage() {
@@ -19,7 +20,12 @@ export default function NewSupplierPage() {
           ))}
         </aside>
 
-        <form className="rounded-lg border border-slate-200 bg-white p-5">
+        <form action={completeProcessAction} className="rounded-lg border border-slate-200 bg-white p-5">
+          <input type="hidden" name="module" value="Suppliers" />
+          <input type="hidden" name="process" value="New Supplier" />
+          <input type="hidden" name="intent" value="Supplier saved" />
+          <input type="hidden" name="returnTo" value="/suppliers/new" />
+          <input type="hidden" name="next" value="Add another supplier" />
           <h2 className="text-lg font-semibold">Supplier identity</h2>
           <div className="mt-5 grid gap-4 md:grid-cols-2">
             {["Legal name", "Trading name", "Supplier code", "KRA PIN", "Registration number", "Primary phone", "Email", "Website"].map((field) => (

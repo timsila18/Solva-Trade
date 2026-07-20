@@ -45,7 +45,7 @@ export default function ProductsPage() {
           <p className="mt-2 text-sm text-slate-600">Create your first product or import a catalogue template. No sample stock values are invented.</p>
           <div className="mt-5 flex justify-center gap-3">
             <Link href="/inventory/products/new" className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-semibold text-white">Create product</Link>
-            <button className="rounded-md border border-slate-200 px-4 py-2 text-sm font-semibold">Download import template</button>
+            <Link href="/api/exports?module=Inventory&process=Products%20import%20template&format=excel" className="rounded-md border border-slate-200 px-4 py-2 text-sm font-semibold">Download import template</Link>
           </div>
         </div>
       </section>

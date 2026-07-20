@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ArrowLeft, Save, UserPlus } from "lucide-react";
+import { completeProcessAction } from "@/app/(app)/actions";
 import { PageHero } from "@/components/ui/premium";
 
 const simpleFields = ["Customer name", "Phone number", "Town or area", "Delivery route"];
@@ -18,7 +19,12 @@ export default function NewCustomerPage() {
       />
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_340px]">
-        <form className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <form action={completeProcessAction} className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+          <input type="hidden" name="module" value="Customers" />
+          <input type="hidden" name="process" value="New Customer" />
+          <input type="hidden" name="intent" value="Customer saved" />
+          <input type="hidden" name="returnTo" value="/customers/new" />
+          <input type="hidden" name="next" value="Add another customer" />
           <div className="flex items-center gap-3">
             <span className="grid h-11 w-11 place-items-center rounded-md bg-emerald-50 text-emerald-800">
               <UserPlus className="h-5 w-5" />

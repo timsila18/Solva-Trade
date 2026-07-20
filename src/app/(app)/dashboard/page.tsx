@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { ArrowRight, Banknote, PackagePlus, ReceiptText, ShieldCheck } from "lucide-react";
-import { EmptyState, MetricCard, PageHero, PlainCard } from "@/components/ui/premium";
+import { ArrowRight, Banknote, CreditCard, PackagePlus, ReceiptText, ShieldCheck, ShoppingCart, Users } from "lucide-react";
+import { DashboardPanel, DashboardTile, EmptyState, MetricCard, MiniBars, PageHero, PlainCard, ProgressRow } from "@/components/ui/premium";
 import {
   alertExamples,
   commandCentreFacts,
@@ -46,9 +46,9 @@ export default function DashboardPage() {
             <Link
               key={action.href}
               href={action.href}
-              className="flex min-h-16 items-center gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-md"
+              className="flex min-h-16 items-center gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-cyan-300 hover:shadow-md"
             >
-              <span className="grid h-11 w-11 place-items-center rounded-md bg-emerald-50 text-emerald-800">
+              <span className="grid h-11 w-11 place-items-center rounded-md bg-blue-50 text-[var(--solva-blue-700)]">
                 <Icon className="h-5 w-5" />
               </span>
               <span>
@@ -60,11 +60,66 @@ export default function DashboardPage() {
         })}
       </section>
 
+      <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+        <DashboardTile label="Today sales" value="KES 0" caption="No sale posted yet" icon={ShoppingCart} tone="blue" />
+        <DashboardTile label="Cash collected" value="KES 0" caption="Receipts appear here" icon={Banknote} tone="green" />
+        <DashboardTile label="Customers owing" value="KES 0" caption="Follow-up list is clean" icon={CreditCard} tone="gold" />
+        <DashboardTile label="Active customers" value="0" caption="Create the first customer" icon={Users} tone="cyan" />
+        <DashboardTile label="Stock alerts" value="0" caption="Receive stock to monitor" icon={PackagePlus} tone="rose" />
+      </section>
+
+      <section className="mt-6 grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+        <DashboardPanel
+          title="Sales Activity"
+          action={<Link href="/sales/invoices" className="text-sm font-semibold text-[var(--solva-blue-700)]">New sale</Link>}
+        >
+          <div className="grid gap-4 lg:grid-cols-[1fr_280px]">
+            <div>
+              <MiniBars values={[18, 31, 24, 42, 36, 57, 49, 65, 70, 84, 76, 92]} />
+              <div className="mt-3 flex justify-between text-xs text-slate-500">
+                <span>Jan</span>
+                <span>Apr</span>
+                <span>Jul</span>
+                <span>Oct</span>
+                <span>Today</span>
+              </div>
+            </div>
+            <div className="grid gap-4">
+              <ProgressRow label="Invoices ready" value={0} amount="0" />
+              <ProgressRow label="Payments received" value={0} amount="KES 0" />
+              <ProgressRow label="Orders to deliver" value={0} amount="0" />
+            </div>
+          </div>
+        </DashboardPanel>
+
+        <DashboardPanel
+          title="Inventory Summary"
+          action={<Link href="/inventory" className="text-sm font-semibold text-[var(--solva-blue-700)]">Open stock</Link>}
+        >
+          <div className="grid gap-3">
+            {[
+              ["Products in catalogue", "0", "Add products before selling or buying."],
+              ["Quantity on hand", "0", "Opening stock and receipts update this."],
+              ["Low-stock items", "0", "Reorder warnings will appear here."],
+              ["Stock value", "KES 0", "Valuation starts after stock is received."],
+            ].map(([label, value, description]) => (
+              <div key={label} className="grid grid-cols-[1fr_auto] gap-4 rounded-md border border-slate-200 px-3 py-3">
+                <span>
+                  <span className="block text-xs font-semibold uppercase text-slate-500">{label}</span>
+                  <span className="mt-1 block text-sm text-slate-600">{description}</span>
+                </span>
+                <span className="text-lg font-semibold text-slate-950">{value}</span>
+              </div>
+            ))}
+          </div>
+        </DashboardPanel>
+      </section>
+
       <section className="mt-6 grid gap-4 xl:grid-cols-[1.25fr_0.75fr]">
         <article className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
             <div>
-              <p className="text-sm font-semibold text-emerald-700">Plain-language brief</p>
+              <p className="text-sm font-semibold text-[var(--solva-blue-700)]">Plain-language brief</p>
               <h2 className="mt-1 text-xl font-semibold">What you need to know now</h2>
             </div>
             <span className="rounded-md bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700">
@@ -81,18 +136,18 @@ export default function DashboardPage() {
           <p className="mt-4 text-sm leading-6 text-slate-500">{morningBrief.summary}</p>
         </article>
 
-        <article className="rounded-lg border border-emerald-100 bg-emerald-50 p-5 shadow-sm">
-          <div className="flex items-center gap-2 text-emerald-900">
+        <article className="rounded-lg border border-cyan-100 bg-cyan-50 p-5 shadow-sm">
+          <div className="flex items-center gap-2 text-[var(--solva-blue-700)]">
             <ShieldCheck className="h-5 w-5" />
             <h2 className="font-semibold">Business Health</h2>
           </div>
-          <p className="mt-2 text-sm leading-6 text-emerald-950">
+          <p className="mt-2 text-sm leading-6 text-slate-700">
             No score yet. Solva will calculate this from real sales, collections, stock, supplier payments and tax activity.
           </p>
           <div className="mt-6 h-3 overflow-hidden rounded-full bg-white">
-            <div className="h-full w-1/6 rounded-full bg-emerald-600" />
+            <div className="h-full w-1/6 rounded-full bg-[var(--solva-cyan-500)]" />
           </div>
-          <Link href="/insights" className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-emerald-800">
+          <Link href="/insights" className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-[var(--solva-blue-700)]">
             See what affects the score
             <ArrowRight className="h-4 w-4" />
           </Link>
@@ -138,7 +193,7 @@ export default function DashboardPage() {
           <h2 className="font-semibold">Quick Actions</h2>
           <div className="mt-4 grid gap-2">
             {quickActions.slice(0, 5).map((action) => (
-              <Link key={action.href} href={action.href} className="rounded-md border border-slate-200 px-3 py-3 text-sm font-semibold hover:border-emerald-300">
+              <Link key={action.href} href={action.href} className="rounded-md border border-slate-200 px-3 py-3 text-sm font-semibold hover:border-cyan-300">
                 {action.label}
               </Link>
             ))}

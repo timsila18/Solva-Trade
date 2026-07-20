@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { completeProcessAction } from "@/app/(app)/actions";
 
 const workflows: Record<string, { title: string; description: string; fields: string[] }> = {
   "opening-stock": {
@@ -47,7 +48,11 @@ export default async function InventoryWorkflowPage({
       <h1 className="mt-1 text-3xl font-semibold">{config.title}</h1>
       <p className="mt-2 max-w-3xl text-slate-600">{config.description}</p>
 
-      <section className="mt-6 rounded-lg border border-slate-200 bg-white p-5">
+      <form action={completeProcessAction} className="mt-6 rounded-lg border border-slate-200 bg-white p-5">
+        <input type="hidden" name="module" value="Inventory" />
+        <input type="hidden" name="process" value={config.title} />
+        <input type="hidden" name="returnTo" value={`/inventory/${workflow}`} />
+        <input type="hidden" name="next" value={`Continue ${config.title}`} />
         <div className="grid gap-4 md:grid-cols-2">
           {config.fields.map((field) => (
             <label key={field} className="text-sm font-medium">
@@ -57,11 +62,11 @@ export default async function InventoryWorkflowPage({
           ))}
         </div>
         <div className="mt-6 flex flex-wrap gap-3">
-          <button className="rounded-md border border-slate-200 px-4 py-2 text-sm font-semibold">Save as draft</button>
-          <button className="rounded-md border border-slate-200 px-4 py-2 text-sm font-semibold">Preview validation</button>
-          <button className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-semibold text-white">Submit for posting</button>
+          <button name="intent" value="Draft saved" className="rounded-md border border-slate-200 px-4 py-2 text-sm font-semibold">Save as draft</button>
+          <button name="intent" value="Validation previewed" className="rounded-md border border-slate-200 px-4 py-2 text-sm font-semibold">Preview validation</button>
+          <button name="intent" value="Submitted for posting" className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-semibold text-white">Submit for posting</button>
         </div>
-      </section>
+      </form>
 
       <section className="mt-6 rounded-lg border border-slate-200 bg-white p-5">
         <h2 className="font-semibold">Posting controls</h2>

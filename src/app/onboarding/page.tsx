@@ -29,7 +29,7 @@ export default function OnboardingPage() {
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-8">
       <section className="mx-auto max-w-6xl">
-        <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-700">Solva Trade onboarding</p>
+        <p className="text-sm font-semibold uppercase text-emerald-700">Solva Trade onboarding</p>
         <h1 className="mt-2 text-4xl font-semibold">Create your business workspace</h1>
         <p className="mt-3 max-w-2xl text-slate-600">
           Save and resume setup while creating the Owner membership and active business context.
