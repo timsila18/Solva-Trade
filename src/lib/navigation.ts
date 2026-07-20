@@ -19,6 +19,9 @@ export const navigationItems: NavigationItem[] = [
   { label: "Financials", href: "/financials", permission: "financial_reporting.view_statements", status: "ready" },
   { label: "Tax", href: "/tax", permission: "tax.view_tax_reports", status: "ready" },
   { label: "Reports", href: "/reports", permission: "dashboard.view_business_insights", status: "ready" },
+  { label: "Billing", href: "/billing", permission: "administration.view_billing", status: "ready" },
+  { label: "Imports", href: "/imports", permission: "administration.manage_imports", status: "ready" },
+  { label: "Support", href: "/support", permission: "administration.view_support", status: "ready" },
   {
     label: "Insights",
     href: "/insights",

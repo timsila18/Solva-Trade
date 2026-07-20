@@ -1,6 +1,6 @@
 # Solva Trade
 
-Solva Trade is a production-ready multi-tenant SaaS foundation for Kenyan and African SMEs: inventory, invoicing, accounting and distribution management for growing businesses.
+Solva Trade is a multi-tenant SaaS business operating system for Kenyan and African SMEs: inventory, sales, purchasing, distribution, treasury, accounting, financial reporting, tax compliance, command centre, billing and launch-readiness foundations for growing businesses.
 
 ## Stack
 
@@ -28,6 +28,16 @@ Solva Trade is a production-ready multi-tenant SaaS foundation for Kenyan and Af
 - `npm run test`
 - `npm run build`
 
+## Production Runbooks
+
+- Architecture: `docs/ARCHITECTURE.md`
+- Environment variables: `docs/ENVIRONMENT.md`
+- Production launch, rollback, backup and disaster recovery: `docs/PRODUCTION_LAUNCH.md`
+- Security and tenant isolation: `docs/SECURITY.md`
+- Billing and subscriptions: `docs/BILLING.md`
+- Operations, support and monitoring: `docs/OPERATIONS.md`
+- Testing and quality: `docs/TESTING_AND_QUALITY.md`
+
 ## Foundation Notes
 
 The first migration creates profiles, businesses, memberships, invitations, audit logs, notifications, setup checklist items and subscription-ready plan structures. All business-owned data is scoped by `business_id`.
@@ -41,6 +51,10 @@ The fourth migration adds the supplier and purchasing engine: suppliers, contact
 The distribution migration adds the delivery engine and also fills the missing customer/sales foundation needed by distribution: customers, customer addresses, sales orders, invoices, customer payments and customer returns. Distribution tables cover route schedules, delivery runs, assigned staff, stops, multi-document stops, loading sheets, delivery notes, proof of delivery, route collections, collection reconciliation, route expenses, delivery returns, vehicle-stock reconciliation, packaging ledgers, customer and vehicle packaging balances, exceptions, timeline events and accounting-event preparation.
 
 The treasury migration extends the existing `finance_accounts` foundation into a unified financial-account model for cash, petty cash, bank, M-Pesa, mobile money, clearing, owner-current and staff-advance accounts. It adds immutable financial-account transactions, balance summaries, general receipts, general payments, expenses, expense claims, petty-cash vouchers and reconciliations, deposits, withdrawals, account transfers, cheques, owner transactions, owner-current ledger, staff advances, advance surrenders, statement imports, reconciliation matching, unidentified receipts, cash counts, daily cash-up, cashflow forecasts and accounting-event preparation.
+
+Later migrations add accounting, financial reporting, Kenyan tax compliance, the command centre and final commercial SaaS launch foundations. Prompt 12 adds separate platform administration, business lifecycle states, plans and entitlements, usage limits, checkout and verified-payment foundations, M-Pesa/card/manual payment records, SaaS invoices, cancellation and retention workflows, Import Centre, go-live checklist, support access controls, API/webhook foundations, jobs, observability, backup verification, data export, account closure, legal documents, training and feature flags.
+
+Launch classification is intentionally conservative. The codebase is **Not Ready** for broad production until manual backup drills, legal review, provider credentials/webhooks, platform-admin MFA, external monitoring and full staging security tests are completed. It is structured for pilot hardening without fake production data.
 
 Authentication pages are present for sign in, account creation, password reset, invitation acceptance, inactive accounts and no-business state. Wire them to Supabase Auth by calling the server-side auth client and then redirecting users into onboarding or the active workspace.
 

@@ -121,3 +121,15 @@ Timeline, alerts and recommendations share source module and source record refer
 Dashboard customization is persisted through dashboard layouts and dashboard widgets. Widgets support move, resize, hide, favourite, personal layouts and restore-default behavior. The reusable widget catalog covers KPI cards, charts, gauges, tables, timelines, calendars, alerts, tasks, heatmaps, leaderboards, sparklines and map foundations.
 
 The `/dashboard` page is the owner command centre. `/insights` exposes role dashboards, business memory, health, alerts, recommendations, trends, forecasts, data quality and system health. `/reports` is the unified reporting hub for executive, operational, financial, inventory, sales, purchasing, treasury, accounting, tax, budget and scheduled-report foundations.
+
+## Prompt 12 Launch Readiness Foundation
+
+The final hardening phase adds commercial SaaS foundations without creating unrelated modules. Business lifecycle is explicit on `businesses` through pending verification, onboarding, trial, active, grace, overdue, restricted, suspended, cancelled, archived and scheduled-deletion states. Each state has controlled access effects in `src/lib/saas-platform.ts`.
+
+Platform administration is separated from tenant administration through `platform_users`, platform roles, platform audit logs and scoped support access grants. Tenant Owners do not gain platform controls, and platform support access requires reason, approval, scope and expiry.
+
+Subscription billing is provider-neutral. Plans, entitlements, usage limits, subscriptions, checkout sessions, payment requests, payment events, SaaS invoices, plan changes and cancellation requests are separate from tenant sales invoices. Paid activation requires verified backend payment confirmation.
+
+Operational readiness foundations include onboarding templates, onboarding progress, Import Centre batches, go-live checklist items, ownership transfer requests, MFA/session foundations, API keys, webhook endpoints and receipts, background jobs, application errors, security events, backup verification runs, data export requests, account closure requests, legal documents, support cases, training modules and feature flags.
+
+The final app surface adds `/billing`, `/imports`, `/support`, `/platform-admin` and `/launch-readiness`, plus security headers and generic authentication errors. Launch classification is intentionally conservative and remains below Production Ready until manual infrastructure, backup drills, provider credentials, legal review and full staging security tests are complete.

@@ -11,6 +11,7 @@ const suites = [
   "financial-reporting",
   "tax-compliance",
   "business-intelligence",
+  "saas-platform",
 ];
 
 for (const suite of suites) {

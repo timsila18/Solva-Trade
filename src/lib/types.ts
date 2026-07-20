@@ -265,7 +265,17 @@ export type PermissionKey =
   | "administration.view_audit_logs"
   | "administration.export_data"
   | "administration.delete_draft_records"
-  | "administration.approve_sensitive_actions";
+  | "administration.approve_sensitive_actions"
+  | "administration.view_billing"
+  | "administration.manage_subscription"
+  | "administration.request_data_export"
+  | "administration.request_account_closure"
+  | "administration.manage_security_settings"
+  | "administration.view_sessions"
+  | "administration.manage_imports"
+  | "administration.view_support"
+  | "administration.manage_support_cases"
+  | "administration.view_launch_readiness";
 
 export type StaffTemplateKey =
   | "salesperson"

@@ -6,13 +6,14 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 const emailSchema = z.string().email();
 const passwordSchema = z.string().min(8);
+const genericAuthError = "We could not complete that authentication request.";
 
 export async function signInAction(formData: FormData) {
   const supabase = await createSupabaseServerClient();
   const email = emailSchema.parse(formData.get("email"));
   const password = passwordSchema.parse(formData.get("password"));
   const { error } = await supabase.auth.signInWithPassword({ email, password });
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(genericAuthError);
   redirect("/dashboard");
 }
 
@@ -26,7 +27,7 @@ export async function createAccountAction(formData: FormData) {
     password,
     options: { data: { full_name: fullName } },
   });
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(genericAuthError);
   redirect("/onboarding");
 }
 
@@ -37,7 +38,7 @@ export async function forgotPasswordAction(formData: FormData) {
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
     redirectTo: `${origin}/reset-password`,
   });
-  if (error) throw new Error(error.message);
+  if (error) throw new Error("If the email can receive resets, instructions will be sent.");
   redirect("/sign-in");
 }
 
@@ -47,7 +48,7 @@ export async function resetPasswordAction(formData: FormData) {
   const confirm = passwordSchema.parse(formData.get("confirm_password"));
   if (password !== confirm) throw new Error("Passwords do not match.");
   const { error } = await supabase.auth.updateUser({ password });
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(genericAuthError);
   redirect("/dashboard");
 }
 
