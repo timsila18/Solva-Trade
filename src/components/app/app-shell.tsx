@@ -6,7 +6,6 @@ import {
   LogIn,
   LogOut,
   PackagePlus,
-  Plus,
   ReceiptText,
   Settings,
   UserPlus,
@@ -66,19 +65,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
           </Link>
         </div>
 
-        <div className="mx-4 mt-4 rounded-lg border border-cyan-300/20 bg-white/8 p-3">
-          <p className="text-xs font-semibold uppercase text-cyan-200">Today&apos;s next step</p>
-          <p className="mt-2 text-sm leading-5 text-blue-50">Start with one sale, one payment, or one stock receipt.</p>
-          <Link
-            href="/sales/invoices"
-            className="mt-3 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md bg-[var(--solva-blue-700)] px-3 text-sm font-semibold text-white shadow-sm shadow-blue-950/30"
-          >
-            <Plus className="h-4 w-4" />
-            New Sale
-          </Link>
-        </div>
-
-        <div className="mt-4 min-h-0 flex-1 overflow-y-auto px-4 pb-4 pr-2">
+        <div className="mt-3 min-h-0 flex-1 overflow-y-auto px-4 pb-5 pr-2">
           <nav className="space-y-1 pr-2">
             {mainNav.map((item) => (
               <Link
@@ -110,35 +97,11 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
 
-        <div className="border-t border-white/10 p-4">
-          <div className="rounded-lg bg-white/8 p-3">
-            <p className="text-xs font-medium text-blue-100/70">Signed in as</p>
-            <p className="mt-1 truncate text-sm font-semibold">{user?.email ?? "Guest user"}</p>
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <Link href="/sign-in" className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-white/15 px-3 text-sm font-semibold text-white hover:bg-white/10">
-                <LogIn className="h-4 w-4" />
-                Login
-              </Link>
-              {user ? (
-                <form action={signOutAction}>
-                  <button className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md bg-white px-3 text-sm font-semibold text-[var(--solva-navy-900)]">
-                    <LogOut className="h-4 w-4" />
-                    Logout
-                  </button>
-                </form>
-              ) : (
-                <Link href="/create-account" className="inline-flex min-h-10 items-center justify-center rounded-md bg-white px-3 text-sm font-semibold text-[var(--solva-navy-900)]">
-                  Sign up
-                </Link>
-              )}
-            </div>
-          </div>
-        </div>
       </aside>
       <div className="lg:pl-72">
         <header className="sticky top-0 z-20 border-b border-slate-200/80 bg-white/85 px-4 py-3 backdrop-blur-xl">
-          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-            <div className="flex items-center gap-3">
+          <div className="grid gap-3 xl:grid-cols-[minmax(220px,320px)_minmax(260px,1fr)_auto] xl:items-center">
+            <div className="flex min-w-0 items-center gap-3">
               <Link href="/dashboard" className="relative h-10 w-20 shrink-0 overflow-hidden rounded-md bg-[var(--solva-navy-900)] lg:hidden">
                 <Image
                   src="/solva-trade-logo.png"
@@ -156,11 +119,11 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
                 </p>
               </div>
             </div>
-            <div className="min-w-0 flex-1 xl:max-w-2xl">
+            <div className="min-w-0">
               <QuickCommand />
             </div>
-            <div className="flex items-center gap-2 overflow-x-auto">
-              <span className="hidden rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 sm:inline">
+            <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
+              <span className="hidden min-h-10 items-center rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 sm:inline-flex">
                 {branch.name} · {branch.code}
               </span>
               {quickCreate.map((action) => {
@@ -169,7 +132,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
                   <Link
                     key={action.href}
                     href={action.href}
-                    className="inline-flex min-h-10 shrink-0 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-emerald-300 hover:text-emerald-800"
+                    className="inline-flex min-h-10 shrink-0 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-cyan-300 hover:text-[var(--solva-blue-700)]"
                   >
                     <Icon className="h-4 w-4" />
                     <span className="hidden sm:inline">{action.label}</span>
@@ -183,15 +146,22 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
                 <Bell className="h-4 w-4" />
               </Link>
               {user ? (
-                <form action={signOutAction}>
-                  <button className="grid h-10 w-10 shrink-0 place-items-center rounded-md border border-slate-200 bg-white text-slate-600 shadow-sm" aria-label="Logout">
+                <form action={signOutAction} className="shrink-0">
+                  <button className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm" aria-label="Logout">
                     <LogOut className="h-4 w-4" />
+                    <span className="hidden sm:inline">Logout</span>
                   </button>
                 </form>
               ) : (
-                <Link href="/sign-in" className="grid h-10 w-10 shrink-0 place-items-center rounded-md border border-slate-200 bg-white text-slate-600 shadow-sm" aria-label="Login">
-                  <LogIn className="h-4 w-4" />
-                </Link>
+                <>
+                  <Link href="/sign-in" className="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm">
+                    <LogIn className="h-4 w-4" />
+                    Login
+                  </Link>
+                  <Link href="/create-account" className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-md bg-[var(--solva-blue-700)] px-3 text-sm font-semibold text-white shadow-sm">
+                    Sign up
+                  </Link>
+                </>
               )}
               <Link href="/settings" className="grid h-10 w-10 shrink-0 place-items-center rounded-md bg-slate-950 text-white shadow-sm">
                 <Settings className="h-4 w-4" />
