@@ -95,3 +95,15 @@ Period close is controlled through `period_close_cycles` and `period_close_tasks
 Financial statement snapshots are immutable and preserve the generated payload, layout, period, status, data hash and report-file reference. Snapshots are created for approved management packs, hard-closed periods, closed financial years and formally issued reports.
 
 The `/financials` workspace exposes Profit and Loss, Balance Sheet, Cash Flow, Changes in Equity, management accounts, ratios, working capital, branch performance, product/customer profitability, route and vehicle profitability foundations, budgets, forecasts, close, adjustments, snapshots and reports.
+
+## Prompt 10 Tax Compliance Engine
+
+Tax compliance is tenant-scoped and ledger-backed. Business tax profiles, branch tax outlet configuration, effective-dated tax rules, VAT codes, product mappings, periods, documents, ledgers, external-submission records, withholding certificates, returns, payments, calendar tasks, imports and audit evidence all carry `business_id` and RLS policies.
+
+VAT calculation separates standard-rated, zero-rated, exempt and out-of-scope treatment. Purchase VAT records recoverable and non-recoverable portions, while sales and purchase documents preserve rule snapshots, tax-date decisions, line discounts, document discounts and rounding adjustments.
+
+The eTIMS architecture is provider-neutral. The database stores canonical payloads, hashes, idempotency keys, submission status, retry safety, external receipt/control-unit references and audit hashes, but secrets are represented by credential references only. A certified KRA/eTIMS adapter can later consume `etims_submission_queue` without changing tax documents or ledgers.
+
+Tax returns are prepared from posted `tax_ledger_entries`, then reconciled back to source tax documents and posted journal lines. Closed tax periods block new tax documents and tax ledger entries unless a controlled reopening records the approver and reason.
+
+The `/tax` workspace exposes setup, branch outlets, tax rules, VAT codes, product mappings, customer and supplier tax profiles, VAT calculations, sales/purchase tax documents, credit/debit notes, eTIMS configuration and queue, external registry, VAT ledgers, VAT return preparation, withholding tax and withholding VAT, turnover/excise/levy foundations, compliance calendar, tax periods, audit evidence, imports, reports and integration health.

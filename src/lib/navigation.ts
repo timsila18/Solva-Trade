@@ -17,6 +17,7 @@ export const navigationItems: NavigationItem[] = [
   { label: "Expenses", href: "/cash-bank/expenses", permission: "finance.record_expenses", status: "ready" },
   { label: "Accounting", href: "/accounting", permission: "accounting.view_general_ledger", status: "ready" },
   { label: "Financials", href: "/financials", permission: "financial_reporting.view_statements", status: "ready" },
+  { label: "Tax", href: "/tax", permission: "tax.view_tax_reports", status: "ready" },
   { label: "Reports", href: "/financials/reports", permission: "financial_reporting.export_financial_reports", status: "ready" },
   {
     label: "Insights",

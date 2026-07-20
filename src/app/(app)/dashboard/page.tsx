@@ -6,6 +6,7 @@ import {
   demoBusinesses,
   setupChecklist,
 } from "@/lib/mock-data";
+import { taxStatusCards } from "@/lib/tax-compliance-data";
 
 const ownerCards = [
   ["Active business", demoBusinesses[0].tradingName],
@@ -53,6 +54,7 @@ const ownerCards = [
   ["Budget performance", "No active budget"],
   ["Projected year-end profit", "No active forecast"],
   ["Current ratio", "Not enough data"],
+  ...taxStatusCards,
 ];
 
 export default function DashboardPage() {
@@ -126,6 +128,8 @@ export default function DashboardPage() {
           ["Period-close readiness", "Prompt 9 financial statements will build on posted journals, reconciled subledgers and locked accounting periods."],
           ["Financial reporting", "Profit and Loss, Balance Sheet, Cash Flow, budgets, forecasts, ratios and management packs use posted accounting entries only."],
           ["Major financial risks", "Budget variance, cash shortages, branch margin drops, owner drawings and close blockers will appear from real reporting records."],
+          ["Tax compliance", "VAT returns, eTIMS queues, withholding certificates, filing dates and audit evidence are ready for posted tax records."],
+          ["Tax exceptions", "Failed eTIMS submissions, missing PINs, unmapped VAT codes and tax reconciliation differences will appear from real tax records."],
         ].map(([title, body]) => (
           <article key={title} className="rounded-lg border border-slate-200 bg-white p-5">
             <h3 className="font-semibold">{title}</h3>
