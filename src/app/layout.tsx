@@ -6,9 +6,9 @@ export const metadata: Metadata = {
   title: "Solva Trade",
   description: "Run Your Business Smarter.",
   icons: {
-    icon: "/solva-trade-logo.png",
-    shortcut: "/solva-trade-logo.png",
-    apple: "/solva-trade-logo.png",
+    icon: "/solva-trade-icon.png",
+    shortcut: "/solva-trade-icon.png",
+    apple: "/solva-trade-icon.png",
   },
   openGraph: {
     title: "Solva Trade",
