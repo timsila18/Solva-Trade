@@ -1,0 +1,206 @@
+export type CoreRole = "owner" | "manager" | "staff";
+
+export type PermissionCategory =
+  | "dashboard"
+  | "sales"
+  | "purchases"
+  | "inventory"
+  | "finance"
+  | "distribution"
+  | "administration";
+
+export type PermissionKey =
+  | "dashboard.view_owner"
+  | "dashboard.view_manager"
+  | "dashboard.view_staff"
+  | "dashboard.view_business_health"
+  | "dashboard.view_business_insights"
+  | "dashboard.view_sensitive_financial_summaries"
+  | "sales.view"
+  | "sales.create"
+  | "sales.edit_draft"
+  | "sales.approve_discounts"
+  | "sales.issue_invoices"
+  | "sales.receive_payments"
+  | "sales.cancel_invoices"
+  | "sales.view_customer_balances"
+  | "purchases.view"
+  | "purchases.create"
+  | "purchases.approve"
+  | "purchases.receive_stock"
+  | "purchases.record_supplier_invoices"
+  | "purchases.record_supplier_payments"
+  | "purchases.view_suppliers"
+  | "purchases.create_suppliers"
+  | "purchases.edit_suppliers"
+  | "purchases.approve_suppliers"
+  | "purchases.view_supplier_prices"
+  | "purchases.manage_supplier_prices"
+  | "purchases.view_supplier_documents"
+  | "purchases.create_requisitions"
+  | "purchases.approve_requisitions"
+  | "purchases.create_purchase_orders"
+  | "purchases.edit_draft_purchase_orders"
+  | "purchases.approve_purchase_orders"
+  | "purchases.send_purchase_orders"
+  | "purchases.inspect_goods"
+  | "purchases.approve_grns"
+  | "purchases.post_grns"
+  | "purchases.approve_supplier_bills"
+  | "purchases.override_match_exceptions"
+  | "purchases.create_supplier_returns"
+  | "purchases.approve_supplier_returns"
+  | "purchases.approve_supplier_payments"
+  | "purchases.view_supplier_balances"
+  | "purchases.view_creditor_ageing"
+  | "purchases.export_purchase_data"
+  | "purchases.import_supplier_data"
+  | "purchases.reverse_purchase_transactions"
+  | "inventory.view_stock"
+  | "inventory.add_products"
+  | "inventory.edit_products"
+  | "inventory.adjust_stock"
+  | "inventory.perform_stock_counts"
+  | "inventory.view_buying_prices"
+  | "inventory.view_selling_prices"
+  | "inventory.transfer_stock"
+  | "inventory.archive_products"
+  | "inventory.view_inventory_value"
+  | "inventory.enter_opening_stock"
+  | "inventory.receive_transfers"
+  | "inventory.approve_adjustments"
+  | "inventory.approve_stock_counts"
+  | "inventory.view_batches"
+  | "inventory.dispose_expired_stock"
+  | "inventory.manage_serial_numbers"
+  | "inventory.export_inventory"
+  | "inventory.revalue_stock"
+  | "inventory.close_inventory_periods"
+  | "finance.view_cashbook"
+  | "finance.view_financial_accounts"
+  | "finance.create_financial_accounts"
+  | "finance.edit_financial_accounts"
+  | "finance.view_full_account_details"
+  | "finance.view_account_balances"
+  | "finance.create_receipts"
+  | "finance.create_payments"
+  | "finance.approve_payments"
+  | "finance.record_expenses"
+  | "finance.approve_expenses"
+  | "finance.submit_expense_claims"
+  | "finance.approve_expense_claims"
+  | "finance.manage_petty_cash"
+  | "finance.reconcile_petty_cash"
+  | "finance.create_bank_deposits"
+  | "finance.verify_bank_deposits"
+  | "finance.create_withdrawals"
+  | "finance.create_transfers"
+  | "finance.approve_transfers"
+  | "finance.confirm_transfers"
+  | "finance.manage_cheques"
+  | "finance.view_profit"
+  | "finance.view_balance_sheet"
+  | "finance.view_cash_flow"
+  | "finance.view_owner_transactions"
+  | "finance.record_owner_transactions"
+  | "finance.approve_owner_transactions"
+  | "finance.issue_staff_advances"
+  | "finance.approve_staff_advances"
+  | "finance.review_advance_surrender"
+  | "finance.view_driver_cash"
+  | "finance.record_cash_handover"
+  | "finance.import_statements"
+  | "finance.reconcile_bank_accounts"
+  | "finance.reconcile_mobile_money_accounts"
+  | "finance.approve_reconciliations"
+  | "finance.reopen_reconciliations"
+  | "finance.record_cash_counts"
+  | "finance.approve_cash_variances"
+  | "finance.view_treasury_reports"
+  | "finance.export_treasury_data"
+  | "finance.reverse_treasury_transactions"
+  | "finance.close_accounting_periods"
+  | "finance.export_financial_reports"
+  | "distribution.view_deliveries"
+  | "distribution.create_deliveries"
+  | "distribution.edit_draft_delivery_runs"
+  | "distribution.approve_delivery_runs"
+  | "distribution.assign_vehicles"
+  | "distribution.assign_drivers"
+  | "distribution.create_loading_sheets"
+  | "distribution.pick_stock"
+  | "distribution.verify_loading"
+  | "distribution.dispatch_vehicles"
+  | "distribution.view_assigned_runs"
+  | "distribution.confirm_arrival"
+  | "distribution.confirm_deliveries"
+  | "distribution.record_partial_delivery"
+  | "distribution.record_failed_delivery"
+  | "distribution.capture_proof_of_delivery"
+  | "distribution.record_collections"
+  | "distribution.record_returns"
+  | "distribution.record_crate_movements"
+  | "distribution.record_route_expenses"
+  | "distribution.reconcile_vehicle_stock"
+  | "distribution.approve_stock_variances"
+  | "distribution.reconcile_route_collections"
+  | "distribution.approve_cash_variances"
+  | "distribution.close_delivery_runs"
+  | "distribution.reopen_delivery_runs"
+  | "distribution.view_routes"
+  | "distribution.view_distribution_reports"
+  | "distribution.export_distribution_data"
+  | "administration.manage_users"
+  | "administration.manage_permissions"
+  | "administration.manage_business_settings"
+  | "administration.view_audit_logs"
+  | "administration.export_data"
+  | "administration.delete_draft_records"
+  | "administration.approve_sensitive_actions";
+
+export type StaffTemplateKey =
+  | "salesperson"
+  | "cashier"
+  | "storekeeper"
+  | "driver"
+  | "accountant"
+  | "custom";
+
+export type Membership = {
+  userId: string;
+  businessId: string;
+  role: CoreRole;
+  permissions: PermissionKey[];
+  active: boolean;
+  branchAccessMode?: "all" | "selected";
+  branchIds?: string[];
+  defaultBranchId?: string;
+};
+
+export type BusinessSummary = {
+  id: string;
+  tradingName: string;
+  legalName: string;
+  role: CoreRole;
+  onboardingStatus: "not_started" | "in_progress" | "complete";
+  industryProfileCode?: string;
+  advancedSettingsEnabled?: boolean;
+};
+
+export type BranchSummary = {
+  id: string;
+  businessId: string;
+  name: string;
+  code: string;
+  type: string;
+  active: boolean;
+  isDefault: boolean;
+};
+
+export type NavigationItem = {
+  label: string;
+  href: string;
+  permission?: PermissionKey;
+  role?: CoreRole;
+  status?: "ready" | "next_phase";
+};
