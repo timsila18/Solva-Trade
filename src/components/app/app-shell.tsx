@@ -2,6 +2,8 @@ import Link from "next/link";
 import {
   Bell,
   CircleHelp,
+  LogIn,
+  LogOut,
   Home,
   PackagePlus,
   Plus,
@@ -9,10 +11,12 @@ import {
   Settings,
   UserPlus,
 } from "lucide-react";
+import { signOutAction } from "@/app/(auth)/actions";
 import { QuickCommand } from "@/components/app/quick-command";
 import { navigationItems } from "@/lib/navigation";
 import { canPerformAction } from "@/lib/permissions";
 import { demoBranches, demoBusinesses, demoMemberships } from "@/lib/mock-data";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 const priorityNav = [
   "Dashboard",
@@ -30,7 +34,10 @@ const quickCreate = [
   { label: "Receive Stock", href: "/purchases/goods-received", icon: PackagePlus },
 ];
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+export async function AppShell({ children }: { children: React.ReactNode }) {
+  const supabase = await createSupabaseServerClient();
+  const { data: userData } = await supabase.auth.getUser();
+  const user = userData.user;
   const business = demoBusinesses[0];
   const branch = demoBranches[0];
   const membership = demoMemberships[0];
@@ -42,53 +49,82 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,#ecfdf5_0,#f8fafc_32rem)] text-slate-950">
-      <aside className="fixed inset-y-0 left-0 hidden w-72 border-r border-slate-200/80 bg-white/90 px-4 py-5 shadow-sm backdrop-blur lg:block">
-        <Link href="/dashboard" className="block rounded-lg px-2 py-2">
-          <p className="text-xs font-semibold uppercase text-emerald-700">
-            Solva Trade
-          </p>
-          <h1 className="mt-2 text-2xl font-semibold tracking-normal">Run Your Business Smarter.</h1>
-        </Link>
+      <aside className="fixed inset-y-0 left-0 hidden w-72 border-r border-white/10 bg-[var(--solva-navy-900)] text-white shadow-2xl lg:flex lg:flex-col">
+        <div className="border-b border-white/10 px-4 py-5">
+          <Link href="/dashboard" className="block rounded-lg px-2 py-2">
+            <p className="text-xs font-semibold uppercase text-cyan-300">
+              Solva Trade
+            </p>
+            <h1 className="mt-2 text-2xl font-semibold tracking-normal">Run Your Business Smarter.</h1>
+          </Link>
+        </div>
 
-        <div className="mt-5 rounded-lg border border-emerald-100 bg-emerald-50 p-3">
-          <p className="text-xs font-semibold uppercase text-emerald-800">Today&apos;s next step</p>
-          <p className="mt-2 text-sm leading-5 text-emerald-950">Start with one sale, one payment, or one stock receipt.</p>
+        <div className="mx-4 mt-4 rounded-lg border border-cyan-300/20 bg-white/8 p-3">
+          <p className="text-xs font-semibold uppercase text-cyan-200">Today&apos;s next step</p>
+          <p className="mt-2 text-sm leading-5 text-blue-50">Start with one sale, one payment, or one stock receipt.</p>
           <Link
             href="/sales/invoices"
-            className="mt-3 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md bg-emerald-700 px-3 text-sm font-semibold text-white"
+            className="mt-3 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md bg-[var(--solva-blue-700)] px-3 text-sm font-semibold text-white shadow-sm shadow-blue-950/30"
           >
             <Plus className="h-4 w-4" />
             New Sale
           </Link>
         </div>
 
-        <nav className="mt-5 space-y-1">
-          {mainNav.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className="flex min-h-10 items-center justify-between rounded-md px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-emerald-50 hover:text-emerald-800"
-            >
-              <span>{item.label}</span>
-              {item.status === "next_phase" ? (
-                <span className="text-[10px] uppercase text-slate-400">Soon</span>
-              ) : null}
-            </Link>
-          ))}
-        </nav>
-
-        <div className="mt-5 border-t border-slate-100 pt-4">
-          <p className="px-3 text-xs font-semibold uppercase text-slate-400">More tools</p>
-          <div className="mt-2 grid gap-1">
-            {moreNav.slice(0, 10).map((item) => (
+        <div className="mt-4 min-h-0 flex-1 overflow-y-auto px-4 pb-4 pr-2">
+          <nav className="space-y-1 pr-2">
+            {mainNav.map((item) => (
               <Link
                 key={item.href}
                 href={item.href}
-                className="rounded-md px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-950"
+                className="flex min-h-10 items-center justify-between rounded-md px-3 py-2 text-sm font-medium text-blue-50/85 transition hover:bg-white/10 hover:text-white"
               >
-                {item.label}
+                <span>{item.label}</span>
+                {item.status === "next_phase" ? (
+                  <span className="text-[10px] uppercase text-cyan-200/70">Soon</span>
+                ) : null}
               </Link>
             ))}
+          </nav>
+
+          <div className="mt-5 border-t border-white/10 pt-4">
+            <p className="px-3 text-xs font-semibold uppercase text-cyan-200/70">More tools</p>
+            <div className="mt-2 grid gap-1 pr-2">
+              {moreNav.map((item) => (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className="rounded-md px-3 py-2 text-sm font-medium text-blue-50/70 transition hover:bg-white/10 hover:text-white"
+                >
+                  {item.label}
+                </Link>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="border-t border-white/10 p-4">
+          <div className="rounded-lg bg-white/8 p-3">
+            <p className="text-xs font-medium text-blue-100/70">Signed in as</p>
+            <p className="mt-1 truncate text-sm font-semibold">{user?.email ?? "Guest user"}</p>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <Link href="/sign-in" className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-white/15 px-3 text-sm font-semibold text-white hover:bg-white/10">
+                <LogIn className="h-4 w-4" />
+                Login
+              </Link>
+              {user ? (
+                <form action={signOutAction}>
+                  <button className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md bg-white px-3 text-sm font-semibold text-[var(--solva-navy-900)]">
+                    <LogOut className="h-4 w-4" />
+                    Logout
+                  </button>
+                </form>
+              ) : (
+                <Link href="/create-account" className="inline-flex min-h-10 items-center justify-center rounded-md bg-white px-3 text-sm font-semibold text-[var(--solva-navy-900)]">
+                  Sign up
+                </Link>
+              )}
+            </div>
           </div>
         </div>
       </aside>
@@ -133,6 +169,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <Link href="/notifications" className="grid h-10 w-10 shrink-0 place-items-center rounded-md border border-slate-200 bg-white text-slate-600 shadow-sm">
                 <Bell className="h-4 w-4" />
               </Link>
+              {user ? (
+                <form action={signOutAction}>
+                  <button className="grid h-10 w-10 shrink-0 place-items-center rounded-md border border-slate-200 bg-white text-slate-600 shadow-sm" aria-label="Logout">
+                    <LogOut className="h-4 w-4" />
+                  </button>
+                </form>
+              ) : (
+                <Link href="/sign-in" className="grid h-10 w-10 shrink-0 place-items-center rounded-md border border-slate-200 bg-white text-slate-600 shadow-sm" aria-label="Login">
+                  <LogIn className="h-4 w-4" />
+                </Link>
+              )}
               <Link href="/settings" className="grid h-10 w-10 shrink-0 place-items-center rounded-md bg-slate-950 text-white shadow-sm">
                 <Settings className="h-4 w-4" />
               </Link>

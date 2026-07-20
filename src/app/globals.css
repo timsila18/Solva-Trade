@@ -1,8 +1,23 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f6f8fb;
-  --foreground: #0f172a;
+  --solva-navy-950: #03111f;
+  --solva-navy-900: #071a2b;
+  --solva-navy-800: #0b2740;
+  --solva-blue-700: #1455d9;
+  --solva-blue-600: #2563eb;
+  --solva-cyan-500: #18b7c9;
+  --solva-green-600: #159a6a;
+  --solva-gold-500: #d8a43b;
+  --solva-bg: #f4f7fb;
+  --solva-surface: #ffffff;
+  --solva-surface-blue: #eef6ff;
+  --solva-border: #d8e2ee;
+  --solva-shadow: 0 18px 45px rgb(7 26 43 / 0.08);
+  --solva-radius: 8px;
+  --solva-form-height: 44px;
+  --background: var(--solva-bg);
+  --foreground: var(--solva-navy-900);
 }
 
 @theme inline {
@@ -24,12 +39,12 @@ body {
 }
 
 ::selection {
-  background: #bbf7d0;
-  color: #052e16;
+  background: #bfecf3;
+  color: var(--solva-navy-900);
 }
 
 :focus-visible {
-  outline: 3px solid #a7f3d0;
+  outline: 3px solid color-mix(in srgb, var(--solva-cyan-500) 45%, white);
   outline-offset: 2px;
 }
 
