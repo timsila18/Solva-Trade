@@ -35,13 +35,33 @@ type Report = {
   auditTrail: string[];
 };
 
+type DocumentFamily = "sales" | "purchase" | "inventory" | "distribution" | "finance" | "tax" | "statement" | "report";
+
 const brand = {
   navy: "#071A2B",
   blue: "#1455D9",
   cyan: "#18B7C9",
   gold: "#D8A43B",
+  slate: "#475569",
+  muted: "#64748B",
   surface: "#EEF6FF",
+  soft: "#F8FBFF",
   border: "#D8E2EE",
+};
+
+const pdfColors: Record<string, string> = {
+  navy: "0.027 0.102 0.169",
+  blue: "0.078 0.333 0.851",
+  cyan: "0.094 0.718 0.788",
+  gold: "0.847 0.643 0.231",
+  slate: "0.278 0.333 0.411",
+  muted: "0.392 0.455 0.545",
+  border: "0.847 0.886 0.933",
+  soft: "0.973 0.984 1",
+  surface: "0.933 0.965 1",
+  white: "1 1 1",
+  black: "0 0 0",
+  watermark: "0.89 0.96 0.98",
 };
 
 const defaultLines: ReportLine[] = [
@@ -72,6 +92,20 @@ const defaultLines: ReportLine[] = [
     warehouse: "Nairobi Depot",
     batch: "Not batch tracked",
     notes: "Included so exports carry every useful transaction detail.",
+  },
+  {
+    sku: "SKU-003",
+    description: "Delivery, receiving, approval or audit reference",
+    unit: "Service",
+    quantity: 1,
+    unitPrice: 350,
+    discount: 0,
+    taxRate: "VAT 16%",
+    taxAmount: 56,
+    lineTotal: 406,
+    warehouse: "Dispatch",
+    batch: "Reference",
+    notes: "Keeps operational documents useful after download.",
   },
 ];
 
@@ -109,6 +143,31 @@ function generatedAt() {
     timeStyle: "medium",
     timeZone: "Africa/Nairobi",
   }).format(new Date());
+}
+
+function initials(name: string) {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("") || "ST";
+}
+
+function familyFor(report: Pick<Report, "moduleName" | "processName">): DocumentFamily {
+  const value = `${report.moduleName} ${report.processName}`.toLowerCase();
+  if (value.includes("statement") || value.includes("aging") || value.includes("ageing")) return "statement";
+  if (value.includes("purchase") || value.includes("supplier") || value.includes("received") || value.includes("grn") || value.includes("rfq")) return "purchase";
+  if (value.includes("inventory") || value.includes("stock") || value.includes("warehouse") || value.includes("bin card")) return "inventory";
+  if (value.includes("delivery") || value.includes("dispatch") || value.includes("route") || value.includes("vehicle") || value.includes("driver")) return "distribution";
+  if (value.includes("cash") || value.includes("ledger") || value.includes("voucher") || value.includes("balance sheet") || value.includes("income statement")) return "finance";
+  if (value.includes("vat") || value.includes("tax") || value.includes("etims") || value.includes("withholding")) return "tax";
+  if (value.includes("report") || value.includes("brief") || value.includes("dashboard") || value.includes("action plan")) return "report";
+  return "sales";
+}
+
+function titleFor(report: Report) {
+  return report.processName.toUpperCase();
 }
 
 async function tenantContext() {
@@ -304,179 +363,313 @@ function csv(report: Report) {
     .join("\n");
 }
 
-function excel(report: Report) {
+function logoHtml(report: Report) {
+  if (report.businessLogoPath) {
+    return `<img src="${htmlEscape(report.businessLogoPath)}" alt="${htmlEscape(report.businessName)} logo" />`;
+  }
+  return `<span>${htmlEscape(initials(report.businessName))}</span>`;
+}
+
+function documentIntro(report: Report) {
+  const family = familyFor(report);
+  if (family === "purchase") return "Supplier, stock receiving, approval and matching details.";
+  if (family === "distribution") return "Dispatch, delivery, route, vehicle and proof-of-delivery details.";
+  if (family === "finance") return "Cash, bank, ledger, voucher, balance and approval details.";
+  if (family === "tax") return "Tax period, taxable value, compliance and filing details.";
+  if (family === "statement") return "Opening balance, movements, payments and closing balance.";
+  if (family === "report") return "Business insight, supporting figures, commentary and recommended action.";
+  if (family === "inventory") return "Stock, warehouse, batch, movement, count and valuation details.";
+  return "Customer, sale, invoice, receipt, delivery and payment details.";
+}
+
+function lineHeaders(report: Report) {
+  const family = familyFor(report);
+  if (family === "purchase") return ["#", "Description", "Item Code", "Units", "Qty Received", "Qty Returned", "Total Qty"];
+  if (family === "distribution") return ["#", "Description", "Vehicle/Route", "Ordered", "Delivered", "Outstanding"];
+  if (family === "statement") return ["Date", "Reference", "Description", "Debit", "Credit", "Balance"];
+  if (family === "report") return ["Area", "Metric", "Current", "Risk", "Recommended Action"];
+  if (family === "inventory") return ["SKU", "Description", "Unit", "Qty", "Warehouse", "Batch", "Status"];
+  return ["Code", "Description", "Qty", "Unit Price", "Tax", "Amount"];
+}
+
+function lineCells(report: Report, line: ReportLine, index: number) {
+  const family = familyFor(report);
+  if (family === "purchase") return [String(index + 1), line.description, line.sku, line.unit, String(line.quantity), "0", String(line.quantity)];
+  if (family === "distribution") return [String(index + 1), line.description, line.warehouse, String(line.quantity), String(line.quantity), "0"];
+  if (family === "statement") return [report.transaction["Document date"], line.sku, line.description, money(line.lineTotal), money(line.discount), money(line.lineTotal)];
+  if (family === "report") return [line.sku, line.description, money(line.lineTotal), line.taxRate, line.notes];
+  if (family === "inventory") return [line.sku, line.description, line.unit, String(line.quantity), line.warehouse, line.batch, line.notes];
+  return [line.sku, line.description, String(line.quantity), money(line.unitPrice), money(line.taxAmount), money(line.lineTotal)];
+}
+
+function htmlDocument(report: Report, print = false) {
   const transactionRows = Object.entries(report.transaction)
-    .map(([label, value]) => `<tr><th>${htmlEscape(label)}</th><td>${htmlEscape(value)}</td></tr>`)
+    .map(([label, value]) => `<div><dt>${htmlEscape(label)}</dt><dd>${htmlEscape(value)}</dd></div>`)
     .join("");
+  const headers = lineHeaders(report);
   const lineRows = report.lines
     .map(
-      (line) => `<tr>
-        <td>${htmlEscape(line.sku)}</td>
-        <td>${htmlEscape(line.description)}</td>
-        <td>${htmlEscape(line.unit)}</td>
-        <td class="num">${line.quantity}</td>
-        <td class="num">${money(line.unitPrice)}</td>
-        <td class="num">${money(line.discount)}</td>
-        <td>${htmlEscape(line.taxRate)}</td>
-        <td class="num">${money(line.taxAmount)}</td>
-        <td class="num">${money(line.lineTotal)}</td>
-        <td>${htmlEscape(line.warehouse)}</td>
-        <td>${htmlEscape(line.batch)}</td>
-        <td>${htmlEscape(line.notes)}</td>
-      </tr>`,
+      (line, index) => `<tr>${lineCells(report, line, index)
+        .map((cell, cellIndex) => `<td class="${cellIndex >= headers.length - 3 ? "num" : ""}">${htmlEscape(cell)}</td>`)
+        .join("")}</tr>`,
     )
     .join("");
   const totalRows = Object.entries(report.totals)
-    .map(([label, value]) => `<tr><th>${htmlEscape(label)}</th><td class="num">${htmlEscape(value)}</td></tr>`)
+    .map(([label, value], index, all) => `<tr class="${index === all.length - 1 ? "grand" : ""}"><th>${htmlEscape(label)}</th><td>${htmlEscape(value)}</td></tr>`)
     .join("");
   const approvalRows = Object.entries(report.approvals)
-    .map(([label, value]) => `<tr><th>${htmlEscape(label)}</th><td>${htmlEscape(value)}</td></tr>`)
+    .map(([label, value]) => `<div><dt>${htmlEscape(label)}</dt><dd>${htmlEscape(value)}</dd></div>`)
     .join("");
 
   return `<!doctype html>
 <html>
 <head>
   <meta charset="utf-8" />
+  <title>${htmlEscape(report.processName)} - ${htmlEscape(report.businessName)}</title>
   <style>
-    body { font-family: Arial, sans-serif; color: ${brand.navy}; }
-    .sheet { position: relative; padding: 24px; }
-    .watermark { position: fixed; left: 32%; top: 34%; color: #d9eef4; font-size: 128px; font-weight: 800; z-index: -1; }
-    .hero { background: ${brand.navy}; color: white; padding: 22px; border-radius: 8px; }
-    .brand-row { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; }
-    .logo { color: ${brand.cyan}; font-size: 24px; font-weight: 800; }
-    .tenant-logo { min-width: 100px; min-height: 64px; border: 1px solid rgba(255,255,255,.35); border-radius: 8px; display: flex; align-items: center; justify-content: center; padding: 8px; color: white; font-size: 20px; font-weight: 800; background: rgba(255,255,255,.08); }
-    .tenant-logo img { max-width: 130px; max-height: 68px; object-fit: contain; }
-    .subtitle { color: #dbeafe; margin-top: 6px; }
-    .meta { margin-top: 18px; color: #dbeafe; }
-    h2 { margin-top: 26px; color: ${brand.blue}; }
-    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-    th { background: ${brand.surface}; color: ${brand.navy}; text-align: left; }
-    th, td { border: 1px solid ${brand.border}; padding: 9px; font-size: 12px; vertical-align: top; }
+    @page { size: A4; margin: 16mm; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #eaf1f8; color: ${brand.navy}; font-family: Arial, Helvetica, sans-serif; }
+    .page { position: relative; max-width: 920px; min-height: 1180px; margin: ${print ? "0" : "24px auto"}; overflow: hidden; background: white; padding: 42px 48px 36px; box-shadow: ${print ? "none" : "0 18px 60px rgba(7,26,43,.12)"}; }
+    .watermark { position: absolute; inset: 28% auto auto 14%; color: rgba(24,183,201,.06); font-size: 150px; font-weight: 900; letter-spacing: 8px; transform: rotate(-18deg); pointer-events: none; white-space: nowrap; }
+    .accent { position: absolute; left: 0; right: 0; top: 0; height: 10px; background: linear-gradient(90deg, ${brand.blue}, ${brand.cyan}, ${brand.gold}); }
+    header { position: relative; display: grid; grid-template-columns: 1fr 270px; gap: 32px; align-items: start; }
+    .tenant { display: grid; grid-template-columns: 82px 1fr; gap: 16px; align-items: center; }
+    .tenant-logo { display: grid; width: 82px; height: 82px; place-items: center; overflow: hidden; border-radius: 14px; border: 1px solid ${brand.border}; background: ${brand.soft}; color: ${brand.blue}; font-size: 24px; font-weight: 800; }
+    .tenant-logo img { max-width: 74px; max-height: 74px; object-fit: contain; }
+    .tenant h1 { margin: 0 0 5px; font-size: 26px; line-height: 1.1; letter-spacing: 0; }
+    .tenant p, .meta p { margin: 2px 0; color: ${brand.slate}; font-size: 12px; line-height: 1.45; }
+    .doc-title { text-align: right; }
+    .doc-title h2 { margin: 0; color: ${brand.navy}; font-size: 30px; font-weight: 800; letter-spacing: 0; }
+    .doc-title .ref { margin-top: 8px; color: ${brand.muted}; font-size: 12px; }
+    .solva-mark { margin-top: 18px; display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; border: 1px solid ${brand.border}; padding: 8px 12px; color: ${brand.blue}; font-size: 12px; font-weight: 800; }
+    .solva-dot { display: grid; width: 24px; height: 24px; place-items: center; border-radius: 8px; background: ${brand.navy}; color: ${brand.cyan}; }
+    .intro { position: relative; margin-top: 34px; display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    .panel { border: 1px solid ${brand.border}; border-radius: 10px; background: ${brand.soft}; padding: 16px; }
+    .panel h3 { margin: 0 0 10px; color: ${brand.blue}; font-size: 13px; text-transform: uppercase; letter-spacing: .03em; }
+    .details { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 18px; }
+    dt { color: ${brand.muted}; font-size: 10px; font-weight: 800; text-transform: uppercase; }
+    dd { margin: 2px 0 0; color: ${brand.navy}; font-size: 12px; line-height: 1.35; }
+    .table-wrap { position: relative; margin-top: 26px; border: 1px solid ${brand.border}; border-radius: 10px; overflow: hidden; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    th { background: ${brand.navy}; color: white; font-size: 11px; padding: 10px 8px; text-align: left; }
+    td { border-top: 1px solid ${brand.border}; color: ${brand.navy}; font-size: 11px; line-height: 1.35; padding: 10px 8px; vertical-align: top; word-break: break-word; }
+    tbody tr:nth-child(even) td { background: #f4f8fc; }
     .num { text-align: right; }
-    .totals { width: 45%; margin-left: auto; }
-    .accent { height: 5px; background: ${brand.cyan}; margin-top: 14px; border-radius: 999px; }
+    .after-table { display: grid; grid-template-columns: 1fr 300px; gap: 28px; margin-top: 24px; align-items: start; }
+    .totals table { border: 1px solid ${brand.border}; border-radius: 8px; overflow: hidden; }
+    .totals th, .totals td { background: white; color: ${brand.navy}; border-top: 1px solid ${brand.border}; font-size: 12px; }
+    .totals th { text-align: left; }
+    .totals td { text-align: right; font-weight: 700; }
+    .totals .grand th, .totals .grand td { background: ${brand.surface}; color: ${brand.blue}; font-size: 14px; }
+    .audit ul { margin: 8px 0 0; padding-left: 18px; color: ${brand.slate}; font-size: 11px; line-height: 1.55; }
+    .signatures { margin-top: 34px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
+    .signature { border-top: 1px solid ${brand.navy}; padding-top: 7px; color: ${brand.slate}; font-size: 11px; text-align: center; }
+    footer { margin-top: 36px; border-top: 1px solid ${brand.border}; padding-top: 12px; color: ${brand.muted}; font-size: 10px; line-height: 1.5; text-align: center; }
+    @media print { body { background: white; } .page { box-shadow: none; margin: 0; } }
   </style>
 </head>
 <body>
-  <div class="sheet">
-    <div class="watermark">S</div>
-    <div class="hero">
-      <div class="brand-row">
+  <main class="page">
+    <div class="accent"></div>
+    <div class="watermark">SOLVA TRADE</div>
+    <header>
+      <section class="tenant">
+        <div class="tenant-logo">${logoHtml(report)}</div>
         <div>
-          <div class="logo">Solva Trade</div>
-          <div class="subtitle">Run. Grow. Lead.</div>
+          <h1>${htmlEscape(report.businessName)}</h1>
+          <p>${htmlEscape(report.businessLocation)}</p>
+          ${report.businessPhone ? `<p>Phone: ${htmlEscape(report.businessPhone)}</p>` : ""}
+          ${report.businessEmail ? `<p>Email: ${htmlEscape(report.businessEmail)}</p>` : ""}
+          ${report.kraPin ? `<p>KRA PIN: ${htmlEscape(report.kraPin)}</p>` : ""}
         </div>
-        <div class="tenant-logo">${report.businessLogoPath ? `<img src="${htmlEscape(report.businessLogoPath)}" alt="${htmlEscape(report.businessName)} logo" />` : htmlEscape(report.businessName.slice(0, 2).toUpperCase())}</div>
-      </div>
-      <h1>${htmlEscape(report.processName)}</h1>
-      <div class="meta">
-        <strong>${htmlEscape(report.businessName)}</strong><br />
-        ${htmlEscape(report.businessLocation)}<br />
-        ${report.businessPhone ? `Phone: ${htmlEscape(report.businessPhone)}<br />` : ""}
-        ${report.businessEmail ? `Email: ${htmlEscape(report.businessEmail)}<br />` : ""}
-        ${report.kraPin ? `KRA PIN: ${htmlEscape(report.kraPin)}<br />` : ""}
-        Report owner: ${htmlEscape(report.partyName)}<br />
-        Module: ${htmlEscape(report.moduleName)}<br />
-        Printed by: ${htmlEscape(report.generatedBy)}<br />
-        Generated: ${htmlEscape(report.generatedAt)}
-      </div>
-      <div class="accent"></div>
-    </div>
-    <h2>Transaction or Process Details</h2>
-    <table>${transactionRows}</table>
-    <h2>Line Details</h2>
-    <table>
-      <thead>
-        <tr><th>SKU</th><th>Description</th><th>Unit</th><th>Qty</th><th>Unit Price</th><th>Discount</th><th>Tax</th><th>Tax Amount</th><th>Total</th><th>Warehouse</th><th>Batch</th><th>Notes</th></tr>
-      </thead>
-      <tbody>${lineRows}</tbody>
-    </table>
-    <h2>Totals</h2>
-    <table class="totals">${totalRows}</table>
-    <h2>Approval and Audit</h2>
-    <table>${approvalRows}</table>
-    <ul>${report.auditTrail.map((item) => `<li>${htmlEscape(item)}</li>`).join("")}</ul>
-  </div>
+      </section>
+      <section class="doc-title">
+        <h2>${htmlEscape(titleFor(report))}</h2>
+        <p class="ref"># ${htmlEscape(report.transaction["Reference number"])}</p>
+        <p class="ref">Generated ${htmlEscape(report.generatedAt)}</p>
+        <div class="solva-mark"><span class="solva-dot">S</span> Solva Trade</div>
+      </section>
+    </header>
+
+    <section class="intro">
+      <article class="panel">
+        <h3>Party Details</h3>
+        <p><strong>${htmlEscape(report.partyName)}</strong></p>
+        <p>${htmlEscape(documentIntro(report))}</p>
+      </article>
+      <article class="panel">
+        <h3>Document Details</h3>
+        <dl class="details">${transactionRows}</dl>
+      </article>
+    </section>
+
+    <section class="table-wrap">
+      <table>
+        <thead><tr>${headers.map((header) => `<th>${htmlEscape(header)}</th>`).join("")}</tr></thead>
+        <tbody>${lineRows}</tbody>
+      </table>
+    </section>
+
+    <section class="after-table">
+      <article class="panel audit">
+        <h3>Approval and Audit</h3>
+        <dl class="details">${approvalRows}</dl>
+        <ul>${report.auditTrail.map((item) => `<li>${htmlEscape(item)}</li>`).join("")}</ul>
+      </article>
+      <article class="totals">
+        <table>${totalRows}</table>
+      </article>
+    </section>
+
+    <section class="signatures">
+      <div class="signature">Prepared by</div>
+      <div class="signature">Reviewed by</div>
+      <div class="signature">Received / Approved by</div>
+    </section>
+
+    <footer>
+      ${htmlEscape(report.businessName)} document generated by Solva Trade. Printed by ${htmlEscape(report.generatedBy)} on ${htmlEscape(report.generatedAt)}.
+    </footer>
+  </main>
 </body>
 </html>`;
 }
 
-function pdf(report: Report) {
-  const lines = [
-    { text: "Solva Trade", x: 56, y: 790, size: 24, color: "cyan", bold: true },
-    { text: "Run. Grow. Lead.", x: 56, y: 768, size: 10, color: "white" },
-    { text: report.businessName, x: 410, y: 790, size: 12, color: "white", bold: true },
-    { text: report.businessPhone || report.businessLocation, x: 410, y: 774, size: 8, color: "white" },
-    { text: report.kraPin ? `KRA PIN: ${report.kraPin}` : "Tenant logo pending upload", x: 410, y: 760, size: 8, color: "white" },
-    { text: report.processName, x: 56, y: 735, size: 18, color: "navy", bold: true },
-    { text: report.partyName, x: 56, y: 713, size: 12, color: "navy" },
-    { text: `Module: ${report.moduleName}`, x: 56, y: 696, size: 10, color: "muted" },
-    { text: `Printed by: ${report.generatedBy}`, x: 320, y: 790, size: 9, color: "white" },
-    { text: `Generated: ${report.generatedAt}`, x: 320, y: 774, size: 9, color: "white" },
-    { text: "Transaction Details", x: 56, y: 650, size: 13, color: "blue", bold: true },
-    ...Object.entries(report.transaction).flatMap(([label, value], index) => [
-      { text: label, x: index % 2 === 0 ? 56 : 320, y: 628 - Math.floor(index / 2) * 28, size: 8, color: "muted", bold: true },
-      { text: value, x: index % 2 === 0 ? 56 : 320, y: 615 - Math.floor(index / 2) * 28, size: 9, color: "navy" },
-    ]),
-    { text: "Line Details", x: 56, y: 465, size: 13, color: "blue", bold: true },
-    { text: "SKU        Description                         Qty     Unit Price     Tax      Total", x: 56, y: 442, size: 8, color: "white" },
-    ...report.lines.map((line, index) => ({
-      text: `${line.sku.padEnd(10)} ${line.description.slice(0, 32).padEnd(34)} ${String(line.quantity).padEnd(7)} ${money(line.unitPrice).padEnd(14)} ${money(line.taxAmount).padEnd(9)} ${money(line.lineTotal)}`,
-      x: 56,
-      y: 420 - index * 20,
-      size: 8,
-      color: "navy",
-    })),
-    { text: "Totals", x: 360, y: 330, size: 13, color: "blue", bold: true },
-    ...Object.entries(report.totals).map(([label, value], index) => ({
-      text: `${label}: ${value}`,
-      x: 360,
-      y: 310 - index * 18,
-      size: 9,
-      color: index === 2 ? "blue" : "navy",
-      bold: index === 2,
-    })),
-    { text: "Approval and Audit", x: 56, y: 300, size: 13, color: "blue", bold: true },
-    ...Object.entries(report.approvals).map(([label, value], index) => ({
-      text: `${label}: ${value}`,
-      x: 56,
-      y: 280 - index * 18,
-      size: 9,
-      color: "navy",
-    })),
-    ...report.auditTrail.map((item, index) => ({
-      text: `- ${item}`,
-      x: 56,
-      y: 190 - index * 16,
-      size: 8,
-      color: "muted",
-    })),
-  ];
+class PdfCanvas {
+  private ops: string[] = [];
 
-  const colorOps: Record<string, string> = {
-    navy: "0.027 0.102 0.169 rg",
-    blue: "0.078 0.333 0.851 rg",
-    cyan: "0.094 0.718 0.788 rg",
-    gold: "0.847 0.643 0.231 rg",
-    muted: "0.278 0.333 0.411 rg",
-    white: "1 1 1 rg",
-    watermark: "0.88 0.95 0.98 rg",
-  };
-  const textOps = lines
-    .map((line) => {
-      const font = line.bold ? "/F2" : "/F1";
-      return `BT ${colorOps[line.color]} ${font} ${line.size} Tf ${line.x} ${line.y} Td (${pdfText(line.text)}) Tj ET`;
-    })
-    .join("\n");
-  const content = [
-    "0.027 0.102 0.169 rg 40 742 532 72 re f",
-    "0.094 0.718 0.788 rg 40 738 532 5 re f",
-    "0.847 0.643 0.231 rg 46 748 18 18 re f",
-    "0.93 0.97 0.99 rg BT /F2 120 Tf 180 365 Td (SOLVA) Tj ET",
-    "0.078 0.333 0.851 rg 52 432 508 18 re f",
-    "0.93 0.96 1 rg 52 402 508 1 re f",
-    textOps,
-  ].join("\n");
+  rect(x: number, y: number, width: number, height: number, color: string, stroke = false) {
+    this.ops.push(`${pdfColors[color]} ${stroke ? "RG" : "rg"} ${x} ${y} ${width} ${height} re ${stroke ? "S" : "f"}`);
+  }
+
+  line(x1: number, y1: number, x2: number, y2: number, color = "border", width = 1) {
+    this.ops.push(`${pdfColors[color]} RG ${width} w ${x1} ${y1} m ${x2} ${y2} l S`);
+  }
+
+  text(value: string, x: number, y: number, size = 10, color = "navy", bold = false) {
+    this.ops.push(`BT ${pdfColors[color]} rg ${bold ? "/F2" : "/F1"} ${size} Tf ${x} ${y} Td (${pdfText(value)}) Tj ET`);
+  }
+
+  wrap(value: string, x: number, y: number, width: number, size = 10, color = "navy", bold = false, leading = size + 4) {
+    const maxChars = Math.max(8, Math.floor(width / (size * 0.52)));
+    const words = value.split(/\s+/);
+    const rows: string[] = [];
+    let current = "";
+    words.forEach((word) => {
+      const next = current ? `${current} ${word}` : word;
+      if (next.length > maxChars && current) {
+        rows.push(current);
+        current = word;
+      } else {
+        current = next;
+      }
+    });
+    if (current) rows.push(current);
+    rows.slice(0, 5).forEach((row, index) => this.text(row, x, y - index * leading, size, color, bold));
+    return y - Math.min(rows.length, 5) * leading;
+  }
+
+  output() {
+    return this.ops.join("\n");
+  }
+}
+
+function renderPdfTable(canvas: PdfCanvas, report: Report, startY: number) {
+  const headers = lineHeaders(report);
+  const rows = report.lines.map((line, index) => lineCells(report, line, index));
+  const x = 48;
+  const widths = headers.length === 5 ? [78, 178, 78, 70, 126] : headers.length === 7 ? [28, 176, 70, 54, 70, 70, 62] : [62, 220, 44, 76, 58, 70];
+  let y = startY;
+
+  canvas.rect(x, y - 18, 530, 22, "navy");
+  let cursor = x;
+  headers.forEach((header, index) => {
+    canvas.text(header, cursor + 5, y - 10, 7.5, "white", true);
+    cursor += widths[index] ?? 70;
+  });
+  y -= 24;
+
+  rows.forEach((row, rowIndex) => {
+    const height = 38;
+    canvas.rect(x, y - height + 6, 530, height, rowIndex % 2 === 0 ? "white" : "soft");
+    canvas.line(x, y + 6, x + 530, y + 6);
+    cursor = x;
+    row.forEach((cell, index) => {
+      canvas.wrap(cell, cursor + 5, y - 8, (widths[index] ?? 70) - 10, 7.5, "navy", false, 9);
+      cursor += widths[index] ?? 70;
+    });
+    y -= height;
+  });
+
+  canvas.line(x, y + 6, x + 530, y + 6, "border");
+  return y - 16;
+}
+
+function pdf(report: Report) {
+  const canvas = new PdfCanvas();
+  const title = titleFor(report);
+
+  canvas.rect(0, 0, 612, 842, "white");
+  canvas.rect(0, 832, 612, 10, "blue");
+  canvas.rect(204, 832, 204, 10, "cyan");
+  canvas.rect(408, 832, 204, 10, "gold");
+  canvas.text("SOLVA TRADE", 92, 420, 72, "watermark", true);
+
+  canvas.rect(48, 744, 72, 72, "surface");
+  canvas.rect(52, 748, 64, 64, "white");
+  canvas.text(initials(report.businessName), 68, 778, 22, "blue", true);
+  canvas.text(report.businessName, 134, 794, 20, "navy", true);
+  canvas.wrap(report.businessLocation, 134, 774, 240, 8.5, "slate");
+  if (report.businessPhone) canvas.text(`Phone: ${report.businessPhone}`, 134, 750, 8.5, "slate");
+  if (report.businessEmail) canvas.text(`Email: ${report.businessEmail}`, 134, 738, 8.5, "slate");
+  if (report.kraPin) canvas.text(`KRA PIN: ${report.kraPin}`, 134, 726, 8.5, "slate");
+
+  canvas.wrap(title, 372, 790, 190, 20, "navy", true, 22);
+  canvas.text(`# ${report.transaction["Reference number"]}`, 374, 742, 9, "muted");
+  canvas.text(`Generated: ${report.generatedAt}`, 374, 728, 8, "muted");
+  canvas.rect(374, 698, 126, 26, "navy");
+  canvas.text("S", 386, 706, 13, "cyan", true);
+  canvas.text("Solva Trade", 406, 706, 10, "white", true);
+
+  canvas.rect(48, 628, 250, 72, "soft");
+  canvas.rect(314, 628, 250, 72, "soft");
+  canvas.text("PARTY DETAILS", 62, 676, 9, "blue", true);
+  canvas.wrap(report.partyName, 62, 656, 210, 12, "navy", true);
+  canvas.wrap(documentIntro(report), 62, 638, 210, 8.5, "slate");
+  canvas.text("DOCUMENT DETAILS", 328, 676, 9, "blue", true);
+  canvas.text(`Date: ${report.transaction["Document date"]}`, 328, 656, 8.5, "navy");
+  canvas.text(`Due: ${report.transaction["Due or action date"]}`, 328, 642, 8.5, "navy");
+  canvas.text(`Branch: ${report.transaction.Branch}`, 328, 628, 8.5, "navy");
+
+  canvas.text("LINE DETAILS", 48, 594, 11, "blue", true);
+  const yAfterTable = renderPdfTable(canvas, report, 572);
+
+  const totalsY = Math.max(180, yAfterTable);
+  canvas.text("TOTALS", 384, totalsY, 11, "blue", true);
+  Object.entries(report.totals).forEach(([label, value], index, all) => {
+    const y = totalsY - 22 - index * 22;
+    canvas.rect(384, y - 4, 174, 20, index === all.length - 1 ? "surface" : "white");
+    canvas.text(label, 394, y + 2, 8.5, index === all.length - 1 ? "blue" : "slate", index === all.length - 1);
+    canvas.text(value, 480, y + 2, 8.5, index === all.length - 1 ? "blue" : "navy", true);
+  });
+
+  canvas.text("APPROVAL AND AUDIT", 48, totalsY, 11, "blue", true);
+  Object.entries(report.approvals).forEach(([label, value], index) => {
+    canvas.text(`${label}:`, 48, totalsY - 22 - index * 18, 8, "muted", true);
+    canvas.wrap(value, 112, totalsY - 22 - index * 18, 210, 8, "navy");
+  });
+
+  canvas.line(48, 96, 176, 96, "navy");
+  canvas.line(242, 96, 370, 96, "navy");
+  canvas.line(436, 96, 564, 96, "navy");
+  canvas.text("Prepared by", 82, 82, 8, "slate");
+  canvas.text("Reviewed by", 278, 82, 8, "slate");
+  canvas.text("Received / Approved by", 452, 82, 8, "slate");
+  canvas.line(48, 58, 564, 58, "border");
+  canvas.wrap(`${report.businessName} document generated by Solva Trade. Printed by ${report.generatedBy} on ${report.generatedAt}.`, 76, 42, 460, 7.5, "muted");
+
+  const content = canvas.output();
   const objects = [
     "<< /Type /Catalog /Pages 2 0 R >>",
     "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
@@ -519,7 +712,7 @@ export async function GET(request: NextRequest) {
   }
 
   if (format === "excel") {
-    return new Response(excel(report), {
+    return new Response(htmlDocument(report), {
       headers: {
         "Content-Type": "application/vnd.ms-excel; charset=utf-8",
         "Content-Disposition": `attachment; filename="${filename}.xls"`,
@@ -528,7 +721,7 @@ export async function GET(request: NextRequest) {
   }
 
   if (format === "print") {
-    return new Response(`${excel(report)}<script>window.addEventListener("load",()=>window.print())</script>`, {
+    return new Response(`${htmlDocument(report, true)}<script>window.addEventListener("load",()=>window.print())</script>`, {
       headers: {
         "Content-Type": "text/html; charset=utf-8",
         "Content-Disposition": `inline; filename="${filename}.html"`,
