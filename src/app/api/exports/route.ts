@@ -194,6 +194,10 @@ async function tenantContext() {
         : user.email?.split("@")[0] ?? fallback.generatedBy;
     const metadataBusinessId = typeof user.app_metadata?.active_business_id === "string" ? user.app_metadata.active_business_id : null;
     const metadataBusinessName = typeof user.app_metadata?.business_name === "string" ? user.app_metadata.business_name : fallback.businessName;
+    const metadataKraPin = typeof user.app_metadata?.business_kra_pin === "string" ? user.app_metadata.business_kra_pin : "";
+    const metadataPhone = typeof user.app_metadata?.business_phone === "string" ? user.app_metadata.business_phone : "";
+    const metadataEmail = typeof user.app_metadata?.business_email === "string" ? user.app_metadata.business_email : "";
+    const metadataLocation = typeof user.app_metadata?.business_location === "string" ? user.app_metadata.business_location : fallback.businessLocation;
     const { data: membership } = await supabase
       .from("business_memberships")
       .select("business_id")
@@ -201,7 +205,16 @@ async function tenantContext() {
       .limit(1)
       .maybeSingle();
     const businessId = membership?.business_id ?? metadataBusinessId;
-    if (!businessId) return { ...fallback, businessName: metadataBusinessName, generatedBy };
+    const metadataTenant = {
+      businessName: metadataBusinessName,
+      businessLogoPath: null,
+      businessPhone: metadataPhone,
+      businessEmail: metadataEmail,
+      businessLocation: metadataLocation,
+      kraPin: metadataKraPin,
+      generatedBy,
+    };
+    if (!businessId) return { ...fallback, ...metadataTenant };
 
     let business:
       | {
@@ -234,15 +247,15 @@ async function tenantContext() {
       business = data;
     }
 
-    if (!business) return { ...fallback, businessName: metadataBusinessName, generatedBy };
+    if (!business) return { ...fallback, ...metadataTenant };
 
     return {
       businessName: business.trading_name ?? business.legal_name ?? fallback.businessName,
       businessLogoPath: business.logo_path ?? null,
-      businessPhone: business.phone ?? "",
-      businessEmail: business.email ?? "",
-      businessLocation: [business.physical_address, business.county, business.country].filter(Boolean).join(", ") || "Kenya",
-      kraPin: business.kra_pin ?? "",
+      businessPhone: business.phone ?? metadataPhone,
+      businessEmail: business.email ?? metadataEmail,
+      businessLocation: [business.physical_address, business.county, business.country].filter(Boolean).join(", ") || metadataLocation,
+      kraPin: business.kra_pin ?? metadataKraPin,
       generatedBy,
     };
   } catch {
