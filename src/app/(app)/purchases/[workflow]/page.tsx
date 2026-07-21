@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { Download, Printer } from "lucide-react";
 import { completeProcessAction } from "@/app/(app)/actions";
 import { purchasingReports } from "@/lib/purchasing";
 
@@ -59,6 +60,18 @@ const workflows: Record<string, { title: string; description: string; fields: st
   },
 };
 
+const workflowDocuments: Record<string, string[]> = {
+  requisitions: ["Purchase Requisition", "Request for Quotation (RFQ)"],
+  "purchase-orders": ["Purchase Order (PO)", "Supplier Quotation Comparison"],
+  "goods-received": ["Goods Received Note (GRN)", "Supplier Delivery Note", "Stock Movement Report"],
+  "supplier-bills": ["Supplier Invoice Register", "Outstanding Supplier Balance Statement", "Supplier Statement"],
+  returns: ["Purchase Return Note", "Supplier Statement"],
+  payments: ["Payment Voucher", "Supplier Payment History", "Outstanding Supplier Balance Statement"],
+  "creditor-ageing": ["Supplier Aging Report", "Outstanding Supplier Balance Statement"],
+  reports: ["Purchase Order (PO)", "Goods Received Note (GRN)", "Supplier Invoice Register"],
+  imports: ["Supplier Profile", "Supplier Purchase History"],
+};
+
 export function generateStaticParams() {
   return Object.keys(workflows).map((workflow) => ({ workflow }));
 }
@@ -101,6 +114,43 @@ export default async function PurchasingWorkflowPage({
       <section className="mt-6 rounded-lg border border-slate-200 bg-white p-5">
         <h2 className="font-semibold">Ledger controls</h2>
         <p className="mt-2 text-sm text-slate-600">{config.controls}</p>
+      </section>
+
+      <section className="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
+          <div>
+            <p className="text-sm font-semibold text-[var(--solva-blue-700)]">Download documents</p>
+            <h2 className="mt-1 text-xl font-semibold">
+              {workflow === "goods-received" ? "GRN and receiving documents" : "Available after this purchasing step"}
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              Documents include tenant logo, Solva Trade branding, faint watermark, supplier details, quantities, approvals and audit context.
+            </p>
+          </div>
+          <a href="/reports" className="rounded-md border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700">Open centre</a>
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {(workflowDocuments[workflow] ?? ["Purchasing Reports"]).map((document) => {
+            const base = `/api/exports?module=Purchasing&process=${encodeURIComponent(document)}`;
+            return (
+              <article key={document} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                <h3 className="font-semibold text-slate-950">{document}</h3>
+                <p className="mt-2 text-sm leading-6 text-slate-600">Ready in PDF, Excel and print format from this workspace.</p>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <a href={`${base}&format=pdf`} className="inline-flex items-center gap-2 rounded-md bg-[var(--solva-blue-700)] px-3 py-2 text-xs font-semibold text-white">
+                    <Download className="h-3.5 w-3.5" />
+                    PDF
+                  </a>
+                  <a href={`${base}&format=excel`} className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700">Excel</a>
+                  <a href={`${base}&format=print`} className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700">
+                    <Printer className="h-3.5 w-3.5" />
+                    Print
+                  </a>
+                </div>
+              </article>
+            );
+          })}
+        </div>
       </section>
     </div>
   );

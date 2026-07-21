@@ -83,11 +83,11 @@ export default async function OnboardingPage({
                 ["County", "county"],
                 ["KRA PIN", "kra_pin"],
                 ["Primary brand colour", "primary_brand_color"],
-                ["Company logo URL or uploaded path (optional)", "logo_path"],
+                ["Company logo URL or uploaded path", "logo_path"],
               ].map(([field, name]) => (
                 <label key={field} className="text-sm font-medium">
                   {field}
-                  <input name={name} className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2" />
+                  <input name={name} required={name === "logo_path"} className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2" />
                 </label>
               ))}
               <label className="text-sm font-medium">

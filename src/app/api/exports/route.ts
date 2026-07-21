@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 type ReportLine = {
   sku: string;
@@ -19,6 +20,12 @@ type Report = {
   moduleName: string;
   processName: string;
   partyName: string;
+  businessName: string;
+  businessLogoPath: string | null;
+  businessPhone: string;
+  businessEmail: string;
+  businessLocation: string;
+  kraPin: string;
   generatedBy: string;
   generatedAt: string;
   transaction: Record<string, string>;
@@ -104,7 +111,60 @@ function generatedAt() {
   }).format(new Date());
 }
 
-function buildReport(searchParams: URLSearchParams): Report {
+async function tenantContext() {
+  const fallback = {
+    businessName: "Your company",
+    businessLogoPath: null as string | null,
+    businessPhone: "",
+    businessEmail: "",
+    businessLocation: "Kenya",
+    kraPin: "",
+    generatedBy: "Solva Trade User",
+  };
+
+  try {
+    const supabase = await createSupabaseServerClient();
+    const { data: userData } = await supabase.auth.getUser();
+    const user = userData.user;
+    if (!user) return fallback;
+
+    const generatedBy =
+      typeof user.user_metadata?.full_name === "string"
+        ? user.user_metadata.full_name
+        : user.email?.split("@")[0] ?? fallback.generatedBy;
+    const metadataBusinessId = typeof user.app_metadata?.active_business_id === "string" ? user.app_metadata.active_business_id : null;
+    const { data: membership } = await supabase
+      .from("business_memberships")
+      .select("business_id")
+      .eq("active", true)
+      .limit(1)
+      .maybeSingle();
+    const businessId = membership?.business_id ?? metadataBusinessId;
+    if (!businessId) return { ...fallback, generatedBy };
+
+    const { data: business } = await supabase
+      .from("businesses")
+      .select("trading_name, legal_name, logo_path, phone, email, physical_address, county, country, kra_pin")
+      .eq("id", businessId)
+      .maybeSingle();
+    if (!business) return { ...fallback, generatedBy };
+
+    return {
+      businessName: business.trading_name ?? business.legal_name ?? fallback.businessName,
+      businessLogoPath: business.logo_path ?? null,
+      businessPhone: business.phone ?? "",
+      businessEmail: business.email ?? "",
+      businessLocation: [business.physical_address, business.county, business.country].filter(Boolean).join(", ") || "Kenya",
+      kraPin: business.kra_pin ?? "",
+      generatedBy,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+async function buildReport(searchParams: URLSearchParams): Promise<Report> {
+  const tenant = await tenantContext();
   const moduleName = searchParams.get("module") ?? "Solva Trade";
   const processName = searchParams.get("process") ?? "Business Process";
   const partyName =
@@ -112,8 +172,8 @@ function buildReport(searchParams: URLSearchParams): Report {
     searchParams.get("company") ??
     searchParams.get("user") ??
     searchParams.get("party") ??
-    "Your company";
-  const generatedBy = searchParams.get("generatedBy") ?? searchParams.get("printer") ?? "Solva Trade User";
+    tenant.businessName;
+  const generatedBy = searchParams.get("generatedBy") ?? searchParams.get("printer") ?? tenant.generatedBy;
   const subtotal = defaultLines.reduce((sum, line) => sum + line.quantity * line.unitPrice - line.discount, 0);
   const tax = defaultLines.reduce((sum, line) => sum + line.taxAmount, 0);
   const total = defaultLines.reduce((sum, line) => sum + line.lineTotal, 0);
@@ -122,10 +182,18 @@ function buildReport(searchParams: URLSearchParams): Report {
     moduleName,
     processName,
     partyName,
+    businessName: tenant.businessName,
+    businessLogoPath: tenant.businessLogoPath,
+    businessPhone: tenant.businessPhone,
+    businessEmail: tenant.businessEmail,
+    businessLocation: tenant.businessLocation,
+    kraPin: tenant.kraPin,
     generatedBy,
     generatedAt: generatedAt(),
     transaction: {
       "Report owner": partyName,
+      Business: tenant.businessName,
+      "KRA PIN": tenant.kraPin || "Not provided",
       "Reference number": `${moduleName.slice(0, 3).toUpperCase()}-${processName.slice(0, 3).toUpperCase()}-0001`,
       "Document date": "2026-07-21",
       "Due or action date": "2026-07-28",
@@ -274,7 +342,10 @@ function excel(report: Report) {
     .sheet { position: relative; padding: 24px; }
     .watermark { position: fixed; left: 32%; top: 34%; color: #d9eef4; font-size: 128px; font-weight: 800; z-index: -1; }
     .hero { background: ${brand.navy}; color: white; padding: 22px; border-radius: 8px; }
+    .brand-row { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; }
     .logo { color: ${brand.cyan}; font-size: 24px; font-weight: 800; }
+    .tenant-logo { min-width: 100px; min-height: 64px; border: 1px solid rgba(255,255,255,.35); border-radius: 8px; display: flex; align-items: center; justify-content: center; padding: 8px; color: white; font-size: 20px; font-weight: 800; background: rgba(255,255,255,.08); }
+    .tenant-logo img { max-width: 130px; max-height: 68px; object-fit: contain; }
     .subtitle { color: #dbeafe; margin-top: 6px; }
     .meta { margin-top: 18px; color: #dbeafe; }
     h2 { margin-top: 26px; color: ${brand.blue}; }
@@ -290,11 +361,21 @@ function excel(report: Report) {
   <div class="sheet">
     <div class="watermark">S</div>
     <div class="hero">
-      <div class="logo">Solva Trade</div>
-      <div class="subtitle">Run. Grow. Lead.</div>
+      <div class="brand-row">
+        <div>
+          <div class="logo">Solva Trade</div>
+          <div class="subtitle">Run. Grow. Lead.</div>
+        </div>
+        <div class="tenant-logo">${report.businessLogoPath ? `<img src="${htmlEscape(report.businessLogoPath)}" alt="${htmlEscape(report.businessName)} logo" />` : htmlEscape(report.businessName.slice(0, 2).toUpperCase())}</div>
+      </div>
       <h1>${htmlEscape(report.processName)}</h1>
       <div class="meta">
-        <strong>${htmlEscape(report.partyName)}</strong><br />
+        <strong>${htmlEscape(report.businessName)}</strong><br />
+        ${htmlEscape(report.businessLocation)}<br />
+        ${report.businessPhone ? `Phone: ${htmlEscape(report.businessPhone)}<br />` : ""}
+        ${report.businessEmail ? `Email: ${htmlEscape(report.businessEmail)}<br />` : ""}
+        ${report.kraPin ? `KRA PIN: ${htmlEscape(report.kraPin)}<br />` : ""}
+        Report owner: ${htmlEscape(report.partyName)}<br />
         Module: ${htmlEscape(report.moduleName)}<br />
         Printed by: ${htmlEscape(report.generatedBy)}<br />
         Generated: ${htmlEscape(report.generatedAt)}
@@ -324,6 +405,9 @@ function pdf(report: Report) {
   const lines = [
     { text: "Solva Trade", x: 56, y: 790, size: 24, color: "cyan", bold: true },
     { text: "Run. Grow. Lead.", x: 56, y: 768, size: 10, color: "white" },
+    { text: report.businessName, x: 410, y: 790, size: 12, color: "white", bold: true },
+    { text: report.businessPhone || report.businessLocation, x: 410, y: 774, size: 8, color: "white" },
+    { text: report.kraPin ? `KRA PIN: ${report.kraPin}` : "Tenant logo pending upload", x: 410, y: 760, size: 8, color: "white" },
     { text: report.processName, x: 56, y: 735, size: 18, color: "navy", bold: true },
     { text: report.partyName, x: 56, y: 713, size: 12, color: "navy" },
     { text: `Module: ${report.moduleName}`, x: 56, y: 696, size: 10, color: "muted" },
@@ -388,7 +472,7 @@ function pdf(report: Report) {
     "0.027 0.102 0.169 rg 40 742 532 72 re f",
     "0.094 0.718 0.788 rg 40 738 532 5 re f",
     "0.847 0.643 0.231 rg 46 748 18 18 re f",
-    "0.88 0.95 0.98 rg BT /F2 142 Tf 210 360 Td (S) Tj ET",
+    "0.93 0.97 0.99 rg BT /F2 120 Tf 180 365 Td (SOLVA) Tj ET",
     "0.078 0.333 0.851 rg 52 432 508 18 re f",
     "0.93 0.96 1 rg 52 402 508 1 re f",
     textOps,
@@ -415,9 +499,9 @@ function pdf(report: Report) {
   return document;
 }
 
-export function GET(request: NextRequest) {
+export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
-  const report = buildReport(searchParams);
+  const report = await buildReport(searchParams);
   const format = searchParams.get("format") ?? "csv";
   const filename = slug(`${report.moduleName}-${report.processName}`);
 
@@ -439,6 +523,15 @@ export function GET(request: NextRequest) {
       headers: {
         "Content-Type": "application/vnd.ms-excel; charset=utf-8",
         "Content-Disposition": `attachment; filename="${filename}.xls"`,
+      },
+    });
+  }
+
+  if (format === "print") {
+    return new Response(`${excel(report)}<script>window.addEventListener("load",()=>window.print())</script>`, {
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        "Content-Disposition": `inline; filename="${filename}.html"`,
       },
     });
   }

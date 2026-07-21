@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { CheckCircle2, Download, Home, Plus } from "lucide-react";
+import { CheckCircle2, Download, Home, Plus, Printer } from "lucide-react";
 
 export default async function ActionCompletePage({
   searchParams,
@@ -17,6 +17,7 @@ export default async function ActionCompletePage({
   const exportHref = `${exportBase}&format=csv`;
   const excelHref = `${exportBase}&format=excel`;
   const pdfHref = `${exportBase}&format=pdf`;
+  const printHref = `${exportBase}&format=print`;
 
   return (
     <div className="mx-auto max-w-3xl pb-24">
@@ -46,6 +47,10 @@ export default async function ActionCompletePage({
           <a href={pdfHref} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700">
             <Download className="h-4 w-4" />
             Export PDF
+          </a>
+          <a href={printHref} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700">
+            <Printer className="h-4 w-4" />
+            Print
           </a>
           <Link href="/dashboard" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700">
             <Home className="h-4 w-4" />
