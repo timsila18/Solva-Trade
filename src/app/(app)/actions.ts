@@ -1,6 +1,9 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getActiveBusinessId } from "@/lib/tenant";
 
 function safeText(value: FormDataEntryValue | null, fallback: string) {
   const text = typeof value === "string" ? value.trim() : "";
@@ -23,6 +26,34 @@ export async function completeProcessAction(formData: FormData) {
     returnTo,
     next,
   });
+
+  try {
+    const supabase = await createSupabaseServerClient();
+    const { data } = await supabase.auth.getUser();
+    const user = data.user;
+    const businessId =
+      (await getActiveBusinessId()) ||
+      (typeof user?.app_metadata?.active_business_id === "string" ? user.app_metadata.active_business_id : null);
+
+    if (user && businessId) {
+      const admin = createSupabaseAdminClient();
+      await admin.from("audit_logs").insert({
+        business_id: businessId,
+        user_id: user.id,
+        action: intent,
+        module: moduleName,
+        entity_type: documentName,
+        new_value: {
+          process: processName,
+          document: documentName,
+          status: "posted",
+          source: "workspace_submit",
+        },
+      });
+    }
+  } catch {
+    // The user should still receive the generated document if audit logging is unavailable.
+  }
 
   redirect(`/action-complete?${params.toString()}`);
 }
