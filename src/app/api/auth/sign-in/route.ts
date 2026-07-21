@@ -36,6 +36,12 @@ export async function POST(request: NextRequest) {
       return redirectTo(request, "/dashboard");
     }
 
+    const metadataBusinessId = userData.user?.app_metadata?.active_business_id;
+    if (typeof metadataBusinessId === "string" && metadataBusinessId.length > 0) {
+      await setActiveBusinessCookie(metadataBusinessId);
+      return redirectTo(request, "/dashboard");
+    }
+
     let platformUser: { id: string } | null = null;
     if (userData.user) {
       try {
