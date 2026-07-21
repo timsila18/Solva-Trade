@@ -70,7 +70,7 @@ export async function POST(request: NextRequest) {
     .select("onboarding_status")
     .eq("id", membership.business_id)
     .maybeSingle();
-  if (business?.onboarding_status !== "complete") return redirectTo(request, "/onboarding");
+  if (business && business.onboarding_status !== "complete") return redirectTo(request, "/onboarding");
 
   return redirectTo(request, "/dashboard");
 }
