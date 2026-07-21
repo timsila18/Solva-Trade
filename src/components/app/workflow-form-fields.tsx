@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import type { CustomerLookup, InvoiceLookup, ProductLookup } from "@/lib/workflow-live-data";
 
 function fieldKey(label: string) {
   return label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || "field";
@@ -66,7 +67,17 @@ function calculationBase(values: Record<string, string>) {
   return explicitSubtotal || explicitAmountBeforeTax || (quantity && price ? quantity * price : 0);
 }
 
-export function WorkflowFormFields({ fields }: { fields: string[] }) {
+export function WorkflowFormFields({
+  fields,
+  customers = [],
+  products = [],
+  unpaidInvoices = [],
+}: {
+  fields: string[];
+  customers?: CustomerLookup[];
+  products?: ProductLookup[];
+  unpaidInvoices?: InvoiceLookup[];
+}) {
   const normalizedFields = useMemo(() => {
     const hasTax = fields.some((field) => fieldKey(field) === "tax");
     const hasRate = fields.some((field) => ["tax_rate", "vat_rate", "tax_code", "vat_code"].includes(fieldKey(field)));
@@ -99,6 +110,12 @@ export function WorkflowFormFields({ fields }: { fields: string[] }) {
   return (
     <div className="grid gap-4 md:grid-cols-2">
       {keys.map(({ label, key, type }) => {
+        const selectedProduct = products.find((product) => product.name === values.product || product.id === values.product_id);
+        const selectedCustomer = customers.find((customer) => customer.name === values.customer || customer.id === values.customer_id);
+        const selectedInvoice = unpaidInvoices.find((invoice) => invoice.number === values.invoice || invoice.id === values.invoice_id);
+        const isCustomerField = key === "customer";
+        const isProductField = key === "product";
+        const isInvoiceField = key === "invoice";
         const resolvedType =
           type === "text" && /^(subtotal|total|tax|amount|balance_due|discount|price|unit_price|quantity)$/.test(key) ? "number" : type;
         const isCalculated =
@@ -108,6 +125,136 @@ export function WorkflowFormFields({ fields }: { fields: string[] }) {
         const defaultCalculatedValue =
           ["vat_rate", "tax_rate"].includes(key) && !values[key] ? calculated[key as keyof typeof calculated] : undefined;
         const value = isCalculated ? calculated[key as keyof typeof calculated] : defaultCalculatedValue ?? values[key] ?? "";
+        const maxStock =
+          selectedProduct?.trackInventory && /^(quantity|ordered_quantity|quantity_sold)$/.test(key)
+            ? String(selectedProduct.available)
+            : undefined;
+        const helper =
+          isProductField && selectedProduct
+            ? `Available stock: ${selectedProduct.available.toLocaleString("en-KE")} - VAT: ${selectedProduct.vatCode} ${selectedProduct.vatRate}%`
+            : isCustomerField && selectedCustomer
+              ? `Saved customer - Code ${selectedCustomer.code}${selectedCustomer.balance ? ` - Balance KES ${selectedCustomer.balance.toLocaleString("en-KE")}` : ""}`
+              : isInvoiceField && selectedInvoice
+                ? `Outstanding balance KES ${selectedInvoice.balanceDue.toLocaleString("en-KE")}`
+                : "";
+
+        if (isCustomerField && customers.length > 0) {
+          return (
+            <label key={label} className="text-sm font-medium">
+              {label}
+              <input type="hidden" name={`label_${key}`} value={label} />
+              <input type="hidden" name="field_customer_id" value={selectedCustomer?.id ?? ""} />
+              <input type="hidden" name="label_customer_id" value="Customer ID" />
+              <input
+                name={`field_${key}`}
+                list="customer-options"
+                required
+                value={values[key] ?? ""}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  const customer = customers.find((item) => item.name === next || item.code === next || item.phone === next);
+                  setValues((current) => ({ ...current, [key]: next, customer_id: customer?.id ?? "" }));
+                }}
+                className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2"
+                placeholder="Search customer by name, code or phone"
+              />
+              <datalist id="customer-options">
+                {customers.map((customer) => (
+                  <option key={customer.id} value={customer.name}>
+                    {customer.code} {customer.phone ? `- ${customer.phone}` : ""}
+                  </option>
+                ))}
+              </datalist>
+              {helper ? <span className="mt-1 block text-xs text-slate-500">{helper}</span> : null}
+            </label>
+          );
+        }
+
+        if (isProductField && products.length > 0) {
+          return (
+            <label key={label} className="text-sm font-medium">
+              {label}
+              <input type="hidden" name={`label_${key}`} value={label} />
+              <input type="hidden" name="field_product_id" value={selectedProduct?.id ?? ""} />
+              <input type="hidden" name="label_product_id" value="Product ID" />
+              <input type="hidden" name="field_product_available_stock" value={selectedProduct ? String(selectedProduct.available) : ""} />
+              <input type="hidden" name="label_product_available_stock" value="Available stock" />
+              <input type="hidden" name="field_tax_code" value={selectedProduct?.vatCode ?? values.tax_code ?? ""} />
+              <input type="hidden" name="label_tax_code" value="Tax code" />
+              <input
+                name={`field_${key}`}
+                list="product-options"
+                required
+                value={values[key] ?? ""}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  const product = products.find((item) => item.name === next || item.code === next);
+                  setValues((current) => ({
+                    ...current,
+                    [key]: next,
+                    product_id: product?.id ?? "",
+                    unit_price: product?.price ? String(product.price) : current.unit_price,
+                    price: product?.price ? String(product.price) : current.price,
+                    vat_rate: product ? String(product.vatRate) : current.vat_rate,
+                    tax_code: product?.vatCode ?? current.tax_code,
+                  }));
+                }}
+                className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2"
+                placeholder="Search product by name or code"
+              />
+              <datalist id="product-options">
+                {products.map((product) => (
+                  <option key={product.id} value={product.name}>
+                    {product.code} - Stock {product.available} - VAT {product.vatRate}%
+                  </option>
+                ))}
+              </datalist>
+              {helper ? <span className={`mt-1 block text-xs ${selectedProduct?.trackInventory && selectedProduct.available <= 0 ? "text-red-600" : "text-slate-500"}`}>{helper}</span> : null}
+            </label>
+          );
+        }
+
+        if (isInvoiceField && unpaidInvoices.length > 0) {
+          const visibleInvoices = selectedCustomer?.id
+            ? unpaidInvoices.filter((invoice) => invoice.customerId === selectedCustomer.id)
+            : unpaidInvoices;
+          return (
+            <label key={label} className="text-sm font-medium">
+              {label}
+              <input type="hidden" name={`label_${key}`} value={label} />
+              <input type="hidden" name="field_invoice_id" value={selectedInvoice?.id ?? ""} />
+              <input type="hidden" name="label_invoice_id" value="Invoice ID" />
+              <input
+                name={`field_${key}`}
+                list="invoice-options"
+                value={values[key] ?? ""}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  const invoice = unpaidInvoices.find((item) => item.number === next);
+                  setValues((current) => ({
+                    ...current,
+                    [key]: next,
+                    invoice_id: invoice?.id ?? "",
+                    customer_id: invoice?.customerId ?? current.customer_id,
+                    customer: invoice?.customerName || current.customer,
+                    amount: invoice?.balanceDue ? String(invoice.balanceDue) : current.amount,
+                  }));
+                }}
+                className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2"
+                placeholder="Select unpaid invoice"
+              />
+              <datalist id="invoice-options">
+                {visibleInvoices.map((invoice) => (
+                  <option key={invoice.id} value={invoice.number}>
+                    {invoice.customerName} - Balance KES {invoice.balanceDue}
+                  </option>
+                ))}
+              </datalist>
+              {helper ? <span className="mt-1 block text-xs text-slate-500">{helper}</span> : null}
+            </label>
+          );
+        }
+
         return (
           <label key={label} className="text-sm font-medium">
             {label}
@@ -117,6 +264,7 @@ export function WorkflowFormFields({ fields }: { fields: string[] }) {
               type={resolvedType}
               inputMode={resolvedType === "number" ? "decimal" : undefined}
               min={resolvedType === "number" && !/variance|adjustment/i.test(label) ? "0" : undefined}
+              max={maxStock}
               step={resolvedType === "number" ? "0.01" : undefined}
               required={/(customer|supplier|product|date|number|total|amount)/i.test(label)}
               readOnly={isCalculated}
@@ -125,6 +273,7 @@ export function WorkflowFormFields({ fields }: { fields: string[] }) {
               className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 read-only:bg-slate-100"
               placeholder={type === "date" ? undefined : label}
             />
+            {maxStock ? <span className="mt-1 block text-xs text-slate-500">Cannot sell more than available stock: {maxStock}.</span> : null}
           </label>
         );
       })}

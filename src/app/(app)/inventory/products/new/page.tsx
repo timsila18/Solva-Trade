@@ -1,6 +1,10 @@
 import { completeProcessAction } from "@/app/(app)/actions";
 import { distributorQuickSetup, productSetupSections, productTypes } from "@/lib/inventory-data";
 
+function fieldKey(label: string) {
+  return label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || "field";
+}
+
 export default function NewProductPage() {
   return (
     <div className="pb-20">
@@ -31,12 +35,19 @@ export default function NewProductPage() {
             {["Product name", "Short name", "Product code", "SKU", "Barcode", "Manufacturer"].map((field) => (
               <label key={field} className="text-sm font-medium">
                 {field}
-                <input className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2" placeholder={field} />
+                <input type="hidden" name={`label_${fieldKey(field)}`} value={field} />
+                <input
+                  name={`field_${fieldKey(field)}`}
+                  className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2"
+                  placeholder={field}
+                  required={field === "Product name"}
+                />
               </label>
             ))}
             <label className="text-sm font-medium">
               Product type
-              <select className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2" defaultValue="Stock Item">
+              <input type="hidden" name="label_product_type" value="Product type" />
+              <select name="field_product_type" className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2" defaultValue="Stock Item">
                 {productTypes.map((type) => (
                   <option key={type}>{type}</option>
                 ))}
@@ -52,11 +63,23 @@ export default function NewProductPage() {
             </label>
             <label className="text-sm font-medium">
               Selling price placeholder
-              <input className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2" type="number" min="0" step="0.01" />
+              <input type="hidden" name="label_selling_price_placeholder" value="Selling price placeholder" />
+              <input name="field_selling_price_placeholder" className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2" type="number" min="0" step="0.01" />
             </label>
             <label className="text-sm font-medium">
               Reorder level
-              <input className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2" type="number" min="0" step="0.01" />
+              <input type="hidden" name="label_reorder_level" value="Reorder level" />
+              <input name="field_reorder_level" className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2" type="number" min="0" step="0.01" />
+            </label>
+            <label className="text-sm font-medium">
+              VAT treatment
+              <input type="hidden" name="label_vat_treatment" value="VAT treatment" />
+              <select name="field_vat_treatment" className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2" defaultValue="VAT_STD">
+                <option value="VAT_STD">Standard VAT 16%</option>
+                <option value="VAT_ZERO">Zero-rated 0%</option>
+                <option value="VAT_EXEMPT">Exempt 0%</option>
+                <option value="VAT_OUT_OF_SCOPE">Out of scope / No VAT</option>
+              </select>
             </label>
           </div>
 

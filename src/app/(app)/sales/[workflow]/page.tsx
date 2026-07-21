@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { Download, Printer } from "lucide-react";
 import { completeProcessAction } from "@/app/(app)/actions";
 import { WorkflowFormFields } from "@/components/app/workflow-form-fields";
+import { getSalesWorkflowLookups } from "@/lib/workflow-live-data";
 
 const workflows: Record<string, { title: string; description: string; fields: string[] }> = {
   quotations: {
@@ -17,7 +18,7 @@ const workflows: Record<string, { title: string; description: string; fields: st
   invoices: {
     title: "Invoices",
     description: "Issue invoices and track payment and delivery status.",
-    fields: ["Invoice number", "Customer", "Sales order", "Invoice date", "Due date", "Subtotal", "Tax", "Total", "Balance due"],
+    fields: ["Invoice number", "Customer", "Sales order", "Invoice date", "Due date", "Product", "Quantity", "Unit price", "Discount", "Subtotal", "Tax", "Amount paid", "Total", "Balance due"],
   },
   payments: {
     title: "Customer Payments",
@@ -66,6 +67,7 @@ export default async function SalesWorkflowPage({
   const { workflow } = await params;
   const config = workflows[workflow];
   if (!config) notFound();
+  const lookups = await getSalesWorkflowLookups();
 
   return (
     <div className="pb-20">
@@ -79,7 +81,7 @@ export default async function SalesWorkflowPage({
         <input type="hidden" name="document" value={primaryDocument[workflow] ?? config.title} />
         <input type="hidden" name="returnTo" value={`/sales/${workflow}`} />
         <input type="hidden" name="next" value={`Continue ${config.title}`} />
-        <WorkflowFormFields fields={config.fields} />
+        <WorkflowFormFields fields={config.fields} customers={lookups.customers} products={lookups.products} unpaidInvoices={lookups.unpaidInvoices} />
         <div className="mt-6 flex flex-wrap gap-3">
           <button name="intent" value="Draft saved" className="rounded-md border border-slate-200 px-4 py-2 text-sm font-semibold">Save draft</button>
           <button name="intent" value="Validation previewed" className="rounded-md border border-slate-200 px-4 py-2 text-sm font-semibold">Preview validation</button>

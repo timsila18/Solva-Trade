@@ -6,6 +6,10 @@ import { PageHero } from "@/components/ui/premium";
 const simpleFields = ["Customer name", "Phone number", "Town or area", "Delivery route"];
 const advancedFields = ["KRA PIN", "Email", "Opening balance", "Credit limit"];
 
+function fieldKey(label: string) {
+  return label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || "field";
+}
+
 export default function NewCustomerPage() {
   return (
     <div className="pb-24">
@@ -39,9 +43,12 @@ export default function NewCustomerPage() {
             {simpleFields.map((field, index) => (
               <label key={field} className="text-sm font-medium">
                 {field}
+                <input type="hidden" name={`label_${fieldKey(field)}`} value={field} />
                 <input
+                  name={`field_${fieldKey(field)}`}
                   className="mt-2 min-h-11 w-full rounded-md border border-slate-300 px-3 py-2"
                   placeholder={index === 0 ? "Example: Mary Wanjiku Shop" : field}
+                  required={index === 0}
                 />
               </label>
             ))}
@@ -53,12 +60,21 @@ export default function NewCustomerPage() {
               {advancedFields.map((field) => (
                 <label key={field} className="text-sm font-medium">
                   {field}
-                  <input className="mt-2 min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 py-2" placeholder={field} />
+                  <input type="hidden" name={`label_${fieldKey(field)}`} value={field} />
+                  <input
+                    name={`field_${fieldKey(field)}`}
+                    className="mt-2 min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 py-2"
+                    placeholder={field}
+                    type={/(balance|limit)/i.test(field) ? "number" : "text"}
+                    min={/(balance|limit)/i.test(field) ? "0" : undefined}
+                    step={/(balance|limit)/i.test(field) ? "0.01" : undefined}
+                  />
                 </label>
               ))}
               <label className="text-sm font-medium">
                 Payment agreement
-                <select className="mt-2 min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 py-2" defaultValue="Cash">
+                <input type="hidden" name="label_payment_agreement" value="Payment agreement" />
+                <select name="field_payment_agreement" className="mt-2 min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 py-2" defaultValue="Cash">
                   {["Cash", "Pay in 7 days", "Pay in 14 days", "Pay in 30 days"].map((term) => (
                     <option key={term}>{term}</option>
                   ))}

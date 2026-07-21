@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { CheckCircle2, Download, Home, Plus, Printer } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Download, Home, Plus, Printer } from "lucide-react";
 
 export default async function ActionCompletePage({
   searchParams,
@@ -13,6 +13,7 @@ export default async function ActionCompletePage({
   const intent = String(params.intent ?? "Completed");
   const returnTo = String(params.returnTo ?? "/dashboard");
   const next = String(params.next ?? "Open Dashboard");
+  const error = typeof params.error === "string" ? params.error : "";
   const exportParams = new URLSearchParams({
     module: moduleName,
     process: documentName,
@@ -31,45 +32,50 @@ export default async function ActionCompletePage({
   return (
     <div className="mx-auto max-w-3xl pb-24">
       <section className="rounded-lg border border-emerald-200 bg-white p-6 text-center shadow-sm">
-        <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-emerald-50 text-emerald-700">
-          <CheckCircle2 className="h-8 w-8" />
+        <div className={`mx-auto grid h-14 w-14 place-items-center rounded-full ${error ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"}`}>
+          {error ? <AlertTriangle className="h-8 w-8" /> : <CheckCircle2 className="h-8 w-8" />}
         </div>
-        <p className="mt-5 text-sm font-semibold text-emerald-700">{moduleName}</p>
-        <h1 className="mt-2 text-3xl font-semibold text-slate-950">{intent} successfully</h1>
+        <p className={`mt-5 text-sm font-semibold ${error ? "text-red-700" : "text-emerald-700"}`}>{moduleName}</p>
+        <h1 className="mt-2 text-3xl font-semibold text-slate-950">{error ? "Action needs attention" : `${intent} successfully`}</h1>
         <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-slate-600">
-          {processName} has been captured and posted to the workspace record trail. Your {documentName} is ready now
-          for download, printing, filing or sharing with the customer, supplier or accountant.
+          {error
+            ? error
+            : `${processName} has been captured and posted to the workspace record trail. Your ${documentName} is ready now for download, printing, filing or sharing with the customer, supplier or accountant.`}
         </p>
-        <div className="mt-6 rounded-lg border border-cyan-200 bg-cyan-50 p-4 text-left">
-          <p className="text-sm font-semibold text-[var(--solva-blue-700)]">Generated document</p>
-          <h2 className="mt-1 text-2xl font-semibold text-slate-950">{documentName}</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-600">
-            This document uses the correct business format, tenant details, Solva Trade watermark, line details, totals and approval context.
-          </p>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <a href={pdfHref} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-[var(--solva-blue-700)] px-4 py-3 text-sm font-semibold text-white">
-              <Download className="h-4 w-4" />
-              Download PDF
-            </a>
-            <a href={printHref} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700">
-              <Printer className="h-4 w-4" />
-              Print
-            </a>
-            <a href={excelHref} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700">
-              <Download className="h-4 w-4" />
-              Excel
-            </a>
+        {!error ? (
+          <div className="mt-6 rounded-lg border border-cyan-200 bg-cyan-50 p-4 text-left">
+            <p className="text-sm font-semibold text-[var(--solva-blue-700)]">Generated document</p>
+            <h2 className="mt-1 text-2xl font-semibold text-slate-950">{documentName}</h2>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              This document uses the correct business format, tenant details, Solva Trade watermark, line details, totals and approval context.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <a href={pdfHref} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-[var(--solva-blue-700)] px-4 py-3 text-sm font-semibold text-white">
+                <Download className="h-4 w-4" />
+                Download PDF
+              </a>
+              <a href={printHref} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700">
+                <Printer className="h-4 w-4" />
+                Print
+              </a>
+              <a href={excelHref} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700">
+                <Download className="h-4 w-4" />
+                Excel
+              </a>
+            </div>
           </div>
-        </div>
+        ) : null}
         <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">
           <Link href={returnTo} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-[var(--solva-blue-700)] px-4 py-3 text-sm font-semibold text-white">
             <Plus className="h-4 w-4" />
             {next}
           </Link>
-          <a href={exportHref} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700">
-            <Download className="h-4 w-4" />
-            Export CSV
-          </a>
+          {!error ? (
+            <a href={exportHref} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700">
+              <Download className="h-4 w-4" />
+              Export CSV
+            </a>
+          ) : null}
           <Link href="/dashboard" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700">
             <Home className="h-4 w-4" />
             Dashboard Home
