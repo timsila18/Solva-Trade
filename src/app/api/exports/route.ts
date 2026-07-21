@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 type ReportLine = {
@@ -192,6 +193,7 @@ async function tenantContext() {
         ? user.user_metadata.full_name
         : user.email?.split("@")[0] ?? fallback.generatedBy;
     const metadataBusinessId = typeof user.app_metadata?.active_business_id === "string" ? user.app_metadata.active_business_id : null;
+    const metadataBusinessName = typeof user.app_metadata?.business_name === "string" ? user.app_metadata.business_name : fallback.businessName;
     const { data: membership } = await supabase
       .from("business_memberships")
       .select("business_id")
@@ -199,14 +201,40 @@ async function tenantContext() {
       .limit(1)
       .maybeSingle();
     const businessId = membership?.business_id ?? metadataBusinessId;
-    if (!businessId) return { ...fallback, generatedBy };
+    if (!businessId) return { ...fallback, businessName: metadataBusinessName, generatedBy };
 
-    const { data: business } = await supabase
-      .from("businesses")
-      .select("trading_name, legal_name, logo_path, phone, email, physical_address, county, country, kra_pin")
-      .eq("id", businessId)
-      .maybeSingle();
-    if (!business) return { ...fallback, generatedBy };
+    let business:
+      | {
+          trading_name: string | null;
+          legal_name: string | null;
+          logo_path: string | null;
+          phone: string | null;
+          email: string | null;
+          physical_address: string | null;
+          county: string | null;
+          country: string | null;
+          kra_pin: string | null;
+        }
+      | null = null;
+
+    try {
+      const admin = createSupabaseAdminClient();
+      const { data } = await admin
+        .from("businesses")
+        .select("trading_name, legal_name, logo_path, phone, email, physical_address, county, country, kra_pin")
+        .eq("id", businessId)
+        .maybeSingle();
+      business = data;
+    } catch {
+      const { data } = await supabase
+        .from("businesses")
+        .select("trading_name, legal_name, logo_path, phone, email, physical_address, county, country, kra_pin")
+        .eq("id", businessId)
+        .maybeSingle();
+      business = data;
+    }
+
+    if (!business) return { ...fallback, businessName: metadataBusinessName, generatedBy };
 
     return {
       businessName: business.trading_name ?? business.legal_name ?? fallback.businessName,
