@@ -9,7 +9,7 @@ const workflows: Record<string, { title: string; description: string; fields: st
     title: "Accounting Setup Wizard",
     description: "Guide owners through accounting basics, financial years, recommended chart, role mappings, opening balances and activation.",
     fields: ["Accounting basis", "Default currency", "Financial year start", "Use recommended chart", "Import custom chart", "Critical mappings", "Opening balance date", "Activation readiness"],
-    sideTitle: "Wizard steps",
+    sideTitle: "Setup checklist",
     sideItems: setupWizardSteps,
     controls: "Accounting activates only after critical roles, periods, control accounts and opening-balance checks pass.",
   },

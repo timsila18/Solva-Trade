@@ -32,6 +32,34 @@ function getNumber(formData: FormData, key: string) {
   return Number.isFinite(number) ? number : 0;
 }
 
+function getBoolean(formData: FormData, key: string) {
+  return getField(formData, key).toLowerCase() === "yes";
+}
+
+function slugCode(value: string, fallback: string) {
+  const code = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return (code || fallback).slice(0, 60);
+}
+
+function productTypeValue(value: string) {
+  const typeMap: Record<string, string> = {
+    "stock item": "stock_item",
+    service: "service",
+    "non-stock item": "non_stock_item",
+    "returnable packaging": "returnable_packaging",
+    "raw material": "raw_material",
+    "finished good": "finished_good",
+    consumable: "consumable",
+    "expense item": "expense_item",
+    other: "other",
+  };
+  return typeMap[value.trim().toLowerCase()] ?? "stock_item";
+}
+
 async function getWorkspaceContext(userId: string, fallbackBusinessId?: string | null) {
   const businessId = (await getActiveBusinessId()) || fallbackBusinessId;
   if (!businessId) throw new Error("No active business was selected.");
@@ -273,26 +301,166 @@ async function createCustomerRecord(formData: FormData, userId: string, fallback
   });
 }
 
+async function findUnitId(admin: ReturnType<typeof createSupabaseAdminClient>, businessId: string, value: string) {
+  if (!value) return null;
+  const { data } = await admin
+    .from("units_of_measure")
+    .select("id")
+    .or(`business_id.is.null,business_id.eq.${businessId}`)
+    .or(`name.ilike.${value},symbol.ilike.${value}`)
+    .eq("active", true)
+    .limit(1)
+    .maybeSingle();
+  return data?.id ?? null;
+}
+
+async function findOrCreateCategoryId(admin: ReturnType<typeof createSupabaseAdminClient>, businessId: string, userId: string, value: string) {
+  const name = value.trim();
+  if (!name) return null;
+  const { data: existing } = await admin
+    .from("product_categories")
+    .select("id")
+    .eq("business_id", businessId)
+    .ilike("category_name", name)
+    .limit(1)
+    .maybeSingle();
+  if (existing?.id) return existing.id;
+
+  const { data: created } = await admin
+    .from("product_categories")
+    .insert({
+      business_id: businessId,
+      category_name: name,
+      category_code: slugCode(name, `cat_${Date.now().toString().slice(-6)}`),
+      created_by: userId,
+    })
+    .select("id")
+    .single();
+  return created?.id ?? null;
+}
+
+async function findOrCreateBrandId(admin: ReturnType<typeof createSupabaseAdminClient>, businessId: string, userId: string, value: string, manufacturer: string) {
+  const name = value.trim();
+  if (!name) return null;
+  const { data: existing } = await admin
+    .from("brands")
+    .select("id")
+    .eq("business_id", businessId)
+    .ilike("brand_name", name)
+    .limit(1)
+    .maybeSingle();
+  if (existing?.id) return existing.id;
+
+  const { data: created } = await admin
+    .from("brands")
+    .insert({
+      business_id: businessId,
+      brand_name: name,
+      brand_code: slugCode(name, `brand_${Date.now().toString().slice(-6)}`),
+      manufacturer_or_owner: manufacturer || null,
+      created_by: userId,
+    })
+    .select("id")
+    .single();
+  return created?.id ?? null;
+}
+
 async function createProductRecord(formData: FormData, userId: string, fallbackBusinessId?: string | null) {
-  const { admin, businessId } = await getWorkspaceContext(userId, fallbackBusinessId);
+  const { admin, businessId, branchId, warehouseId } = await getWorkspaceContext(userId, fallbackBusinessId);
   const name = getField(formData, "product_name");
   if (!name) throw new Error("Enter the product name.");
   const productCode = getField(formData, "product_code") || `PRD-${Date.now().toString().slice(-6)}`;
-  await admin.from("products").insert({
+  const productType = productTypeValue(getField(formData, "product_type"));
+  const categoryId = await findOrCreateCategoryId(admin, businessId, userId, getField(formData, "category"));
+  const brandId = await findOrCreateBrandId(admin, businessId, userId, getField(formData, "brand"), getField(formData, "manufacturer"));
+  const baseUnitId = await findUnitId(admin, businessId, getField(formData, "base_stock_unit"));
+  const purchaseUnitId = await findUnitId(admin, businessId, getField(formData, "purchase_unit"));
+  const sellingUnitId = await findUnitId(admin, businessId, getField(formData, "selling_unit"));
+  const tracksStock = !["service", "non_stock_item", "expense_item"].includes(productType) && getBoolean(formData, "track_inventory");
+  const { data: product, error: productError } = await admin
+    .from("products")
+    .insert({
     business_id: businessId,
     product_name: name,
     short_name: getField(formData, "short_name") || null,
     product_code: productCode,
     sku: getField(formData, "sku") || null,
     barcode: getField(formData, "barcode") || null,
+    description: getField(formData, "description") || null,
+    category_id: categoryId,
+    brand_id: brandId,
     manufacturer: getField(formData, "manufacturer") || null,
-    product_type: "stock_item",
-    track_inventory: true,
+    base_unit_id: baseUnitId,
+    purchase_unit_id: purchaseUnitId,
+    selling_unit_id: sellingUnitId,
+    product_type: productType,
+    track_inventory: tracksStock,
+    track_batches: getBoolean(formData, "track_batches"),
+    track_expiry: getBoolean(formData, "track_expiry"),
+    track_serial_numbers: getBoolean(formData, "track_serial_numbers"),
+    track_returnable_packaging: getBoolean(formData, "track_returnable_packaging"),
+    tax_category: getField(formData, "tax_category") || null,
     vat_status: getField(formData, "vat_treatment") || "VAT_STD",
+    standard_cost: getNumber(formData, "standard_cost") || getNumber(formData, "opening_stock_unit_cost") || null,
     default_selling_price_placeholder: getNumber(formData, "selling_price_placeholder"),
+    minimum_selling_price: getNumber(formData, "minimum_selling_price") || null,
     reorder_level: getNumber(formData, "reorder_level"),
+    reorder_quantity: getNumber(formData, "reorder_quantity"),
+    maximum_stock_level: getNumber(formData, "maximum_stock_level") || null,
+    lead_time_days: getNumber(formData, "lead_time_days") || null,
+    shelf_life_days: getNumber(formData, "shelf_life_days") || null,
+    weight: getNumber(formData, "weight") || null,
+    volume: getNumber(formData, "volume") || null,
+    image_path: getField(formData, "product_image_url") || null,
+    active: getField(formData, "product_status") !== "Inactive",
     created_by: userId,
-  });
+  })
+    .select("id")
+    .single();
+  if (productError || !product) throw new Error(productError?.message ?? "Could not save the product.");
+
+  const packFactor = getNumber(formData, "units_per_purchase_pack");
+  if (purchaseUnitId && baseUnitId && packFactor > 0 && purchaseUnitId !== baseUnitId) {
+    const { error: packError } = await admin.from("product_pack_units").insert({
+      business_id: businessId,
+      product_id: product.id,
+      from_unit_id: purchaseUnitId,
+      to_unit_id: baseUnitId,
+      conversion_factor: packFactor,
+      purchase_enabled: true,
+      sales_enabled: false,
+      barcode: getField(formData, "pack_barcode") || null,
+      sku: getField(formData, "pack_sku") || null,
+      default_purchase_unit: true,
+      default_sales_unit: false,
+      created_by: userId,
+    });
+    if (packError) throw new Error(packError.message);
+  }
+
+  const openingQuantity = getNumber(formData, "opening_stock_quantity");
+  if (getBoolean(formData, "create_opening_stock_after_save") && tracksStock && openingQuantity > 0) {
+    const unitCost = getNumber(formData, "opening_stock_unit_cost") || getNumber(formData, "standard_cost");
+    const { error: movementError } = await admin.from("stock_movements").insert({
+      business_id: businessId,
+      branch_id: branchId,
+      warehouse_id: warehouseId,
+      product_id: product.id,
+      movement_type: "opening_stock",
+      direction: "in",
+      quantity_base: openingQuantity,
+      display_quantity: openingQuantity,
+      unit_conversion_factor: 1,
+      unit_cost: unitCost,
+      total_cost: unitCost * openingQuantity,
+      reference_document_type: "product_setup",
+      reference_document_id: product.id,
+      reference_number: productCode,
+      reason: "Opening stock created from product setup",
+      created_by: userId,
+    });
+    if (movementError) throw new Error(movementError.message);
+  }
 }
 
 export async function completeProcessAction(formData: FormData) {
