@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" role="img" aria-labelledby="title desc">
+  <title id="title">Cymereg Enterprises logo</title>
+  <desc id="desc">Blue Cymereg Enterprises monogram used as a fallback tenant logo.</desc>
+  <rect width="320" height="180" rx="18" fill="#ffffff"/>
+  <g transform="translate(36 30)">
+    <ellipse cx="72" cy="60" rx="68" ry="48" fill="none" stroke="#174A8B" stroke-width="18"/>
+    <path d="M70 31h74v18H85v22h52v18H85v22h62v18H70z" fill="#174A8B"/>
+    <path d="M58 60c0-36 31-64 77-64 28 0 52 9 69 25l-25 25c-11-10-25-15-44-15-27 0-45 12-45 29s18 29 45 29c19 0 34-5 45-15l25 25c-17 16-41 25-69 25-46 0-78-28-78-64z" fill="#ffffff" opacity=".12"/>
+  </g>
+  <text x="165" y="78" fill="#174A8B" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="700">Cymereg</text>
+  <text x="166" y="108" fill="#526174" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="700">Enterprises</text>
+</svg>

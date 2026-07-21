@@ -36,8 +36,26 @@ type Report = {
   auditTrail: string[];
 };
 
-type DocumentFamily = "sales" | "purchase" | "inventory" | "distribution" | "finance" | "tax" | "statement" | "report";
-type DocumentTemplate = "receipt" | "invoice" | "grn" | "purchaseOrder" | "statement" | "delivery" | "note" | "report" | "finance" | "inventory";
+type DocumentTemplate =
+  | "salesReceipt"
+  | "taxInvoice"
+  | "simplifiedInvoice"
+  | "proformaInvoice"
+  | "quotation"
+  | "grn"
+  | "purchaseOrder"
+  | "statement"
+  | "deliveryNote"
+  | "dispatchNote"
+  | "creditNote"
+  | "debitNote"
+  | "cashbook"
+  | "paymentVoucher"
+  | "stockMovement"
+  | "inventoryReport"
+  | "executiveReport"
+  | "finance"
+  | "report";
 
 const brand = {
   navy: "#071A2B",
@@ -156,34 +174,33 @@ function initials(name: string) {
     .join("") || "ST";
 }
 
-function familyFor(report: Pick<Report, "moduleName" | "processName">): DocumentFamily {
-  const value = `${report.moduleName} ${report.processName}`.toLowerCase();
-  if (value.includes("statement") || value.includes("aging") || value.includes("ageing")) return "statement";
-  if (value.includes("purchase") || value.includes("supplier") || value.includes("received") || value.includes("grn") || value.includes("rfq")) return "purchase";
-  if (value.includes("inventory") || value.includes("stock") || value.includes("warehouse") || value.includes("bin card")) return "inventory";
-  if (value.includes("delivery") || value.includes("dispatch") || value.includes("route") || value.includes("vehicle") || value.includes("driver")) return "distribution";
-  if (value.includes("cash") || value.includes("ledger") || value.includes("voucher") || value.includes("balance sheet") || value.includes("income statement")) return "finance";
-  if (value.includes("vat") || value.includes("tax") || value.includes("etims") || value.includes("withholding")) return "tax";
-  if (value.includes("report") || value.includes("brief") || value.includes("dashboard") || value.includes("action plan")) return "report";
-  return "sales";
-}
-
 function titleFor(report: Report) {
   return report.processName.toUpperCase();
 }
 
 function templateFor(report: Report): DocumentTemplate {
   const value = `${report.moduleName} ${report.processName}`.toLowerCase();
-  if (value.includes("sales receipt") || value.includes("receipt voucher") || value.includes("payment receipt")) return "receipt";
+  if (value.includes("sales receipt") || value.includes("payment receipt")) return "salesReceipt";
+  if (value.includes("receipt voucher")) return "paymentVoucher";
+  if (value.includes("tax invoice") || value.includes("etims")) return "taxInvoice";
+  if (value.includes("simplified invoice")) return "simplifiedInvoice";
+  if (value.includes("proforma")) return "proformaInvoice";
+  if (value.includes("quotation") && !value.includes("request for quotation")) return "quotation";
   if (value.includes("goods received") || value.includes("grn")) return "grn";
   if (value.includes("purchase order") || value.includes("purchase requisition") || value.includes("request for quotation") || value.includes("rfq")) return "purchaseOrder";
   if (value.includes("statement") || value.includes("aging") || value.includes("ageing")) return "statement";
-  if (value.includes("delivery") || value.includes("dispatch") || value.includes("route") || value.includes("vehicle") || value.includes("pod")) return "delivery";
-  if (value.includes("credit note") || value.includes("debit note") || value.includes("return note")) return "note";
-  if (value.includes("cashbook") || value.includes("ledger") || value.includes("voucher") || value.includes("trial balance") || value.includes("balance sheet") || value.includes("income statement")) return "finance";
-  if (value.includes("stock") || value.includes("inventory") || value.includes("bin card") || value.includes("valuation") || value.includes("reorder")) return "inventory";
-  if (value.includes("report") || value.includes("brief") || value.includes("dashboard") || value.includes("action plan")) return "report";
-  return "invoice";
+  if (value.includes("dispatch") || value.includes("route") || value.includes("vehicle") || value.includes("pod")) return "dispatchNote";
+  if (value.includes("delivery")) return "deliveryNote";
+  if (value.includes("credit note") || value.includes("return note")) return "creditNote";
+  if (value.includes("debit note")) return "debitNote";
+  if (value.includes("cashbook")) return "cashbook";
+  if (value.includes("payment voucher") || value.includes("journal voucher") || value.includes("bank deposit")) return "paymentVoucher";
+  if (value.includes("stock movement") || value.includes("stock card") || value.includes("bin card")) return "stockMovement";
+  if (value.includes("stock") || value.includes("inventory") || value.includes("valuation") || value.includes("reorder")) return "inventoryReport";
+  if (value.includes("executive") || value.includes("business health") || value.includes("morning business brief") || value.includes("action plan") || value.includes("kpi")) return "executiveReport";
+  if (value.includes("ledger") || value.includes("trial balance") || value.includes("balance sheet") || value.includes("income statement")) return "finance";
+  if (value.includes("report") || value.includes("brief") || value.includes("dashboard")) return "report";
+  return "taxInvoice";
 }
 
 async function tenantContext() {
@@ -423,26 +440,71 @@ function logoHtml(report: Report) {
   if (report.businessLogoPath) {
     return `<img src="${htmlEscape(report.businessLogoPath)}" alt="${htmlEscape(report.businessName)} logo" />`;
   }
+  if (report.businessName.toLowerCase().includes("cymereg")) {
+    return `<img src="/cymereg-enterprises-logo.svg" alt="Cymereg Enterprises logo" />`;
+  }
   return `<span>${htmlEscape(initials(report.businessName))}</span>`;
 }
 
+function documentStyle(template: DocumentTemplate) {
+  const styles: Record<DocumentTemplate, { accent: string; soft: string; label: string; table: string }> = {
+    salesReceipt: { accent: "#0F766E", soft: "#ECFDF5", label: "Cash and payment acknowledgement", table: "Received items and tender details" },
+    taxInvoice: { accent: "#1455D9", soft: "#EEF6FF", label: "Tax invoice and customer billing", table: "Taxable supply line items" },
+    simplifiedInvoice: { accent: "#2563EB", soft: "#EFF6FF", label: "Fast counter invoice", table: "Simplified sale details" },
+    proformaInvoice: { accent: "#B45309", soft: "#FFF7ED", label: "Proforma and pre-sale commitment", table: "Quoted goods and services" },
+    quotation: { accent: "#7C3AED", soft: "#F5F3FF", label: "Customer quote and validity", table: "Quoted items" },
+    grn: { accent: "#15803D", soft: "#F0FDF4", label: "Receiving control and stock posting", table: "Goods received inspection" },
+    purchaseOrder: { accent: "#1D4ED8", soft: "#EFF6FF", label: "Supplier buying instruction", table: "Ordered items" },
+    statement: { accent: "#334155", soft: "#F8FAFC", label: "Account movement and balance", table: "Statement ledger" },
+    deliveryNote: { accent: "#0891B2", soft: "#ECFEFF", label: "Delivery confirmation", table: "Delivered goods" },
+    dispatchNote: { accent: "#0E7490", soft: "#ECFEFF", label: "Route and vehicle dispatch", table: "Dispatch manifest" },
+    creditNote: { accent: "#BE123C", soft: "#FFF1F2", label: "Customer credit adjustment", table: "Credited items" },
+    debitNote: { accent: "#9333EA", soft: "#FAF5FF", label: "Debit adjustment", table: "Debited items" },
+    cashbook: { accent: "#047857", soft: "#ECFDF5", label: "Cash, bank and M-Pesa movement", table: "Cashbook entries" },
+    paymentVoucher: { accent: "#92400E", soft: "#FFFBEB", label: "Payment authorization", table: "Voucher allocation" },
+    stockMovement: { accent: "#0369A1", soft: "#F0F9FF", label: "SKU movement trace", table: "Stock card movement" },
+    inventoryReport: { accent: "#475569", soft: "#F8FAFC", label: "Inventory control report", table: "Inventory analysis" },
+    executiveReport: { accent: "#071A2B", soft: "#EEF6FF", label: "Owner insight and action pack", table: "Business intelligence" },
+    finance: { accent: "#0F172A", soft: "#F8FAFC", label: "Financial control schedule", table: "Account schedule" },
+    report: { accent: "#1455D9", soft: "#F8FBFF", label: "Management report", table: "Report detail" },
+  };
+  return styles[template];
+}
+
 function lineHeaders(report: Report) {
-  const family = familyFor(report);
-  if (family === "purchase") return ["#", "Description", "Item Code", "Units", "Qty Received", "Qty Returned", "Total Qty"];
-  if (family === "distribution") return ["#", "Description", "Vehicle/Route", "Ordered", "Delivered", "Outstanding"];
-  if (family === "statement") return ["Date", "Reference", "Description", "Debit", "Credit", "Balance"];
-  if (family === "report") return ["Area", "Metric", "Current", "Risk", "Recommended Action"];
-  if (family === "inventory") return ["SKU", "Description", "Unit", "Qty", "Warehouse", "Batch", "Status"];
+  const template = templateFor(report);
+  if (template === "salesReceipt") return ["Code", "Particulars", "Qty", "Rate", "Tax", "Amount"];
+  if (template === "grn") return ["S/No", "Description", "Item Code", "Units", "Qty Ordered", "Qty Received", "Qty Returned", "Condition"];
+  if (template === "purchaseOrder") return ["S/No", "Product Code", "Product Name", "Qty", "Unit", "Rate", "Tax", "Amount"];
+  if (template === "deliveryNote") return ["Item #", "Description", "Ordered", "Delivered", "Outstanding", "Condition"];
+  if (template === "dispatchNote") return ["Route/Vehicle", "Item", "Loaded", "Delivered", "Returned", "Driver Notes"];
+  if (template === "statement") return ["Date", "Document", "Description", "Debit", "Credit", "Running Balance"];
+  if (template === "creditNote" || template === "debitNote") return ["Description", "Qty", "Unit Price", "Tax", "Adjustment", "Reason"];
+  if (template === "cashbook") return ["Date", "Reference", "Account", "Money In", "Money Out", "Tax", "Balance"];
+  if (template === "paymentVoucher") return ["Account", "Description", "Mode", "Reference", "Amount", "Approval"];
+  if (template === "stockMovement") return ["Date", "SKU", "Description", "In", "Out", "Balance", "Warehouse", "Batch"];
+  if (template === "inventoryReport") return ["SKU", "Description", "On Hand", "Reorder", "Value", "Warehouse", "Action"];
+  if (template === "executiveReport" || template === "report") return ["Area", "Metric", "Current", "Risk", "Recommended Action"];
+  if (template === "quotation" || template === "proformaInvoice") return ["#", "Item & Description", "Qty", "Rate", "Discount", "Validity", "Amount"];
+  if (template === "simplifiedInvoice") return ["Item", "Qty", "Unit Price", "Tax", "Total"];
   return ["Code", "Description", "Qty", "Unit Price", "Tax", "Amount"];
 }
 
 function lineCells(report: Report, line: ReportLine, index: number) {
-  const family = familyFor(report);
-  if (family === "purchase") return [String(index + 1), line.description, line.sku, line.unit, String(line.quantity), "0", String(line.quantity)];
-  if (family === "distribution") return [String(index + 1), line.description, line.warehouse, String(line.quantity), String(line.quantity), "0"];
-  if (family === "statement") return [report.transaction["Document date"], line.sku, line.description, money(line.lineTotal), money(line.discount), money(line.lineTotal)];
-  if (family === "report") return [line.sku, line.description, money(line.lineTotal), line.taxRate, line.notes];
-  if (family === "inventory") return [line.sku, line.description, line.unit, String(line.quantity), line.warehouse, line.batch, line.notes];
+  const template = templateFor(report);
+  if (template === "grn") return [String(index + 1), line.description, line.sku, line.unit, String(line.quantity), String(line.quantity), "0", "Accepted"];
+  if (template === "purchaseOrder") return [String(index + 1), line.sku, line.description, String(line.quantity), line.unit, money(line.unitPrice), line.taxRate, money(line.lineTotal)];
+  if (template === "deliveryNote") return [line.sku, line.description, String(line.quantity), String(line.quantity), "0", "Good condition"];
+  if (template === "dispatchNote") return [line.warehouse, line.description, String(line.quantity), String(line.quantity), "0", line.notes];
+  if (template === "statement") return [report.transaction["Document date"], line.sku, line.description, money(line.lineTotal), money(line.discount), money(line.lineTotal)];
+  if (template === "creditNote" || template === "debitNote") return [line.description, String(line.quantity), money(line.unitPrice), money(line.taxAmount), money(line.lineTotal), "Approved adjustment"];
+  if (template === "cashbook") return [report.transaction["Document date"], line.sku, line.warehouse, money(line.lineTotal), money(line.discount), money(line.taxAmount), money(line.lineTotal)];
+  if (template === "paymentVoucher") return [line.warehouse, line.description, "Bank / Cash / M-Pesa", line.sku, money(line.lineTotal), "Pending approval"];
+  if (template === "stockMovement") return [report.transaction["Document date"], line.sku, line.description, String(line.quantity), "0", String(line.quantity), line.warehouse, line.batch];
+  if (template === "inventoryReport") return [line.sku, line.description, String(line.quantity), "Review", money(line.lineTotal), line.warehouse, line.notes];
+  if (template === "executiveReport" || template === "report") return [line.sku, line.description, money(line.lineTotal), line.taxRate, line.notes];
+  if (template === "quotation" || template === "proformaInvoice") return [String(index + 1), line.description, String(line.quantity), money(line.unitPrice), money(line.discount), "7 days", money(line.lineTotal)];
+  if (template === "simplifiedInvoice") return [line.description, String(line.quantity), money(line.unitPrice), money(line.taxAmount), money(line.lineTotal)];
   return [line.sku, line.description, String(line.quantity), money(line.unitPrice), money(line.taxAmount), money(line.lineTotal)];
 }
 
@@ -459,7 +521,7 @@ function documentMetaCard(report: Report) {
 
 function templateIntro(report: Report, transactionRows: string) {
   const template = templateFor(report);
-  if (template === "receipt") {
+  if (template === "salesReceipt") {
     return `
       <section class="receipt-confirmation">
         <div>
@@ -475,6 +537,24 @@ function templateIntro(report: Report, transactionRows: string) {
       <section class="two-column">
         <article class="box"><h3>Received From</h3><p class="party">${htmlEscape(report.partyName)}</p><p>${htmlEscape(report.transaction.Branch)}</p></article>
         <article class="box"><h3>Payment Details</h3>${documentMetaCard(report)}</article>
+      </section>
+    `;
+  }
+
+  if (template === "taxInvoice" || template === "simplifiedInvoice" || template === "proformaInvoice" || template === "quotation") {
+    const label =
+      template === "quotation"
+        ? "Quotation Validity"
+        : template === "proformaInvoice"
+          ? "Proforma Terms"
+          : template === "simplifiedInvoice"
+            ? "Counter Sale Details"
+            : "Tax Details";
+    return `
+      <section class="invoice-grid">
+        <article class="box"><h3>Bill To</h3><p class="party">${htmlEscape(report.partyName)}</p><p>Customer account, PIN, address and credit terms.</p></article>
+        <article class="box"><h3>Supply / Delivery</h3><p class="party">${htmlEscape(report.transaction.Branch)}</p><p>Place of supply, route and fulfilment details.</p></article>
+        <article class="box"><h3>${label}</h3>${documentMetaCard(report)}<p class="small-note">${template === "taxInvoice" ? "Includes taxable value, VAT and eTIMS-ready references where applicable." : "Prepared before posting final tax and receipt records."}</p></article>
       </section>
     `;
   }
@@ -513,26 +593,26 @@ function templateIntro(report: Report, transactionRows: string) {
     `;
   }
 
-  if (template === "delivery") {
+  if (template === "deliveryNote" || template === "dispatchNote") {
     return `
       <section class="two-column">
-        <article class="box"><h3>Deliver To</h3><p class="party">${htmlEscape(report.partyName)}</p><p>Delivery address, route, vehicle and driver details.</p></article>
-        <article class="box"><h3>Dispatch Details</h3>${documentMetaCard(report)}<p class="small-note">Customer signs proof of delivery after quantities are verified.</p></article>
+        <article class="box"><h3>${template === "dispatchNote" ? "Route / Vehicle" : "Deliver To"}</h3><p class="party">${htmlEscape(report.partyName)}</p><p>Delivery address, route, vehicle and driver details.</p></article>
+        <article class="box"><h3>${template === "dispatchNote" ? "Dispatch Control" : "Delivery Details"}</h3>${documentMetaCard(report)}<p class="small-note">Customer signs proof of delivery after quantities and condition are verified.</p></article>
       </section>
     `;
   }
 
-  if (template === "note") {
+  if (template === "creditNote" || template === "debitNote") {
     return `
       <section class="two-column">
-        <article class="box"><h3>Adjustment To</h3><p class="party">${htmlEscape(report.partyName)}</p><p>Original invoice, return reason and approval evidence.</p></article>
-        <article class="box"><h3>Credit / Debit Details</h3>${documentMetaCard(report)}</article>
+        <article class="box"><h3>${template === "creditNote" ? "Credit To" : "Debit To"}</h3><p class="party">${htmlEscape(report.partyName)}</p><p>Original invoice, return reason and approval evidence.</p></article>
+        <article class="box"><h3>${template === "creditNote" ? "Credit Note Details" : "Debit Note Details"}</h3>${documentMetaCard(report)}</article>
       </section>
       <section class="reason-box"><h3>Reason for Adjustment</h3><p>Price correction, returned goods, damaged stock, tax adjustment or approved commercial correction.</p></section>
     `;
   }
 
-  if (template === "finance") {
+  if (template === "finance" || template === "cashbook" || template === "paymentVoucher") {
     return `
       <section class="statement-summary finance-summary">
         <div><span>Money In</span><strong>${htmlEscape(report.totals.Total)}</strong></div>
@@ -544,11 +624,11 @@ function templateIntro(report: Report, transactionRows: string) {
     `;
   }
 
-  if (template === "report" || template === "inventory") {
+  if (template === "report" || template === "inventoryReport" || template === "stockMovement" || template === "executiveReport") {
     return `
       <section class="report-kpis">
-        <div><span>Business Health</span><strong>Ready</strong><small>Monitor daily</small></div>
-        <div><span>Cash / Value</span><strong>${htmlEscape(report.totals.Total)}</strong><small>From posted records</small></div>
+        <div><span>${template === "stockMovement" ? "Stock Control" : "Business Health"}</span><strong>Ready</strong><small>Monitor daily</small></div>
+        <div><span>${template === "stockMovement" || template === "inventoryReport" ? "Inventory Value" : "Cash / Value"}</span><strong>${htmlEscape(report.totals.Total)}</strong><small>From posted records</small></div>
         <div><span>Risk</span><strong>Review</strong><small>Owner action required where flagged</small></div>
       </section>
       <section class="reason-box"><h3>Management Commentary</h3><p>This report explains the result, the risk, the owner action and the supporting transaction detail.</p></section>
@@ -566,7 +646,7 @@ function templateIntro(report: Report, transactionRows: string) {
 
 function templateOutro(report: Report) {
   const template = templateFor(report);
-  if (template === "receipt") {
+  if (template === "salesReceipt") {
     return `<section class="receipt-slip"><div><strong>Sales Receipt Slip</strong><span>${htmlEscape(report.partyName)}</span></div><div><strong>Amount Received</strong><span>${htmlEscape(report.totals.Total)}</span></div></section>`;
   }
   if (template === "grn") {
@@ -575,8 +655,11 @@ function templateOutro(report: Report) {
   if (template === "purchaseOrder") {
     return `<section class="terms"><h3>Terms and Conditions</h3><ol><li>Quote this purchase order number on delivery notes and invoices.</li><li>Deliver only approved quantities and product specifications.</li><li>Price, tax and delivery variances require written approval.</li></ol></section>`;
   }
-  if (template === "delivery") {
+  if (template === "deliveryNote" || template === "dispatchNote") {
     return `<section class="pod-box"><strong>Proof of Delivery</strong><span>Name, signature, date, condition of goods and delivery exceptions.</span></section>`;
+  }
+  if (template === "cashbook" || template === "paymentVoucher" || template === "finance") {
+    return `<section class="signatures grn-signatures"><div class="signature">Prepared by cashier</div><div class="signature">Checked by accountant</div><div class="signature">Approved by owner</div></section>`;
   }
   return "";
 }
@@ -600,6 +683,7 @@ function htmlDocument(report: Report, print = false) {
     .map(([label, value]) => `<div><dt>${htmlEscape(label)}</dt><dd>${htmlEscape(value)}</dd></div>`)
     .join("");
   const template = templateFor(report);
+  const style = documentStyle(template);
 
   return `<!doctype html>
 <html>
@@ -612,7 +696,7 @@ function htmlDocument(report: Report, print = false) {
     body { margin: 0; background: #eaf1f8; color: ${brand.navy}; font-family: Arial, Helvetica, sans-serif; }
     .page { position: relative; max-width: 920px; min-height: 1180px; margin: ${print ? "0" : "24px auto"}; overflow: hidden; background: white; padding: 42px 48px 36px; box-shadow: ${print ? "none" : "0 18px 60px rgba(7,26,43,.12)"}; }
     .watermark { position: absolute; inset: 28% auto auto 14%; color: rgba(24,183,201,.06); font-size: 150px; font-weight: 900; letter-spacing: 8px; transform: rotate(-18deg); pointer-events: none; white-space: nowrap; }
-    .accent { position: absolute; left: 0; right: 0; top: 0; height: 10px; background: linear-gradient(90deg, ${brand.blue}, ${brand.cyan}, ${brand.gold}); }
+    .accent { position: absolute; left: 0; right: 0; top: 0; height: 10px; background: linear-gradient(90deg, var(--doc-accent), ${brand.cyan}, ${brand.gold}); }
     header { position: relative; display: grid; grid-template-columns: 1fr 270px; gap: 32px; align-items: start; }
     .tenant { display: grid; grid-template-columns: 82px 1fr; gap: 16px; align-items: center; }
     .tenant-logo { display: grid; width: 82px; height: 82px; place-items: center; overflow: hidden; border-radius: 14px; border: 1px solid ${brand.border}; background: ${brand.soft}; color: ${brand.blue}; font-size: 24px; font-weight: 800; }
@@ -622,8 +706,8 @@ function htmlDocument(report: Report, print = false) {
     .doc-title { text-align: right; }
     .doc-title h2 { margin: 0; color: ${brand.navy}; font-size: 30px; font-weight: 800; letter-spacing: 0; }
     .doc-title .ref { margin-top: 8px; color: ${brand.muted}; font-size: 12px; }
-    .solva-mark { margin-top: 18px; display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; border: 1px solid ${brand.border}; padding: 8px 12px; color: ${brand.blue}; font-size: 12px; font-weight: 800; }
-    .solva-dot { display: grid; width: 24px; height: 24px; place-items: center; border-radius: 8px; background: ${brand.navy}; color: ${brand.cyan}; }
+    .solva-mark { margin-top: 18px; display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; border: 1px solid ${brand.border}; padding: 7px 11px; color: var(--doc-accent); font-size: 12px; font-weight: 800; }
+    .solva-mark img { width: 92px; height: 24px; object-fit: contain; }
     .intro { position: relative; margin-top: 34px; }
     .two-column, .grn-grid, .invoice-grid, .po-grid { display: grid; gap: 18px; }
     .two-column, .grn-grid { grid-template-columns: 1fr 1fr; }
@@ -632,10 +716,10 @@ function htmlDocument(report: Report, print = false) {
     .box { border: 1px solid ${brand.border}; border-radius: 8px; background: white; padding: 14px; min-height: 116px; }
     .box.dark { background: ${brand.navy}; color: white; }
     .box.dark h3, .box.dark p { color: white; }
-    .box h3, .reason-box h3, .terms h3 { margin: 0 0 10px; color: ${brand.blue}; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
+    .box h3, .reason-box h3, .terms h3 { margin: 0 0 10px; color: var(--doc-accent); font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
     .party { margin: 0 0 6px; font-size: 14px; font-weight: 800; color: ${brand.navy}; }
     .small-note { margin-top: 10px; color: ${brand.muted}; font-size: 11px; line-height: 1.5; }
-    .panel h3 { margin: 0 0 10px; color: ${brand.blue}; font-size: 13px; text-transform: uppercase; letter-spacing: .03em; }
+    .panel h3 { margin: 0 0 10px; color: var(--doc-accent); font-size: 13px; text-transform: uppercase; letter-spacing: .03em; }
     .details { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 18px; }
     .meta-card { display: grid; gap: 7px; margin: 0; }
     .meta-card div { display: grid; grid-template-columns: 90px 1fr; gap: 8px; border-bottom: 1px solid ${brand.border}; padding-bottom: 5px; }
@@ -647,7 +731,7 @@ function htmlDocument(report: Report, print = false) {
     .receipt-number { border-left: 1px solid rgba(255,255,255,.25); padding-left: 18px; }
     .statement-summary, .report-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 18px; }
     .report-kpis { grid-template-columns: repeat(3, 1fr); }
-    .statement-summary div, .report-kpis div { border-radius: 8px; background: ${brand.surface}; padding: 13px; }
+    .statement-summary div, .report-kpis div { border-radius: 8px; background: var(--doc-soft); padding: 13px; }
     .statement-summary span, .report-kpis span { display: block; color: ${brand.muted}; font-size: 11px; font-weight: 800; text-transform: uppercase; }
     .statement-summary strong, .report-kpis strong { display: block; margin-top: 5px; color: ${brand.blue}; font-size: 17px; }
     .report-kpis small { display: block; margin-top: 4px; color: ${brand.slate}; line-height: 1.4; }
@@ -657,7 +741,8 @@ function htmlDocument(report: Report, print = false) {
     .terms ol { margin: 0; padding-left: 18px; color: ${brand.slate}; font-size: 11px; line-height: 1.6; }
     .table-wrap { position: relative; margin-top: 26px; border: 1px solid ${brand.border}; border-radius: 10px; overflow: hidden; }
     table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-    th { background: ${brand.navy}; color: white; font-size: 11px; padding: 10px 8px; text-align: left; }
+    caption { padding: 10px 12px; background: #f8fafc; color: ${brand.slate}; font-size: 11px; font-weight: 800; text-align: left; text-transform: uppercase; }
+    th { background: var(--doc-accent); color: white; font-size: 11px; padding: 10px 8px; text-align: left; }
     td { border-top: 1px solid ${brand.border}; color: ${brand.navy}; font-size: 11px; line-height: 1.35; padding: 10px 8px; vertical-align: top; word-break: break-word; }
     tbody tr:nth-child(even) td { background: #f4f8fc; }
     .num { text-align: right; }
@@ -675,7 +760,7 @@ function htmlDocument(report: Report, print = false) {
   </style>
 </head>
 <body>
-  <main class="page template-${template}">
+  <main class="page template-${template}" style="--doc-accent: ${style.accent}; --doc-soft: ${style.soft};">
     <div class="accent"></div>
     <div class="watermark">SOLVA TRADE</div>
     <header>
@@ -691,9 +776,10 @@ function htmlDocument(report: Report, print = false) {
       </section>
       <section class="doc-title">
         <h2>${htmlEscape(titleFor(report))}</h2>
+        <p class="ref">${htmlEscape(style.label)}</p>
         <p class="ref"># ${htmlEscape(report.transaction["Reference number"])}</p>
         <p class="ref">Generated ${htmlEscape(report.generatedAt)}</p>
-        <div class="solva-mark"><span class="solva-dot">S</span> Solva Trade</div>
+        <div class="solva-mark"><img src="/solva-trade-logo.png" alt="Solva Trade" /></div>
       </section>
     </header>
 
@@ -701,6 +787,7 @@ function htmlDocument(report: Report, print = false) {
 
     <section class="table-wrap">
       <table>
+        <caption>${htmlEscape(style.table)}</caption>
         <thead><tr>${headers.map((header) => `<th>${htmlEscape(header)}</th>`).join("")}</tr></thead>
         <tbody>${lineRows}</tbody>
       </table>
@@ -776,7 +863,16 @@ function renderPdfTable(canvas: PdfCanvas, report: Report, startY: number) {
   const headers = lineHeaders(report);
   const rows = report.lines.map((line, index) => lineCells(report, line, index));
   const x = 48;
-  const widths = headers.length === 5 ? [78, 178, 78, 70, 126] : headers.length === 7 ? [28, 176, 70, 54, 70, 70, 62] : [62, 220, 44, 76, 58, 70];
+  const widths =
+    headers.length === 8
+      ? [30, 96, 72, 46, 58, 68, 66, 94]
+      : headers.length === 7
+        ? [54, 116, 74, 62, 62, 72, 90]
+        : headers.length === 6
+          ? [62, 178, 54, 78, 70, 88]
+          : headers.length === 5
+            ? [156, 58, 92, 78, 146]
+            : [62, 220, 44, 76, 58, 70];
   let y = startY;
 
   canvas.rect(x, y - 18, 530, 22, "navy");
@@ -807,6 +903,7 @@ function pdf(report: Report) {
   const canvas = new PdfCanvas();
   const title = titleFor(report);
   const template = templateFor(report);
+  const style = documentStyle(template);
 
   canvas.rect(0, 0, 612, 842, "white");
   canvas.rect(0, 832, 612, 10, "blue");
@@ -824,14 +921,15 @@ function pdf(report: Report) {
   if (report.kraPin) canvas.text(`KRA PIN: ${report.kraPin}`, 134, 726, 8.5, "slate");
 
   canvas.wrap(title, 372, 790, 190, 20, "navy", true, 22);
-  canvas.text(`# ${report.transaction["Reference number"]}`, 374, 742, 9, "muted");
-  canvas.text(`Generated: ${report.generatedAt}`, 374, 728, 8, "muted");
+  canvas.text(style.label, 374, 750, 8, "blue", true);
+  canvas.text(`# ${report.transaction["Reference number"]}`, 374, 736, 9, "muted");
+  canvas.text(`Generated: ${report.generatedAt}`, 374, 722, 8, "muted");
   canvas.rect(374, 698, 126, 26, "navy");
   canvas.text("S", 386, 706, 13, "cyan", true);
   canvas.text("Solva Trade", 406, 706, 10, "white", true);
 
   let tableStart = 572;
-  if (template === "receipt") {
+  if (template === "salesReceipt") {
     canvas.rect(48, 634, 516, 66, "navy");
     canvas.text("AMOUNT RECEIVED", 66, 674, 9, "cyan", true);
     canvas.text(report.totals.Total, 66, 650, 24, "white", true);
@@ -861,15 +959,33 @@ function pdf(report: Report) {
     canvas.text(report.transaction["Reference number"], 406, 662, 8.5, "navy", true);
     canvas.text("ORDER ITEMS", 48, 614, 11, "blue", true);
     tableStart = 592;
-  } else if (template === "statement" || template === "finance" || template === "report" || template === "inventory") {
-    const labels = template === "report" ? ["Health", "Cash / Value", "Risk"] : ["Opening", "Movements", "Closing"];
+  } else if (template === "deliveryNote" || template === "dispatchNote") {
+    canvas.rect(48, 628, 250, 72, "soft");
+    canvas.rect(314, 628, 250, 72, "soft");
+    canvas.text(template === "dispatchNote" ? "ROUTE / VEHICLE" : "DELIVER TO", 62, 676, 9, "blue", true);
+    canvas.wrap(report.partyName, 62, 656, 210, 12, "navy", true);
+    canvas.text(template === "dispatchNote" ? "DISPATCH CONTROL" : "DELIVERY DETAILS", 328, 676, 9, "blue", true);
+    canvas.text(`Doc No: ${report.transaction["Reference number"]}`, 328, 656, 8.5, "navy");
+    canvas.text(`Branch: ${report.transaction.Branch}`, 328, 642, 8.5, "navy");
+    canvas.text(style.table.toUpperCase(), 48, 594, 11, "blue", true);
+  } else if (template === "statement" || template === "finance" || template === "cashbook" || template === "paymentVoucher" || template === "report" || template === "inventoryReport" || template === "stockMovement" || template === "executiveReport") {
+    const labels = template === "report" || template === "executiveReport" ? ["Health", "Cash / Value", "Risk"] : ["Opening", "Movements", "Closing"];
     [48, 224, 400].forEach((x, index) => {
       canvas.rect(x, 642, 164, 58, "surface");
       canvas.text(labels[index], x + 14, 676, 8, "blue", true);
       canvas.text(index === 0 ? "Ready" : index === 1 ? report.totals.Total : report.totals["Balance due"], x + 14, 654, 16, "navy", true);
     });
-    canvas.text(template === "report" ? "INSIGHT DETAILS" : "LEDGER DETAILS", 48, 614, 11, "blue", true);
+    canvas.text(style.table.toUpperCase(), 48, 614, 11, "blue", true);
     tableStart = 592;
+  } else if (template === "creditNote" || template === "debitNote") {
+    canvas.rect(48, 628, 250, 72, "soft");
+    canvas.rect(314, 628, 250, 72, "soft");
+    canvas.text(template === "creditNote" ? "CREDIT TO" : "DEBIT TO", 62, 676, 9, "blue", true);
+    canvas.wrap(report.partyName, 62, 656, 210, 12, "navy", true);
+    canvas.text("ADJUSTMENT DETAILS", 328, 676, 9, "blue", true);
+    canvas.text(`Original Ref: ${report.transaction["Reference number"]}`, 328, 656, 8.5, "navy");
+    canvas.text("Reason: approved adjustment", 328, 642, 8.5, "navy");
+    canvas.text(style.table.toUpperCase(), 48, 594, 11, "blue", true);
   } else {
     canvas.rect(48, 628, 160, 72, "soft");
     canvas.rect(224, 628, 160, 72, "soft");
@@ -881,7 +997,7 @@ function pdf(report: Report) {
     canvas.text("INVOICE DETAILS", 414, 676, 9, "blue", true);
     canvas.text(`Date: ${report.transaction["Document date"]}`, 414, 656, 8.5, "navy");
     canvas.text(`Due: ${report.transaction["Due or action date"]}`, 414, 642, 8.5, "navy");
-    canvas.text("INVOICE LINE ITEMS", 48, 594, 11, "blue", true);
+    canvas.text(style.table.toUpperCase(), 48, 594, 11, "blue", true);
   }
 
   const yAfterTable = renderPdfTable(canvas, report, tableStart);
@@ -907,7 +1023,7 @@ function pdf(report: Report) {
   canvas.text("Prepared by", 82, 82, 8, "slate");
   canvas.text("Reviewed by", 278, 82, 8, "slate");
   canvas.text(template === "grn" ? "Received into stock by" : "Received / Approved by", 452, 82, 8, "slate");
-  if (template === "receipt") {
+  if (template === "salesReceipt") {
     canvas.rect(48, 116, 516, 30, "soft");
     canvas.text("SALES RECEIPT SLIP", 62, 130, 8, "blue", true);
     canvas.text(`Amount received: ${report.totals.Total}`, 394, 130, 8, "navy", true);
