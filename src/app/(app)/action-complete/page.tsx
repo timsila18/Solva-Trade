@@ -13,8 +13,16 @@ export default async function ActionCompletePage({
   const intent = String(params.intent ?? "Completed");
   const returnTo = String(params.returnTo ?? "/dashboard");
   const next = String(params.next ?? "Open Dashboard");
-  const party = String(params.customer ?? params.company ?? params.user ?? "");
-  const exportBase = `/api/exports?module=${encodeURIComponent(moduleName)}&process=${encodeURIComponent(documentName)}${party ? `&party=${encodeURIComponent(party)}` : ""}`;
+  const exportParams = new URLSearchParams({
+    module: moduleName,
+    process: documentName,
+  });
+  Object.entries(params).forEach(([key, value]) => {
+    if (!key.startsWith("field_") && !key.startsWith("label_")) return;
+    const resolvedValue = Array.isArray(value) ? value[0] : value;
+    if (typeof resolvedValue === "string" && resolvedValue.trim()) exportParams.append(key, resolvedValue);
+  });
+  const exportBase = `/api/exports?${exportParams.toString()}`;
   const exportHref = `${exportBase}&format=csv`;
   const excelHref = `${exportBase}&format=excel`;
   const pdfHref = `${exportBase}&format=pdf`;

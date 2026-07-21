@@ -46,24 +46,47 @@ function fieldType(label: string): "date" | "number" | "text" {
 }
 
 function parseNumber(value: string | undefined) {
-  const number = Number(value || 0);
+  const number = Number(String(value || "").replace(/,/g, ""));
   return Number.isFinite(number) ? number : 0;
 }
 
+function defaultVatRate(values: Record<string, string>) {
+  const rateValue = values.vat_rate ?? values.tax_rate;
+  if (typeof rateValue === "string" && rateValue.trim() !== "") return parseNumber(rateValue);
+  const code = `${values.tax_code ?? values.vat_code ?? ""}`.toLowerCase();
+  if (/(zero|exempt|out|none|no tax|0)/.test(code)) return 0;
+  return 16;
+}
+
+function calculationBase(values: Record<string, string>) {
+  const quantity = parseNumber(values.quantity ?? values.ordered_quantity ?? values.received_quantity ?? values.return_quantity ?? values.quantity_sold);
+  const price = parseNumber(values.price ?? values.unit_price ?? values.unit_cost ?? values.rate);
+  const explicitSubtotal = parseNumber(values.subtotal);
+  const explicitAmountBeforeTax = parseNumber(values.amount_before_tax ?? values.taxable_amount ?? values.net_amount);
+  return explicitSubtotal || explicitAmountBeforeTax || (quantity && price ? quantity * price : 0);
+}
+
 export function WorkflowFormFields({ fields }: { fields: string[] }) {
-  const keys = useMemo(() => fields.map((field) => ({ label: field, key: fieldKey(field), type: fieldType(field) })), [fields]);
+  const normalizedFields = useMemo(() => {
+    const hasTax = fields.some((field) => fieldKey(field) === "tax");
+    const hasRate = fields.some((field) => ["tax_rate", "vat_rate", "tax_code", "vat_code"].includes(fieldKey(field)));
+    return hasTax && !hasRate ? [...fields.slice(0, fields.findIndex((field) => fieldKey(field) === "tax")), "VAT rate", ...fields.slice(fields.findIndex((field) => fieldKey(field) === "tax"))] : fields;
+  }, [fields]);
+  const keys = useMemo(() => normalizedFields.map((field) => ({ label: field, key: fieldKey(field), type: fieldType(field) })), [normalizedFields]);
   const [values, setValues] = useState<Record<string, string>>({});
 
   const calculated = useMemo(() => {
-    const quantity = parseNumber(values.quantity ?? values.ordered_quantity ?? values.received_quantity ?? values.return_quantity);
-    const price = parseNumber(values.price ?? values.unit_price ?? values.unit_cost);
-    const explicitSubtotal = parseNumber(values.subtotal);
+    const base = calculationBase(values);
+    const taxRate = defaultVatRate(values);
     const discount = parseNumber(values.discount);
-    const tax = parseNumber(values.tax);
-    const base = explicitSubtotal || (quantity && price ? quantity * price : 0);
+    const manualTax = parseNumber(values.tax);
+    const shouldAutoTax = base > 0 && !values.tax;
+    const tax = shouldAutoTax ? Math.max(0, (base - discount) * (taxRate / 100)) : manualTax;
     const total = Math.max(0, base - discount + tax);
     return {
-      subtotal: base ? String(base.toFixed(2)) : values.subtotal ?? "",
+      tax_rate: taxRate ? String(taxRate.toFixed(2)) : values.tax_rate ?? "",
+      vat_rate: taxRate ? String(taxRate.toFixed(2)) : values.vat_rate ?? "",
+      tax: tax ? String(tax.toFixed(2)) : values.tax ?? "",
       total: total ? String(total.toFixed(2)) : values.total ?? "",
       balance_due: total ? String(total.toFixed(2)) : values.balance_due ?? "",
       new_quantity:
@@ -78,8 +101,13 @@ export function WorkflowFormFields({ fields }: { fields: string[] }) {
       {keys.map(({ label, key, type }) => {
         const resolvedType =
           type === "text" && /^(subtotal|total|tax|amount|balance_due|discount|price|unit_price|quantity)$/.test(key) ? "number" : type;
-        const isCalculated = key in calculated && calculated[key as keyof typeof calculated] !== "";
-        const value = isCalculated ? calculated[key as keyof typeof calculated] : values[key] ?? "";
+        const isCalculated =
+          ["tax", "total", "balance_due", "new_quantity"].includes(key) &&
+          key in calculated &&
+          calculated[key as keyof typeof calculated] !== "";
+        const defaultCalculatedValue =
+          ["vat_rate", "tax_rate"].includes(key) && !values[key] ? calculated[key as keyof typeof calculated] : undefined;
+        const value = isCalculated ? calculated[key as keyof typeof calculated] : defaultCalculatedValue ?? values[key] ?? "";
         return (
           <label key={label} className="text-sm font-medium">
             {label}

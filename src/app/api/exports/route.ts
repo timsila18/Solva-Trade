@@ -171,6 +171,7 @@ function reportLineFromFields(fields: Record<string, { label: string; value: str
   const unitPrice = parseAmount(fieldValue(fields, ["unit_price", "price", "unit_cost", "rate"], "0"));
   const discount = parseAmount(fieldValue(fields, ["discount"], "0"));
   const taxAmount = parseAmount(fieldValue(fields, ["tax", "withholding_tax"], "0"));
+  const taxRate = parseAmount(fieldValue(fields, ["vat_rate", "tax_rate"], "0"));
   const explicitTotal = parseAmount(fieldValue(fields, ["total", "amount", "balance_due", "amount_received", "amount_sent"], "0"));
   const subtotal = parseAmount(fieldValue(fields, ["subtotal"], "0")) || quantity * unitPrice;
   const lineTotal = explicitTotal || Math.max(0, subtotal - discount + taxAmount);
@@ -182,7 +183,7 @@ function reportLineFromFields(fields: Record<string, { label: string; value: str
       quantity: quantity || 1,
       unitPrice,
       discount,
-      taxRate: taxAmount ? "Tax entered" : "No tax entered",
+      taxRate: taxRate ? `${taxRate.toFixed(2)}%` : taxAmount ? "Tax entered" : "No tax entered",
       taxAmount,
       lineTotal,
       warehouse: fieldValue(fields, ["warehouse", "branch", "route", "account"], "Selected workspace"),
@@ -860,9 +861,9 @@ function valueForHeader(report: Report, line: ReportLine, index: number, header:
   if (h.includes("returned") || h.includes("rejected") || h.includes("variance") || h.includes("backorder")) return "0";
   if (h.includes("outstanding") || h.includes("running balance") || h === "balance" || h.includes("closing")) return money(line.lineTotal);
   if (h.includes("qty") || h.includes("quantity") || h.includes("on hand")) return String(line.quantity);
+  if (h.includes("tax") || h.includes("vat")) return h.includes("rate") ? line.taxRate : money(line.taxAmount);
   if (h.includes("price") || h.includes("rate") || h.includes("cost")) return money(line.unitPrice);
   if (h.includes("discount")) return money(line.discount);
-  if (h.includes("tax") || h.includes("vat")) return h.includes("rate") ? line.taxRate : money(line.taxAmount);
   if (h.includes("money out") || h.includes("credit") || h.includes("paid")) return money(line.discount);
   if (h.includes("money in") || h.includes("debit") || h.includes("gross") || h.includes("amount") || h.includes("value") || h.includes("total") || h.includes("cash") || h.includes("sales") || h.includes("purchases") || h.includes("outstanding")) return money(line.lineTotal);
   if (h.includes("warehouse") || h.includes("branch") || h.includes("route") || h.includes("vehicle") || h.includes("location") || h.includes("from") || h.includes("to") || h.includes("bin")) return line.warehouse;
