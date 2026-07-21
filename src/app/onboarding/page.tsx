@@ -1,5 +1,4 @@
 import Image from "next/image";
-import { completeOnboardingAction } from "./actions";
 
 const steps = [
   "Welcome",
@@ -26,7 +25,13 @@ const activities = [
   "Other",
 ];
 
-export default function OnboardingPage() {
+export default async function OnboardingPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string; message?: string }>;
+}) {
+  const params = await searchParams;
+
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-8">
       <section className="mx-auto max-w-6xl">
@@ -45,6 +50,16 @@ export default function OnboardingPage() {
         <p className="mt-3 max-w-2xl text-slate-600">
           Save and resume setup while creating the Owner membership and active business context.
         </p>
+        {params.error ? (
+          <p className="mt-5 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+            {params.error}
+          </p>
+        ) : null}
+        {params.message ? (
+          <p className="mt-5 rounded-md border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm font-medium text-cyan-800">
+            {params.message}
+          </p>
+        ) : null}
         <div className="mt-8 grid gap-6 lg:grid-cols-[260px_1fr]">
           <aside className="rounded-lg border border-slate-200 bg-white p-4">
             {steps.map((step, index) => (
@@ -56,7 +71,7 @@ export default function OnboardingPage() {
               </div>
             ))}
           </aside>
-          <form action={completeOnboardingAction} className="rounded-lg border border-slate-200 bg-white p-5">
+          <form action="/api/onboarding/complete" method="post" className="rounded-lg border border-slate-200 bg-white p-5">
             <h2 className="text-xl font-semibold">Business details and setup</h2>
             <div className="mt-5 grid gap-4 md:grid-cols-2">
               {[
