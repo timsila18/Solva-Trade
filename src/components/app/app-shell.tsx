@@ -13,8 +13,8 @@ import {
 import { QuickCommand } from "@/components/app/quick-command";
 import { navigationItems } from "@/lib/navigation";
 import { canPerformAction } from "@/lib/permissions";
-import { demoBranches, demoBusinesses, demoMemberships } from "@/lib/mock-data";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import type { CoreRole, Membership } from "@/lib/types";
 
 const priorityNav = [
   "Dashboard",
@@ -32,13 +32,88 @@ const quickCreate = [
   { label: "Receive Stock", href: "/purchases/goods-received", icon: PackagePlus },
 ];
 
+function roleName(role: CoreRole | string | null | undefined) {
+  if (role === "owner") return "Business Owner";
+  if (role === "manager") return "Manager";
+  if (role === "staff") return "Staff";
+  return "User";
+}
+
 export async function AppShell({ children }: { children: React.ReactNode }) {
   const supabase = await createSupabaseServerClient();
   const { data: userData } = await supabase.auth.getUser();
   const user = userData.user;
-  const business = demoBusinesses[0];
-  const branch = demoBranches[0];
-  const membership = demoMemberships[0];
+  const activeBusinessId = typeof user?.app_metadata?.active_business_id === "string" ? user.app_metadata.active_business_id : null;
+  const metadataRole = typeof user?.app_metadata?.business_role === "string" ? user.app_metadata.business_role : "owner";
+  const metadataBusinessName =
+    typeof user?.app_metadata?.business_name === "string" ? user.app_metadata.business_name : "your business";
+  const metadataBusinessShortName =
+    typeof user?.app_metadata?.business_short_name === "string" ? user.app_metadata.business_short_name : metadataBusinessName;
+  const userName =
+    typeof user?.user_metadata?.full_name === "string"
+      ? user.user_metadata.full_name
+      : user?.email?.split("@")[0] ?? "Guest user";
+
+  let business = {
+    id: activeBusinessId ?? "local-business",
+    tradingName: metadataBusinessName,
+    legalName: metadataBusinessName,
+  };
+  let branch = { name: "Main workspace", code: "HQ" };
+  let membership: Membership = {
+    userId: user?.id ?? "guest-user",
+    businessId: business.id,
+    role: metadataRole === "manager" || metadataRole === "staff" ? metadataRole : "owner",
+    permissions: [],
+    active: Boolean(user),
+    branchAccessMode: "all",
+  };
+
+  if (user) {
+    const { data: membershipData } = await supabase
+      .from("business_memberships")
+      .select("business_id, role, permission_overrides, branch_access_mode, default_branch_id, branch_ids")
+      .eq("active", true)
+      .limit(1)
+      .maybeSingle();
+
+    if (membershipData?.business_id) {
+      membership = {
+        userId: user.id,
+        businessId: membershipData.business_id,
+        role: membershipData.role,
+        permissions: Array.isArray(membershipData.permission_overrides) ? membershipData.permission_overrides : [],
+        active: true,
+        branchAccessMode: membershipData.branch_access_mode ?? "all",
+        defaultBranchId: membershipData.default_branch_id ?? undefined,
+        branchIds: membershipData.branch_ids ?? [],
+      };
+
+      const { data: businessData } = await supabase
+        .from("businesses")
+        .select("id, trading_name, legal_name")
+        .eq("id", membershipData.business_id)
+        .maybeSingle();
+      if (businessData) {
+        business = {
+          id: businessData.id,
+          tradingName: businessData.trading_name,
+          legalName: businessData.legal_name,
+        };
+      }
+
+      const { data: branchData } = await supabase
+        .from("branches")
+        .select("branch_name, branch_code")
+        .eq("business_id", membershipData.business_id)
+        .eq("active", true)
+        .order("is_default", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (branchData) branch = { name: branchData.branch_name, code: branchData.branch_code };
+    }
+  }
+
   const nav = navigationItems.filter(
     (item) => !item.permission || canPerformAction(membership, item.permission),
   );
@@ -111,10 +186,14 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
                 />
               </Link>
               <div>
-                <p className="text-xs font-medium text-slate-500">You are working in</p>
+                <p className="text-xs font-medium text-slate-500">
+                  {user ? `Logged in as ${userName} ${roleName(membership.role)} ${metadataBusinessShortName}` : "You are working in"}
+                </p>
                 <p className="text-sm font-semibold text-slate-950">
                   {business.tradingName}
-                  <span className="ml-2 rounded bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">Owner</span>
+                  <span className="ml-2 rounded bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
+                    {roleName(membership.role)}
+                  </span>
                 </p>
               </div>
             </div>

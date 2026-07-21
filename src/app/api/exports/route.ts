@@ -112,7 +112,7 @@ function buildReport(searchParams: URLSearchParams): Report {
     searchParams.get("company") ??
     searchParams.get("user") ??
     searchParams.get("party") ??
-    "Aquamist Nairobi Distributor";
+    "Your company";
   const generatedBy = searchParams.get("generatedBy") ?? searchParams.get("printer") ?? "Solva Trade User";
   const subtotal = defaultLines.reduce((sum, line) => sum + line.quantity * line.unitPrice - line.discount, 0);
   const tax = defaultLines.reduce((sum, line) => sum + line.taxAmount, 0);
@@ -155,6 +155,7 @@ function buildReport(searchParams: URLSearchParams): Report {
       "Includes header details, line details, totals, approval state, and audit context.",
       "CSV output protects spreadsheet users from formula injection.",
       "Live deployments replace these template rows with posted tenant records.",
+      "Company logos are included when the business profile provides one; Solva Trade branding and watermark remain on every report.",
     ],
   };
 }

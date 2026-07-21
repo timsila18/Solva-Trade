@@ -18,6 +18,7 @@ const onboardingSchema = z.object({
   financial_year_start_month: z.coerce.number().int().min(1).max(12),
   stock_costing_method: z.enum(["weighted_average", "fifo"]),
   primary_brand_color: z.string().trim().optional(),
+  logo_path: z.string().trim().optional(),
 });
 
 function cleanOptional(value: string | undefined) {
@@ -43,6 +44,7 @@ export async function POST(request: NextRequest) {
     financial_year_start_month: formData.get("financial_year_start_month") || "1",
     stock_costing_method: formData.get("stock_costing_method") || "weighted_average",
     primary_brand_color: formData.get("primary_brand_color"),
+    logo_path: formData.get("logo_path"),
   });
 
   if (!values.success) {
@@ -79,9 +81,10 @@ export async function POST(request: NextRequest) {
     return redirectWithError(request, "/onboarding", "We could not check your workspace access. Please try again.");
   }
 
-  const { primary_brand_color, ...businessValues } = values.data;
+  const { primary_brand_color, logo_path, ...businessValues } = values.data;
   const payload = {
     ...businessValues,
+    logo_path: cleanOptional(logo_path),
     phone: cleanOptional(businessValues.phone),
     email: cleanOptional(businessValues.email),
     physical_address: cleanOptional(businessValues.physical_address),
@@ -92,7 +95,11 @@ export async function POST(request: NextRequest) {
     onboarding_status: "complete",
     lifecycle_status: "trial",
     onboarding_owner_id: user.id,
-    default_document_theme: { primaryBrandColor: primary_brand_color },
+    default_document_theme: {
+      primaryBrandColor: primary_brand_color,
+      logoPath: cleanOptional(logo_path),
+      solvaWatermark: true,
+    },
     created_by: user.id,
     updated_at: new Date().toISOString(),
   };

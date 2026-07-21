@@ -83,6 +83,7 @@ export default async function OnboardingPage({
                 ["County", "county"],
                 ["KRA PIN", "kra_pin"],
                 ["Primary brand colour", "primary_brand_color"],
+                ["Company logo URL or uploaded path (optional)", "logo_path"],
               ].map(([field, name]) => (
                 <label key={field} className="text-sm font-medium">
                   {field}
