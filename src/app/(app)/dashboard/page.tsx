@@ -88,6 +88,14 @@ export default async function DashboardPage() {
 
   return (
     <div className="pb-24">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+        <DashboardTile label="Today sales" value="KES 0" caption="No sale posted yet" icon={ShoppingCart} tone="blue" />
+        <DashboardTile label="Cash collected" value="KES 0" caption="Receipts appear here" icon={Banknote} tone="green" />
+        <DashboardTile label="Customers owing" value="KES 0" caption="Follow-up list is clean" icon={CreditCard} tone="gold" />
+        <DashboardTile label="Active customers" value="0" caption="Create the first customer" icon={Users} tone="cyan" />
+        <DashboardTile label="Stock alerts" value="0" caption="Receive stock to monitor" icon={PackagePlus} tone="rose" />
+      </section>
+
       <PageHero
         eyebrow={`${greeting()} ${userName}`}
         title={`${businessName} is ready for today.`}
@@ -174,14 +182,6 @@ export default async function DashboardPage() {
             </Link>
           </div>
         ))}
-      </section>
-
-      <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-        <DashboardTile label="Today sales" value="KES 0" caption="No sale posted yet" icon={ShoppingCart} tone="blue" />
-        <DashboardTile label="Cash collected" value="KES 0" caption="Receipts appear here" icon={Banknote} tone="green" />
-        <DashboardTile label="Customers owing" value="KES 0" caption="Follow-up list is clean" icon={CreditCard} tone="gold" />
-        <DashboardTile label="Active customers" value="0" caption="Create the first customer" icon={Users} tone="cyan" />
-        <DashboardTile label="Stock alerts" value="0" caption="Receive stock to monitor" icon={PackagePlus} tone="rose" />
       </section>
 
       <section className="mt-6 grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
