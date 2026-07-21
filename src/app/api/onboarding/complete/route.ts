@@ -18,11 +18,36 @@ const onboardingSchema = z.object({
   financial_year_start_month: z.coerce.number().int().min(1).max(12),
   stock_costing_method: z.enum(["weighted_average", "fifo"]),
   primary_brand_color: z.string().trim().optional(),
-  logo_path: z.string().trim().min(2),
 });
 
 function cleanOptional(value: string | undefined) {
   return value && value.length > 0 ? value : null;
+}
+
+async function uploadRequiredLogo(db: ReturnType<typeof createSupabaseAdminClient>, userId: string, file: FormDataEntryValue | null) {
+  if (!(file instanceof File) || file.size === 0) {
+    return { path: null, error: "Upload your company logo before finishing onboarding." };
+  }
+
+  const allowedTypes = new Set(["image/png", "image/jpeg", "image/webp", "image/svg+xml"]);
+  if (!allowedTypes.has(file.type)) {
+    return { path: null, error: "Upload a PNG, JPG, WEBP or SVG company logo." };
+  }
+
+  if (file.size > 2 * 1024 * 1024) {
+    return { path: null, error: "Use a company logo smaller than 2MB." };
+  }
+
+  const extension = file.name.split(".").pop()?.toLowerCase().replace(/[^a-z0-9]/g, "") || "png";
+  const storagePath = `logos/${userId}/${Date.now()}-${crypto.randomUUID()}.${extension}`;
+  const { error } = await db.storage.from("business-assets").upload(storagePath, file, {
+    cacheControl: "3600",
+    contentType: file.type,
+    upsert: true,
+  });
+
+  if (error) return { path: null, error: "We could not upload your company logo. Please try again." };
+  return { path: storagePath, error: null };
 }
 
 export async function POST(request: NextRequest) {
@@ -44,7 +69,6 @@ export async function POST(request: NextRequest) {
     financial_year_start_month: formData.get("financial_year_start_month") || "1",
     stock_costing_method: formData.get("stock_costing_method") || "weighted_average",
     primary_brand_color: formData.get("primary_brand_color"),
-    logo_path: formData.get("logo_path"),
   });
 
   if (!values.success) {
@@ -59,6 +83,15 @@ export async function POST(request: NextRequest) {
   }
   const db = admin ?? supabase;
   const user = userData.user;
+  if (!admin) {
+    return redirectWithError(request, "/onboarding", "Logo upload needs secure storage configuration. Please try again shortly.");
+  }
+
+  const logoUpload = await uploadRequiredLogo(admin, user.id, formData.get("logo_file"));
+  if (logoUpload.error || !logoUpload.path) {
+    return redirectWithError(request, "/onboarding", logoUpload.error ?? "Upload your company logo before finishing onboarding.");
+  }
+
   if (admin) {
     await admin.from("profiles").upsert({
       id: user.id,
@@ -81,10 +114,10 @@ export async function POST(request: NextRequest) {
     return redirectWithError(request, "/onboarding", "We could not check your workspace access. Please try again.");
   }
 
-  const { primary_brand_color, logo_path, ...businessValues } = values.data;
+  const { primary_brand_color, ...businessValues } = values.data;
   const payload = {
     ...businessValues,
-    logo_path,
+    logo_path: logoUpload.path,
     phone: cleanOptional(businessValues.phone),
     email: cleanOptional(businessValues.email),
     physical_address: cleanOptional(businessValues.physical_address),
@@ -97,7 +130,7 @@ export async function POST(request: NextRequest) {
     onboarding_owner_id: user.id,
     default_document_theme: {
       primaryBrandColor: primary_brand_color,
-      logoPath: logo_path,
+      logoPath: logoUpload.path,
       solvaWatermark: true,
     },
     created_by: user.id,

@@ -57,6 +57,18 @@ type DocumentTemplate =
   | "finance"
   | "report";
 
+type DocumentBlueprint = {
+  accent: string;
+  soft: string;
+  label: string;
+  table: string;
+  intro: [string, string, string][];
+  headers: string[];
+  signatures: string[];
+  footerNote: string;
+  emphasis: "receipt" | "invoice" | "operations" | "ledger" | "report" | "control";
+};
+
 const brand = {
   navy: "#071A2B",
   blue: "#1455D9",
@@ -116,6 +128,15 @@ function generatedAt() {
   return new Intl.DateTimeFormat("en-KE", {
     dateStyle: "medium",
     timeStyle: "medium",
+    timeZone: "Africa/Nairobi",
+  }).format(new Date());
+}
+
+function todayIsoDate() {
+  return new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
     timeZone: "Africa/Nairobi",
   }).format(new Date());
 }
@@ -182,6 +203,332 @@ function initials(name: string) {
 
 function titleFor(report: Report) {
   return report.processName.toUpperCase();
+}
+
+const documentBlueprints: Record<string, DocumentBlueprint> = {
+  "Quotation": {
+    accent: "#7C3AED",
+    soft: "#F5F3FF",
+    label: "Commercial offer before sale",
+    table: "Quoted goods, validity and commercial terms",
+    intro: [
+      ["Quote To", "Customer, contact person, delivery town and PIN where available.", "party"],
+      ["Validity", "Quote date, valid-until date, currency and price-hold terms.", "meta"],
+      ["Acceptance", "Customer signature, approved discount and conversion to sales order.", "note"],
+    ],
+    headers: ["#", "Item & Description", "Qty", "Unit", "Quoted Rate", "Discount", "VAT", "Line Total"],
+    signatures: ["Prepared by", "Accepted by customer", "Approved by"],
+    footerNote: "This quotation is not a tax invoice and is valid only within the stated period.",
+    emphasis: "invoice",
+  },
+  "Proforma Invoice": {
+    accent: "#B45309",
+    soft: "#FFF7ED",
+    label: "Prepayment and supply request",
+    table: "Proforma items and advance amount requested",
+    intro: [
+      ["Bill To", "Customer details and intended place of supply.", "party"],
+      ["Proforma Terms", "Reference, proforma date, expiry date and payment instructions.", "meta"],
+      ["Conversion", "Convert to tax invoice only after acceptance or payment.", "note"],
+    ],
+    headers: ["#", "Item & Description", "Qty", "Rate", "Tax Basis", "Advance Due", "Amount"],
+    signatures: ["Prepared by", "Customer acceptance", "Finance review"],
+    footerNote: "A proforma invoice is a request for payment and not a tax document until converted.",
+    emphasis: "invoice",
+  },
+  "Tax Invoice": {
+    accent: "#1455D9",
+    soft: "#EEF6FF",
+    label: "Taxable sale document",
+    table: "Taxable supply line items",
+    intro: [
+      ["Bill To", "Customer name, address, PIN and account terms.", "party"],
+      ["Tax Details", "Invoice number, invoice date, due date and eTIMS reference where applicable.", "meta"],
+      ["Supply Details", "Branch, route, delivery note and place of supply.", "note"],
+    ],
+    headers: ["Code", "Description", "Qty", "Unit Price", "Discount", "VAT Rate", "VAT Amount", "Amount"],
+    signatures: ["Prepared by", "Checked by", "Customer / recipient"],
+    footerNote: "Tax invoice values should reconcile to sales ledger, VAT output and customer balance.",
+    emphasis: "invoice",
+  },
+  "Simplified Invoice": {
+    accent: "#2563EB",
+    soft: "#EFF6FF",
+    label: "Fast counter-sale invoice",
+    table: "Simplified sale details",
+    intro: [
+      ["Sold To", "Walk-in or customer account details.", "party"],
+      ["Counter Sale", "Invoice date, receipt status, cashier and payment method.", "meta"],
+      ["Tax Summary", "Gross, VAT and net value for daily reconciliation.", "note"],
+    ],
+    headers: ["Item", "Qty", "Unit Price", "VAT", "Line Total"],
+    signatures: ["Cashier", "Customer", "Supervisor"],
+    footerNote: "Designed for quick sales while keeping taxable value and payment evidence clear.",
+    emphasis: "invoice",
+  },
+  "Credit Note": {
+    accent: "#BE123C",
+    soft: "#FFF1F2",
+    label: "Customer credit adjustment",
+    table: "Credited items and approved reason",
+    intro: [
+      ["Credit To", "Customer credited and original invoice reference.", "party"],
+      ["Credit Details", "Credit note number, date, tax treatment and approval state.", "meta"],
+      ["Reason", "Return, price correction, damaged goods or approved commercial adjustment.", "note"],
+    ],
+    headers: ["Original Ref", "Description", "Qty", "Unit Price", "Tax Credit", "Credit Amount", "Reason"],
+    signatures: ["Prepared by", "Approved by", "Customer acknowledged"],
+    footerNote: "Credit notes must link to the original invoice and remain auditable.",
+    emphasis: "control",
+  },
+  "Debit Note": {
+    accent: "#9333EA",
+    soft: "#FAF5FF",
+    label: "Additional amount due",
+    table: "Debited items and basis",
+    intro: [
+      ["Debit To", "Customer or supplier being debited.", "party"],
+      ["Debit Details", "Debit note number, date, source reference and due date.", "meta"],
+      ["Basis", "Short billing, additional charge, tax correction or stock adjustment.", "note"],
+    ],
+    headers: ["Source Ref", "Description", "Qty", "Unit Price", "Tax", "Debit Amount", "Reason"],
+    signatures: ["Prepared by", "Reviewed by", "Approved by"],
+    footerNote: "Debit notes must state the commercial reason and linked source document.",
+    emphasis: "control",
+  },
+  "Sales Receipt": {
+    accent: "#0F766E",
+    soft: "#ECFDF5",
+    label: "Payment acknowledgement",
+    table: "Received items and tender details",
+    intro: [
+      ["Received From", "Customer, payer name and account balance context.", "party"],
+      ["Payment Details", "Receipt number, payment date, mode, reference and cashier.", "meta"],
+      ["Allocation", "Invoice allocation, unallocated amount and balance due after payment.", "note"],
+    ],
+    headers: ["Code", "Particulars", "Qty", "Rate", "Tax", "Amount"],
+    signatures: ["Cashier", "Customer", "Supervisor"],
+    footerNote: "Thank you. Keep this receipt as payment evidence.",
+    emphasis: "receipt",
+  },
+  "Delivery Note": {
+    accent: "#0891B2",
+    soft: "#ECFEFF",
+    label: "Goods delivery confirmation",
+    table: "Ordered, delivered and outstanding quantities",
+    intro: [
+      ["Deliver To", "Customer delivery address and receiving contact.", "party"],
+      ["Delivery Details", "Delivery note number, order reference, route and dispatch date.", "meta"],
+      ["Condition", "Customer confirms quantities and records exceptions before signing.", "note"],
+    ],
+    headers: ["Item #", "Description", "Ordered", "Delivered", "Outstanding", "Condition"],
+    signatures: ["Delivered by", "Received by", "Checked by"],
+    footerNote: "Customer signature confirms goods were received in the stated condition.",
+    emphasis: "operations",
+  },
+  "Dispatch Note": {
+    accent: "#0E7490",
+    soft: "#ECFEFF",
+    label: "Dispatch control document",
+    table: "Dispatch load, route and vehicle details",
+    intro: [
+      ["Dispatch From", "Warehouse, route, vehicle and driver.", "meta"],
+      ["Dispatch To", "Customer, route stop or receiving branch.", "party"],
+      ["Control Checks", "Loading, seal, odometer, fuel and document pack confirmation.", "note"],
+    ],
+    headers: ["Route / Vehicle", "Item", "Loaded", "Delivered", "Returned", "Driver Notes"],
+    signatures: ["Loaded by", "Driver", "Dispatch supervisor"],
+    footerNote: "Dispatch notes support route accountability before proof of delivery is collected.",
+    emphasis: "operations",
+  },
+  "Customer Statement": {
+    accent: "#334155",
+    soft: "#F8FAFC",
+    label: "Customer account movement",
+    table: "Statement ledger",
+    intro: [
+      ["Account Holder", "Customer account, credit terms and contact details.", "party"],
+      ["Statement Period", "Opening balance, statement date range and currency.", "meta"],
+      ["Ageing Note", "Overdue balances should be followed up using collection priorities.", "note"],
+    ],
+    headers: ["Date", "Document", "Description", "Debit", "Credit", "Running Balance"],
+    signatures: ["Prepared by", "Accounts review", "Customer acknowledgement"],
+    footerNote: "Please report statement differences within the agreed credit-control period.",
+    emphasis: "ledger",
+  },
+  "Outstanding Balance Statement": {
+    accent: "#475569",
+    soft: "#F8FAFC",
+    label: "Balance follow-up document",
+    table: "Outstanding invoices and expected collections",
+    intro: [
+      ["Customer", "Debtor details, route and contact.", "party"],
+      ["Collection Summary", "Overdue amount, oldest invoice and expected payment date.", "meta"],
+      ["Follow Up", "Recommended collection action and responsible person.", "note"],
+    ],
+    headers: ["Invoice Date", "Invoice No.", "Due Date", "Age", "Original Amount", "Paid", "Outstanding"],
+    signatures: ["Prepared by", "Credit controller", "Customer response"],
+    footerNote: "Outstanding statements are for collection follow-up and customer reconciliation.",
+    emphasis: "ledger",
+  },
+  "Sales Order": {
+    accent: "#1D4ED8",
+    soft: "#EFF6FF",
+    label: "Approved customer demand",
+    table: "Ordered goods and fulfilment status",
+    intro: [
+      ["Order For", "Customer account, branch and delivery instructions.", "party"],
+      ["Order Details", "Sales order number, order date, delivery date and payment status.", "meta"],
+      ["Fulfilment", "Stock reservation, picking status and dispatch readiness.", "note"],
+    ],
+    headers: ["SKU", "Description", "Ordered", "Reserved", "Packed", "Backorder", "Amount"],
+    signatures: ["Created by", "Approved by", "Fulfilment check"],
+    footerNote: "Sales orders become invoices or delivery tasks only after approval and stock checks.",
+    emphasis: "operations",
+  },
+  "Sales Return Note": {
+    accent: "#BE123C",
+    soft: "#FFF1F2",
+    label: "Customer return control",
+    table: "Returned goods and credit decision",
+    intro: [
+      ["Returned By", "Customer, original invoice and delivery reference.", "party"],
+      ["Return Details", "Return number, return date, reason and stock disposition.", "meta"],
+      ["Inspection", "Accept, quarantine, write off or return to saleable stock.", "note"],
+    ],
+    headers: ["Original Ref", "Item", "Qty Returned", "Condition", "Disposition", "Credit Required", "Reason"],
+    signatures: ["Received by", "Inspected by", "Approved by"],
+    footerNote: "Return notes must be inspected before credit or stock movement is posted.",
+    emphasis: "control",
+  },
+};
+
+function blueprintFromTerms(report: Report): DocumentBlueprint {
+  const name = report.processName;
+  const value = `${report.moduleName} ${name}`.toLowerCase();
+  const base: DocumentBlueprint = {
+    accent: "#1455D9",
+    soft: "#F8FBFF",
+    label: "Business document",
+    table: "Document detail",
+    intro: [
+      ["Prepared For", "Business party, branch, period and operating context.", "party"],
+      ["Document Control", "Reference number, date, owner and status.", "meta"],
+      ["Purpose", "Clear record for review, filing, audit and action.", "note"],
+    ],
+    headers: ["Reference", "Description", "Quantity", "Rate", "Tax", "Amount"],
+    signatures: ["Prepared by", "Reviewed by", "Approved by"],
+    footerNote: "Generated by Solva Trade using tenant-scoped records and export controls.",
+    emphasis: "control",
+  };
+
+  if (value.includes("purchase requisition")) {
+    return { ...base, accent: "#7C3AED", soft: "#F5F3FF", label: "Internal purchase request", table: "Requested items and approval need", headers: ["Req #", "Requested Item", "Branch", "Needed By", "Qty", "Reason", "Approval"], signatures: ["Requested by", "Department head", "Purchasing approval"], footerNote: "Purchase requisitions authorise need, not supplier commitment.", emphasis: "control" };
+  }
+  if (value.includes("request for quotation") || value.includes("rfq")) {
+    return { ...base, accent: "#334155", soft: "#F8FAFC", label: "Supplier quote request", table: "Requested specifications and supplier response", headers: ["Line", "Specification", "Qty", "Required Date", "Supplier Price", "Lead Time", "Remarks"], signatures: ["Prepared by", "Supplier", "Procurement review"], footerNote: "RFQs collect supplier offers and do not create stock or payables.", emphasis: "invoice" };
+  }
+  if (value.includes("quotation comparison")) {
+    return { ...base, accent: "#0F766E", soft: "#ECFDF5", label: "Supplier selection worksheet", table: "Supplier quote comparison", headers: ["Item", "Supplier A", "Supplier B", "Supplier C", "Best Price", "Lead Time", "Recommendation"], signatures: ["Prepared by", "Reviewed by", "Selection approved"], footerNote: "Comparison should preserve the reason for choosing a supplier.", emphasis: "report" };
+  }
+  if (value.includes("purchase order")) {
+    return { ...base, accent: "#1D4ED8", soft: "#EFF6FF", label: "Supplier buying instruction", table: "Ordered items and commercial terms", headers: ["S/No", "Product Code", "Product Name", "Qty", "Unit", "Rate", "Tax", "Amount"], signatures: ["Requisitioner", "Authorised signatory", "Supplier acknowledgement"], footerNote: "Quote the purchase order number on all delivery notes and invoices.", emphasis: "invoice" };
+  }
+  if (value.includes("goods received") || value.includes("grn")) {
+    return { ...base, accent: "#15803D", soft: "#F0FDF4", label: "Receiving and inspection note", table: "Goods received inspection", headers: ["S/No", "Description", "Item Code", "Units", "Qty Ordered", "Qty Received", "Qty Returned", "Condition"], signatures: ["Prepared by", "Quality checked by", "Received into stock by"], footerNote: "GRNs update stock only after received quantities and exceptions are confirmed.", emphasis: "operations" };
+  }
+  if (value.includes("supplier delivery note")) {
+    return { ...base, accent: "#0891B2", soft: "#ECFEFF", label: "Supplier delivery evidence", table: "Supplier-delivered goods", headers: ["Supplier Ref", "Item", "Delivered Qty", "Accepted Qty", "Rejected Qty", "Batch", "Condition"], signatures: ["Supplier driver", "Receiving clerk", "Store supervisor"], footerNote: "Supplier delivery notes are matched to GRNs and purchase orders.", emphasis: "operations" };
+  }
+  if (value.includes("supplier invoice register")) {
+    return { ...base, accent: "#0F172A", soft: "#F8FAFC", label: "Supplier billing register", table: "Supplier invoice matching register", headers: ["Invoice Date", "Supplier Invoice", "PO", "GRN", "Tax", "Gross", "Match Status", "Exception"], signatures: ["Captured by", "Matched by", "Accounts approval"], footerNote: "Supplier invoices should be matched before creditor balances are posted.", emphasis: "ledger" };
+  }
+  if (value.includes("supplier statement") || value.includes("supplier aging") || value.includes("supplier ageing") || value.includes("supplier payment history")) {
+    return { ...base, accent: "#475569", soft: "#F8FAFC", label: "Supplier account reconciliation", table: "Supplier account ledger", headers: ["Date", "Document", "Description", "Debit", "Credit", "Running Balance", "Age"], signatures: ["Prepared by", "Supplier review", "Accounts approval"], footerNote: "Supplier balances reconcile bills, payments, debit notes and opening balances.", emphasis: "ledger" };
+  }
+  if (value.includes("purchase return")) {
+    return { ...base, accent: "#BE123C", soft: "#FFF1F2", label: "Supplier return note", table: "Returned goods and supplier credit tracking", headers: ["Source GRN", "Item", "Qty Returned", "Condition", "Reason", "Credit Expected", "Status"], signatures: ["Prepared by", "Supplier received", "Credit approved"], footerNote: "Purchase returns must link to supplier credit or replacement action.", emphasis: "control" };
+  }
+  if (value.includes("stock card")) {
+    return { ...base, accent: "#0369A1", soft: "#F0F9FF", label: "Product movement ledger", table: "Stock card by product", headers: ["Date", "Reference", "Movement Type", "In", "Out", "Balance", "Unit Cost", "Value"], signatures: ["Prepared by", "Stores review", "Inventory control"], footerNote: "Stock cards show product-level quantity and value movement history.", emphasis: "ledger" };
+  }
+  if (value.includes("bin card")) {
+    return { ...base, accent: "#0E7490", soft: "#ECFEFF", label: "Shelf/bin quantity card", table: "Bin-level movement control", headers: ["Date", "Reference", "Received", "Issued", "Balance", "Bin", "Checked By"], signatures: ["Storekeeper", "Checked by", "Supervisor"], footerNote: "Bin cards support physical stock checks at storage-location level.", emphasis: "operations" };
+  }
+  if (value.includes("stock movement")) {
+    return { ...base, accent: "#0369A1", soft: "#F0F9FF", label: "Inventory movement report", table: "Stock movement trace", headers: ["Date", "SKU", "Description", "In", "Out", "Balance", "Warehouse", "Batch"], signatures: ["Prepared by", "Reviewed by", "Inventory manager"], footerNote: "Stock movement reports trace every stock-in and stock-out event.", emphasis: "ledger" };
+  }
+  if (value.includes("adjustment")) {
+    return { ...base, accent: "#B45309", soft: "#FFF7ED", label: "Stock/ledger adjustment control", table: "Adjustment detail and approval trail", headers: ["Reference", "Item / Account", "Before", "Adjustment", "After", "Value Effect", "Reason"], signatures: ["Prepared by", "Investigated by", "Approved by"], footerNote: "Adjustments require reasons and approval because they alter balances.", emphasis: "control" };
+  }
+  if (value.includes("transfer")) {
+    return { ...base, accent: "#1D4ED8", soft: "#EFF6FF", label: "Transfer control note", table: "Transfer quantities and receiving confirmation", headers: ["Item", "From", "To", "Sent Qty", "Received Qty", "Variance", "Status"], signatures: ["Released by", "Transported by", "Received by"], footerNote: "Transfers remain open until the receiving location confirms quantities.", emphasis: "operations" };
+  }
+  if (value.includes("count sheet")) {
+    return { ...base, accent: "#334155", soft: "#F8FAFC", label: "Physical count worksheet", table: "Blind count entries", headers: ["SKU", "Description", "Bin", "System Qty", "Counted Qty", "Variance", "Counter"], signatures: ["Counted by", "Recounted by", "Approved by"], footerNote: "Physical count sheets support recounts and variance approval.", emphasis: "control" };
+  }
+  if (value.includes("damaged") || value.includes("expired")) {
+    return { ...base, accent: "#BE123C", soft: "#FFF1F2", label: "Exception stock report", table: "Damaged or expired stock detail", headers: ["SKU", "Description", "Batch", "Expiry", "Qty", "Value", "Action"], signatures: ["Reported by", "Inspected by", "Approved disposal"], footerNote: "Exception stock reports support quarantine, write-off and supplier-claim decisions.", emphasis: "control" };
+  }
+  if (value.includes("slow-moving") || value.includes("fast-moving") || value.includes("reorder") || value.includes("valuation") || value.includes("inventory opportunity")) {
+    return { ...base, accent: "#475569", soft: "#F8FAFC", label: "Inventory intelligence report", table: "Inventory performance and action list", headers: ["SKU", "Description", "On Hand", "Sales Velocity", "Value", "Risk", "Recommended Action"], signatures: ["Prepared by", "Inventory review", "Owner action"], footerNote: "Inventory intelligence reports guide reorder, pricing and clearance decisions.", emphasis: "report" };
+  }
+  if (value.includes("delivery manifest")) {
+    return { ...base, accent: "#0891B2", soft: "#ECFEFF", label: "Route delivery manifest", table: "Stops, invoices and delivery load", headers: ["Stop", "Customer", "Invoice", "Area", "Packages", "COD Due", "Delivery Status"], signatures: ["Dispatcher", "Driver", "Route supervisor"], footerNote: "Delivery manifests guide route execution and customer-stop accountability.", emphasis: "operations" };
+  }
+  if (value.includes("loading sheet")) {
+    return { ...base, accent: "#0E7490", soft: "#ECFEFF", label: "Vehicle loading control", table: "Vehicle load checklist", headers: ["SKU", "Description", "Batch", "Ordered", "Picked", "Loaded", "Variance"], signatures: ["Picker", "Loader", "Driver"], footerNote: "Loading sheets confirm stock moved from warehouse to vehicle.", emphasis: "operations" };
+  }
+  if (value.includes("route sheet")) {
+    return { ...base, accent: "#0369A1", soft: "#F0F9FF", label: "Driver route plan", table: "Route stops and instructions", headers: ["Stop", "Customer", "Location", "Contact", "Delivery Window", "Amount Due", "Instructions"], signatures: ["Planner", "Driver", "Supervisor"], footerNote: "Route sheets help drivers execute stops in the correct order.", emphasis: "operations" };
+  }
+  if (value.includes("proof of delivery") || value.includes("pod") || value.includes("delivery confirmation")) {
+    return { ...base, accent: "#0F766E", soft: "#ECFDF5", label: "Customer receipt of goods", table: "Proof and exception record", headers: ["Document", "Customer", "Delivered Qty", "Rejected Qty", "Condition", "Recipient", "Time"], signatures: ["Delivered by", "Received by", "Witness / stamp"], footerNote: "Proof of delivery confirms receipt and records disputes at the point of delivery.", emphasis: "operations" };
+  }
+  if (value.includes("driver") || value.includes("vehicle") || value.includes("route performance") || value.includes("fuel") || value.includes("maintenance") || value.includes("inspection") || value.includes("incident") || value.includes("operations")) {
+    return { ...base, accent: "#0F172A", soft: "#F8FAFC", label: "Field operations control", table: "Operations activity and accountability", headers: ["Date", "Route / Vehicle", "Driver", "Activity", "Quantity / Amount", "Exception", "Action"], signatures: ["Prepared by", "Driver", "Operations manager"], footerNote: "Operations documents preserve driver, vehicle and route accountability.", emphasis: "operations" };
+  }
+  if (value.includes("cashbook")) {
+    return { ...base, accent: "#047857", soft: "#ECFDF5", label: "Cash, bank and M-Pesa ledger", table: "Cashbook entries", headers: ["Date", "Reference", "Account", "Money In", "Money Out", "Tax", "Balance"], signatures: ["Prepared by", "Checked by", "Owner approval"], footerNote: "Cashbook reports reconcile receipts, payments and account balances.", emphasis: "ledger" };
+  }
+  if (value.includes("voucher")) {
+    return { ...base, accent: "#92400E", soft: "#FFFBEB", label: "Payment or journal authorization", table: "Voucher allocation and approval", headers: ["Voucher No.", "Account", "Payee / Source", "Mode", "Reference", "Amount", "Approval"], signatures: ["Prepared by", "Authorised by", "Paid / posted by"], footerNote: "Vouchers document who authorised, paid and posted the transaction.", emphasis: "control" };
+  }
+  if (value.includes("bank deposit")) {
+    return { ...base, accent: "#047857", soft: "#ECFDF5", label: "Banking slip record", table: "Deposit breakdown", headers: ["Date", "Account", "Cash", "Cheques", "M-Pesa", "Bank Ref", "Amount"], signatures: ["Prepared by", "Banked by", "Verified by"], footerNote: "Bank deposit slips support cash-to-bank reconciliation.", emphasis: "control" };
+  }
+  if (value.includes("reconciliation")) {
+    return { ...base, accent: "#334155", soft: "#F8FAFC", label: "Reconciliation worksheet", table: "Matched and unmatched differences", headers: ["Date", "Reference", "Book Amount", "Statement Amount", "Difference", "Status", "Action"], signatures: ["Prepared by", "Reviewed by", "Approved by"], footerNote: "Reconciliation reports explain every difference before balances are accepted.", emphasis: "ledger" };
+  }
+  if (value.includes("cash flow") || value.includes("income statement") || value.includes("profit") || value.includes("balance sheet") || value.includes("trial balance") || value.includes("ledger") || value.includes("budget") || value.includes("expense analysis")) {
+    return { ...base, accent: "#071A2B", soft: "#F8FAFC", label: "Financial statement", table: "Financial statement lines", headers: ["Account Code", "Account Name", "Opening", "Debit", "Credit", "Closing", "Variance"], signatures: ["Prepared by", "Accountant", "Owner / Director"], footerNote: "Financial statements should reconcile to posted ledger entries and approved periods.", emphasis: "ledger" };
+  }
+  if (value.includes("vat") || value.includes("withholding") || value.includes("tax")) {
+    return { ...base, accent: "#1455D9", soft: "#EEF6FF", label: "Tax compliance schedule", table: "Taxable values and filing evidence", headers: ["Tax Period", "Document", "PIN", "Taxable Value", "Tax Rate", "Tax Amount", "Filing Status"], signatures: ["Prepared by", "Tax review", "Authorised by"], footerNote: "Tax reports support statutory review and should be reconciled before submission.", emphasis: "control" };
+  }
+  if (value.includes("customer profile") || value.includes("supplier profile")) {
+    return { ...base, accent: "#1D4ED8", soft: "#EFF6FF", label: "Master-data profile", table: "Profile, contacts and account settings", headers: ["Field", "Value", "Status", "Verified By", "Updated On", "Risk", "Notes"], signatures: ["Prepared by", "Verified by", "Approved by"], footerNote: "Profiles preserve master-data, contacts, tax details and payment terms.", emphasis: "control" };
+  }
+  if (value.includes("customer") || value.includes("top customers")) {
+    return { ...base, accent: "#0F766E", soft: "#ECFDF5", label: "Customer intelligence", table: "Customer performance and follow-up", headers: ["Customer", "Sales", "Gross Profit", "Outstanding", "Last Purchase", "Risk", "Action"], signatures: ["Prepared by", "Sales review", "Owner action"], footerNote: "Customer reports show value, risk and recommended commercial action.", emphasis: "report" };
+  }
+  if (value.includes("supplier")) {
+    return { ...base, accent: "#92400E", soft: "#FFFBEB", label: "Supplier intelligence", table: "Supplier performance and payment history", headers: ["Supplier", "Purchases", "Outstanding", "Delivery Score", "Price Risk", "Last Payment", "Action"], signatures: ["Prepared by", "Procurement review", "Owner action"], footerNote: "Supplier reports support pricing, reliability and payment decisions.", emphasis: "report" };
+  }
+  if (value.includes("audit") || value.includes("activity") || value.includes("login") || value.includes("approval") || value.includes("data change")) {
+    return { ...base, accent: "#0F172A", soft: "#F8FAFC", label: "Audit and compliance evidence", table: "Event trail and control evidence", headers: ["Timestamp", "User", "Module", "Action", "Before", "After", "Evidence"], signatures: ["Generated by", "Reviewed by", "Compliance approval"], footerNote: "Audit reports are read-only evidence of user and system activity.", emphasis: "ledger" };
+  }
+  if (value.includes("subscription") || value.includes("renewal") || value.includes("usage") || value.includes("license") || value.includes("business setup")) {
+    return { ...base, accent: "#1455D9", soft: "#EEF6FF", label: "Subscription and system record", table: "Plan, usage and system entitlement", headers: ["Item", "Plan / License", "Period", "Included", "Used", "Balance", "Status"], signatures: ["Issued by", "Customer", "Solva Trade"], footerNote: "System documents explain billing, license and setup status.", emphasis: "invoice" };
+  }
+  if (value.includes("executive") || value.includes("business health") || value.includes("morning") || value.includes("kpi") || value.includes("performance") || value.includes("leakage") || value.includes("recovery") || value.includes("action plan") || value.includes("cash position") || value.includes("top products") || value.includes("least performing")) {
+    return { ...base, accent: "#071A2B", soft: "#EEF6FF", label: "Executive insight pack", table: "KPIs, risks and recommended actions", headers: ["Area", "Metric", "Current", "Trend", "Risk", "Why It Matters", "Recommended Action"], signatures: ["Prepared by", "Management review", "Owner action"], footerNote: "Executive reports translate business data into clear owner decisions.", emphasis: "report" };
+  }
+  return base;
+}
+
+function blueprintFor(report: Report): DocumentBlueprint {
+  return documentBlueprints[report.processName] ?? blueprintFromTerms(report);
 }
 
 function templateFor(report: Report): DocumentTemplate {
@@ -286,10 +633,11 @@ async function tenantContext() {
     }
 
     if (!business) return { ...fallback, ...metadataTenant };
+    const businessLogoPath = await signedBusinessLogoPath(business.logo_path);
 
     return {
       businessName: business.trading_name ?? business.legal_name ?? fallback.businessName,
-      businessLogoPath: business.logo_path ?? null,
+      businessLogoPath,
       businessPhone: business.phone ?? metadataPhone,
       businessEmail: business.email ?? metadataEmail,
       businessLocation: [business.physical_address, business.county, business.country].filter(Boolean).join(", ") || metadataLocation,
@@ -340,7 +688,7 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
       "adjustment_number",
       "count_number",
     ]) || `${moduleName.slice(0, 3).toUpperCase()}-${processName.slice(0, 3).toUpperCase()}-${Date.now().toString().slice(-6)}`;
-  const documentDate = fieldValue(fields, ["invoice_date", "receipt_date", "payment_date", "received_date", "date", "delivery_date", "needed_by", "as_of_date"], "2026-07-22");
+  const documentDate = fieldValue(fields, ["invoice_date", "receipt_date", "payment_date", "received_date", "date", "delivery_date", "needed_by", "as_of_date"], todayIsoDate());
   const dueDate = fieldValue(fields, ["due_date", "valid_until", "expected_date", "expiry_date", "expected_arrival"], documentDate);
 
   return {
@@ -480,66 +828,55 @@ function logoHtml(report: Report) {
   return `<span>${htmlEscape(initials(report.businessName))}</span>`;
 }
 
-function documentStyle(template: DocumentTemplate) {
-  const styles: Record<DocumentTemplate, { accent: string; soft: string; label: string; table: string }> = {
-    salesReceipt: { accent: "#0F766E", soft: "#ECFDF5", label: "Cash and payment acknowledgement", table: "Received items and tender details" },
-    taxInvoice: { accent: "#1455D9", soft: "#EEF6FF", label: "Tax invoice and customer billing", table: "Taxable supply line items" },
-    simplifiedInvoice: { accent: "#2563EB", soft: "#EFF6FF", label: "Fast counter invoice", table: "Simplified sale details" },
-    proformaInvoice: { accent: "#B45309", soft: "#FFF7ED", label: "Proforma and pre-sale commitment", table: "Quoted goods and services" },
-    quotation: { accent: "#7C3AED", soft: "#F5F3FF", label: "Customer quote and validity", table: "Quoted items" },
-    grn: { accent: "#15803D", soft: "#F0FDF4", label: "Receiving control and stock posting", table: "Goods received inspection" },
-    purchaseOrder: { accent: "#1D4ED8", soft: "#EFF6FF", label: "Supplier buying instruction", table: "Ordered items" },
-    statement: { accent: "#334155", soft: "#F8FAFC", label: "Account movement and balance", table: "Statement ledger" },
-    deliveryNote: { accent: "#0891B2", soft: "#ECFEFF", label: "Delivery confirmation", table: "Delivered goods" },
-    dispatchNote: { accent: "#0E7490", soft: "#ECFEFF", label: "Route and vehicle dispatch", table: "Dispatch manifest" },
-    creditNote: { accent: "#BE123C", soft: "#FFF1F2", label: "Customer credit adjustment", table: "Credited items" },
-    debitNote: { accent: "#9333EA", soft: "#FAF5FF", label: "Debit adjustment", table: "Debited items" },
-    cashbook: { accent: "#047857", soft: "#ECFDF5", label: "Cash, bank and M-Pesa movement", table: "Cashbook entries" },
-    paymentVoucher: { accent: "#92400E", soft: "#FFFBEB", label: "Payment authorization", table: "Voucher allocation" },
-    stockMovement: { accent: "#0369A1", soft: "#F0F9FF", label: "SKU movement trace", table: "Stock card movement" },
-    inventoryReport: { accent: "#475569", soft: "#F8FAFC", label: "Inventory control report", table: "Inventory analysis" },
-    executiveReport: { accent: "#071A2B", soft: "#EEF6FF", label: "Owner insight and action pack", table: "Business intelligence" },
-    finance: { accent: "#0F172A", soft: "#F8FAFC", label: "Financial control schedule", table: "Account schedule" },
-    report: { accent: "#1455D9", soft: "#F8FBFF", label: "Management report", table: "Report detail" },
-  };
-  return styles[template];
+async function signedBusinessLogoPath(path: string | null) {
+  if (!path) return null;
+  if (path.startsWith("http://") || path.startsWith("https://") || path.startsWith("/")) return path;
+  try {
+    const admin = createSupabaseAdminClient();
+    const { data, error } = await admin.storage.from("business-assets").createSignedUrl(path, 60 * 60);
+    if (error) return null;
+    return data.signedUrl;
+  } catch {
+    return null;
+  }
 }
 
 function lineHeaders(report: Report) {
-  const template = templateFor(report);
-  if (template === "salesReceipt") return ["Code", "Particulars", "Qty", "Rate", "Tax", "Amount"];
-  if (template === "grn") return ["S/No", "Description", "Item Code", "Units", "Qty Ordered", "Qty Received", "Qty Returned", "Condition"];
-  if (template === "purchaseOrder") return ["S/No", "Product Code", "Product Name", "Qty", "Unit", "Rate", "Tax", "Amount"];
-  if (template === "deliveryNote") return ["Item #", "Description", "Ordered", "Delivered", "Outstanding", "Condition"];
-  if (template === "dispatchNote") return ["Route/Vehicle", "Item", "Loaded", "Delivered", "Returned", "Driver Notes"];
-  if (template === "statement") return ["Date", "Document", "Description", "Debit", "Credit", "Running Balance"];
-  if (template === "creditNote" || template === "debitNote") return ["Description", "Qty", "Unit Price", "Tax", "Adjustment", "Reason"];
-  if (template === "cashbook") return ["Date", "Reference", "Account", "Money In", "Money Out", "Tax", "Balance"];
-  if (template === "paymentVoucher") return ["Account", "Description", "Mode", "Reference", "Amount", "Approval"];
-  if (template === "stockMovement") return ["Date", "SKU", "Description", "In", "Out", "Balance", "Warehouse", "Batch"];
-  if (template === "inventoryReport") return ["SKU", "Description", "On Hand", "Reorder", "Value", "Warehouse", "Action"];
-  if (template === "executiveReport" || template === "report") return ["Area", "Metric", "Current", "Risk", "Recommended Action"];
-  if (template === "quotation" || template === "proformaInvoice") return ["#", "Item & Description", "Qty", "Rate", "Discount", "Validity", "Amount"];
-  if (template === "simplifiedInvoice") return ["Item", "Qty", "Unit Price", "Tax", "Total"];
-  return ["Code", "Description", "Qty", "Unit Price", "Tax", "Amount"];
+  return blueprintFor(report).headers;
+}
+
+function valueForHeader(report: Report, line: ReportLine, index: number, header: string) {
+  const h = header.toLowerCase();
+  if (h === "#" || h.includes("s/no") || h.includes("line") || h.includes("stop")) return String(index + 1);
+  if (h.includes("timestamp")) return report.generatedAt;
+  if (h.includes("date") || h.includes("period") || h.includes("needed by") || h.includes("expiry")) return report.transaction["Document date"];
+  if (h.includes("document") || h.includes("reference") || h.includes("ref") || h.includes("invoice") || h.includes("po") || h.includes("voucher") || h.includes("receipt") || h.includes("req")) return report.transaction["Reference number"];
+  if (h.includes("customer") || h.includes("supplier") || h.includes("party") || h.includes("payee") || h.includes("source") || h.includes("received from") || h.includes("recipient")) return report.partyName;
+  if (h.includes("description") || h.includes("particular") || h.includes("item") || h.includes("product") || h.includes("specification") || h.includes("account name") || h.includes("activity")) return line.description;
+  if (h.includes("sku") || h.includes("code") || h.includes("account code")) return line.sku;
+  if (h.includes("unit") && !h.includes("price")) return line.unit;
+  if (h.includes("ordered")) return String(line.quantity);
+  if (h.includes("delivered") || h.includes("received") || h.includes("accepted") || h.includes("loaded") || h.includes("picked") || h.includes("counted") || h.includes("sent")) return String(line.quantity);
+  if (h.includes("returned") || h.includes("rejected") || h.includes("variance") || h.includes("backorder")) return "0";
+  if (h.includes("outstanding") || h.includes("running balance") || h === "balance" || h.includes("closing")) return money(line.lineTotal);
+  if (h.includes("qty") || h.includes("quantity") || h.includes("on hand")) return String(line.quantity);
+  if (h.includes("price") || h.includes("rate") || h.includes("cost")) return money(line.unitPrice);
+  if (h.includes("discount")) return money(line.discount);
+  if (h.includes("tax") || h.includes("vat")) return h.includes("rate") ? line.taxRate : money(line.taxAmount);
+  if (h.includes("money out") || h.includes("credit") || h.includes("paid")) return money(line.discount);
+  if (h.includes("money in") || h.includes("debit") || h.includes("gross") || h.includes("amount") || h.includes("value") || h.includes("total") || h.includes("cash") || h.includes("sales") || h.includes("purchases") || h.includes("outstanding")) return money(line.lineTotal);
+  if (h.includes("warehouse") || h.includes("branch") || h.includes("route") || h.includes("vehicle") || h.includes("location") || h.includes("from") || h.includes("to") || h.includes("bin")) return line.warehouse;
+  if (h.includes("batch")) return line.batch;
+  if (h.includes("status") || h.includes("approval")) return report.transaction["Process status"];
+  if (h.includes("condition")) return "Accepted";
+  if (h.includes("risk")) return line.taxRate.includes("No tax") ? "Low" : "Review";
+  if (h.includes("action") || h.includes("reason") || h.includes("remark") || h.includes("note") || h.includes("instruction")) return line.notes;
+  if (h.includes("metric") || h.includes("current") || h.includes("trend")) return line.lineTotal ? money(line.lineTotal) : "Ready";
+  return line.notes || "";
 }
 
 function lineCells(report: Report, line: ReportLine, index: number) {
-  const template = templateFor(report);
-  if (template === "grn") return [String(index + 1), line.description, line.sku, line.unit, String(line.quantity), String(line.quantity), "0", "Accepted"];
-  if (template === "purchaseOrder") return [String(index + 1), line.sku, line.description, String(line.quantity), line.unit, money(line.unitPrice), line.taxRate, money(line.lineTotal)];
-  if (template === "deliveryNote") return [line.sku, line.description, String(line.quantity), String(line.quantity), "0", "Good condition"];
-  if (template === "dispatchNote") return [line.warehouse, line.description, String(line.quantity), String(line.quantity), "0", line.notes];
-  if (template === "statement") return [report.transaction["Document date"], line.sku, line.description, money(line.lineTotal), money(line.discount), money(line.lineTotal)];
-  if (template === "creditNote" || template === "debitNote") return [line.description, String(line.quantity), money(line.unitPrice), money(line.taxAmount), money(line.lineTotal), "Approved adjustment"];
-  if (template === "cashbook") return [report.transaction["Document date"], line.sku, line.warehouse, money(line.lineTotal), money(line.discount), money(line.taxAmount), money(line.lineTotal)];
-  if (template === "paymentVoucher") return [line.warehouse, line.description, "Bank / Cash / M-Pesa", line.sku, money(line.lineTotal), "Pending approval"];
-  if (template === "stockMovement") return [report.transaction["Document date"], line.sku, line.description, String(line.quantity), "0", String(line.quantity), line.warehouse, line.batch];
-  if (template === "inventoryReport") return [line.sku, line.description, String(line.quantity), "Review", money(line.lineTotal), line.warehouse, line.notes];
-  if (template === "executiveReport" || template === "report") return [line.sku, line.description, money(line.lineTotal), line.taxRate, line.notes];
-  if (template === "quotation" || template === "proformaInvoice") return [String(index + 1), line.description, String(line.quantity), money(line.unitPrice), money(line.discount), "7 days", money(line.lineTotal)];
-  if (template === "simplifiedInvoice") return [line.description, String(line.quantity), money(line.unitPrice), money(line.taxAmount), money(line.lineTotal)];
-  return [line.sku, line.description, String(line.quantity), money(line.unitPrice), money(line.taxAmount), money(line.lineTotal)];
+  return lineHeaders(report).map((header) => valueForHeader(report, line, index, header));
 }
 
 function documentMetaCard(report: Report) {
@@ -553,155 +890,104 @@ function documentMetaCard(report: Report) {
   `;
 }
 
-function templateIntro(report: Report, transactionRows: string) {
+function introValue(report: Report, kind: string) {
+  if (kind === "party") return `<p class="party">${htmlEscape(report.partyName)}</p><p>${htmlEscape(report.transaction.Branch)}</p>`;
+  if (kind === "meta") return documentMetaCard(report);
+  return `<p>${htmlEscape(report.processName)} is prepared from the submitted workflow values and tenant records.</p>`;
+}
+
+function introCards(report: Report, columns: "two-column" | "invoice-grid" | "po-grid" | "grn-grid") {
+  const blueprint = blueprintFor(report);
+  return `
+    <section class="${columns}">
+      ${blueprint.intro
+        .map(([title, description, kind], index) => `<article class="box ${index === 0 && blueprint.emphasis === "invoice" && blueprint.label.toLowerCase().includes("supplier") ? "dark" : ""}">
+          <h3>${htmlEscape(title)}</h3>
+          ${introValue(report, kind)}
+          <p class="small-note">${htmlEscape(description)}</p>
+        </article>`)
+        .join("")}
+    </section>
+  `;
+}
+
+function templateIntro(report: Report) {
+  const blueprint = blueprintFor(report);
   const template = templateFor(report);
-  if (template === "salesReceipt") {
+  if (blueprint.emphasis === "receipt") {
     return `
       <section class="receipt-confirmation">
         <div>
           <p class="overline">Amount received</p>
           <strong>${htmlEscape(report.totals.Total)}</strong>
-          <span>Paid by cash, bank, M-Pesa, cheque or mixed tender as recorded.</span>
+          <span>${htmlEscape(blueprint.footerNote)}</span>
         </div>
         <div class="receipt-number">
           <span>Receipt No.</span>
           <strong>${htmlEscape(report.transaction["Reference number"])}</strong>
         </div>
       </section>
-      <section class="two-column">
-        <article class="box"><h3>Received From</h3><p class="party">${htmlEscape(report.partyName)}</p><p>${htmlEscape(report.transaction.Branch)}</p></article>
-        <article class="box"><h3>Payment Details</h3>${documentMetaCard(report)}</article>
-      </section>
+      ${introCards(report, "two-column")}
     `;
   }
 
-  if (template === "taxInvoice" || template === "simplifiedInvoice" || template === "proformaInvoice" || template === "quotation") {
-    const label =
-      template === "quotation"
-        ? "Quotation Validity"
-        : template === "proformaInvoice"
-          ? "Proforma Terms"
-          : template === "simplifiedInvoice"
-            ? "Counter Sale Details"
-            : "Tax Details";
-    return `
-      <section class="invoice-grid">
-        <article class="box"><h3>Bill To</h3><p class="party">${htmlEscape(report.partyName)}</p><p>Customer account, PIN, address and credit terms.</p></article>
-        <article class="box"><h3>Supply / Delivery</h3><p class="party">${htmlEscape(report.transaction.Branch)}</p><p>Place of supply, route and fulfilment details.</p></article>
-        <article class="box"><h3>${label}</h3>${documentMetaCard(report)}<p class="small-note">${template === "taxInvoice" ? "Includes taxable value, VAT and eTIMS-ready references where applicable." : "Prepared before posting final tax and receipt records."}</p></article>
-      </section>
-    `;
-  }
-
-  if (template === "grn") {
-    return `
-      <section class="grn-grid">
-        <article class="box"><h3>Party Details</h3><p class="party">${htmlEscape(report.partyName)}</p><p>Supplier delivery received into ${htmlEscape(report.transaction.Branch)}.</p></article>
-        <article class="box"><h3>GRN Details</h3>${documentMetaCard(report)}<p class="small-note">Record accepted, rejected and returned quantities before stock is posted.</p></article>
-      </section>
-    `;
-  }
-
-  if (template === "purchaseOrder") {
-    return `
-      <section class="po-grid">
-        <article class="box dark"><h3>Vendor</h3><p class="party">${htmlEscape(report.partyName)}</p><p>Supplier quotation, tax and delivery details verified before order.</p></article>
-        <article class="box"><h3>Ship To</h3><p class="party">${htmlEscape(report.businessName)}</p><p>${htmlEscape(report.businessLocation)}</p></article>
-        <article class="box"><h3>P.O Details</h3>${documentMetaCard(report)}</article>
-      </section>
-    `;
-  }
-
-  if (template === "statement") {
+  if (blueprint.emphasis === "ledger") {
     return `
       <section class="statement-summary">
-        <div><span>Opening balance</span><strong>KES 0.00</strong></div>
-        <div><span>Invoices / Debits</span><strong>${htmlEscape(report.totals.Subtotal)}</strong></div>
-        <div><span>Payments / Credits</span><strong>${htmlEscape(report.totals.Discount)}</strong></div>
-        <div><span>Closing balance</span><strong>${htmlEscape(report.totals["Balance due"])}</strong></div>
+        <div><span>Opening</span><strong>KES 0.00</strong></div>
+        <div><span>Debits / Value</span><strong>${htmlEscape(report.totals.Subtotal)}</strong></div>
+        <div><span>Credits / Adjustments</span><strong>${htmlEscape(report.totals.Discount)}</strong></div>
+        <div><span>Closing / Balance</span><strong>${htmlEscape(report.totals["Balance due"])}</strong></div>
       </section>
-      <section class="two-column">
-        <article class="box"><h3>Account Holder</h3><p class="party">${htmlEscape(report.partyName)}</p><p>Statement period and ageing summary.</p></article>
-        <article class="box"><h3>Statement Details</h3>${documentMetaCard(report)}</article>
-      </section>
+      ${introCards(report, "two-column")}
     `;
   }
 
-  if (template === "deliveryNote" || template === "dispatchNote") {
-    return `
-      <section class="two-column">
-        <article class="box"><h3>${template === "dispatchNote" ? "Route / Vehicle" : "Deliver To"}</h3><p class="party">${htmlEscape(report.partyName)}</p><p>Delivery address, route, vehicle and driver details.</p></article>
-        <article class="box"><h3>${template === "dispatchNote" ? "Dispatch Control" : "Delivery Details"}</h3>${documentMetaCard(report)}<p class="small-note">Customer signs proof of delivery after quantities and condition are verified.</p></article>
-      </section>
-    `;
-  }
-
-  if (template === "creditNote" || template === "debitNote") {
-    return `
-      <section class="two-column">
-        <article class="box"><h3>${template === "creditNote" ? "Credit To" : "Debit To"}</h3><p class="party">${htmlEscape(report.partyName)}</p><p>Original invoice, return reason and approval evidence.</p></article>
-        <article class="box"><h3>${template === "creditNote" ? "Credit Note Details" : "Debit Note Details"}</h3>${documentMetaCard(report)}</article>
-      </section>
-      <section class="reason-box"><h3>Reason for Adjustment</h3><p>Price correction, returned goods, damaged stock, tax adjustment or approved commercial correction.</p></section>
-    `;
-  }
-
-  if (template === "finance" || template === "cashbook" || template === "paymentVoucher") {
-    return `
-      <section class="statement-summary finance-summary">
-        <div><span>Money In</span><strong>${htmlEscape(report.totals.Total)}</strong></div>
-        <div><span>Money Out</span><strong>${htmlEscape(report.totals.Discount)}</strong></div>
-        <div><span>Tax</span><strong>${htmlEscape(report.totals.Tax)}</strong></div>
-        <div><span>Net Position</span><strong>${htmlEscape(report.totals["Balance due"])}</strong></div>
-      </section>
-      <section class="two-column"><article class="box"><h3>Account Details</h3><dl class="details">${transactionRows}</dl></article><article class="box"><h3>Control Notes</h3><p>Prepared for cashbook, ledger, voucher, reconciliation and audit review.</p></article></section>
-    `;
-  }
-
-  if (template === "report" || template === "inventoryReport" || template === "stockMovement" || template === "executiveReport") {
+  if (blueprint.emphasis === "report") {
     return `
       <section class="report-kpis">
-        <div><span>${template === "stockMovement" ? "Stock Control" : "Business Health"}</span><strong>Ready</strong><small>Monitor daily</small></div>
-        <div><span>${template === "stockMovement" || template === "inventoryReport" ? "Inventory Value" : "Cash / Value"}</span><strong>${htmlEscape(report.totals.Total)}</strong><small>From posted records</small></div>
-        <div><span>Risk</span><strong>Review</strong><small>Owner action required where flagged</small></div>
+        <div><span>${htmlEscape(blueprint.label)}</span><strong>Ready</strong><small>Generated from posted records and selected filters.</small></div>
+        <div><span>Value / Exposure</span><strong>${htmlEscape(report.totals.Total)}</strong><small>Review supporting rows before action.</small></div>
+        <div><span>Owner Action</span><strong>Review</strong><small>${htmlEscape(blueprint.footerNote)}</small></div>
       </section>
-      <section class="reason-box"><h3>Management Commentary</h3><p>This report explains the result, the risk, the owner action and the supporting transaction detail.</p></section>
+      <section class="reason-box"><h3>Management Commentary</h3><p>${htmlEscape(blueprint.footerNote)}</p></section>
     `;
   }
 
-  return `
-    <section class="invoice-grid">
-      <article class="box"><h3>Bill To</h3><p class="party">${htmlEscape(report.partyName)}</p><p>Customer account, PIN, address and credit terms.</p></article>
-      <article class="box"><h3>Ship / Supply To</h3><p class="party">${htmlEscape(report.transaction.Branch)}</p><p>Place of supply, delivery route and fulfilment details.</p></article>
-      <article class="box"><h3>Invoice Details</h3>${documentMetaCard(report)}</article>
-    </section>
-  `;
+  if (blueprint.emphasis === "operations") {
+    return introCards(report, template === "purchaseOrder" ? "po-grid" : "grn-grid");
+  }
+
+  if (blueprint.emphasis === "control") {
+    return `
+      ${introCards(report, "two-column")}
+      <section class="reason-box"><h3>Control Purpose</h3><p>${htmlEscape(blueprint.footerNote)}</p></section>
+    `;
+  }
+
+  if (template === "purchaseOrder") return introCards(report, "po-grid");
+  return introCards(report, "invoice-grid");
 }
 
 function templateOutro(report: Report) {
+  const blueprint = blueprintFor(report);
   const template = templateFor(report);
-  if (template === "salesReceipt") {
+  if (blueprint.emphasis === "receipt") {
     return `<section class="receipt-slip"><div><strong>Sales Receipt Slip</strong><span>${htmlEscape(report.partyName)}</span></div><div><strong>Amount Received</strong><span>${htmlEscape(report.totals.Total)}</span></div></section>`;
-  }
-  if (template === "grn") {
-    return `<section class="signatures grn-signatures"><div class="signature">Prepared by</div><div class="signature">Quality checked by</div><div class="signature">Received into stock by</div></section>`;
   }
   if (template === "purchaseOrder") {
     return `<section class="terms"><h3>Terms and Conditions</h3><ol><li>Quote this purchase order number on delivery notes and invoices.</li><li>Deliver only approved quantities and product specifications.</li><li>Price, tax and delivery variances require written approval.</li></ol></section>`;
   }
-  if (template === "deliveryNote" || template === "dispatchNote") {
+  if (blueprint.emphasis === "operations") {
     return `<section class="pod-box"><strong>Proof of Delivery</strong><span>Name, signature, date, condition of goods and delivery exceptions.</span></section>`;
   }
-  if (template === "cashbook" || template === "paymentVoucher" || template === "finance") {
-    return `<section class="signatures grn-signatures"><div class="signature">Prepared by cashier</div><div class="signature">Checked by accountant</div><div class="signature">Approved by owner</div></section>`;
+  if (blueprint.emphasis === "ledger" || blueprint.emphasis === "control" || blueprint.emphasis === "report") {
+    return `<section class="terms"><h3>Document Note</h3><p>${htmlEscape(blueprint.footerNote)}</p></section>`;
   }
   return "";
 }
 
 function htmlDocument(report: Report, print = false) {
-  const transactionRows = Object.entries(report.transaction)
-    .map(([label, value]) => `<div><dt>${htmlEscape(label)}</dt><dd>${htmlEscape(value)}</dd></div>`)
-    .join("");
   const headers = lineHeaders(report);
   const lineRows = report.lines
     .map(
@@ -717,7 +1003,7 @@ function htmlDocument(report: Report, print = false) {
     .map(([label, value]) => `<div><dt>${htmlEscape(label)}</dt><dd>${htmlEscape(value)}</dd></div>`)
     .join("");
   const template = templateFor(report);
-  const style = documentStyle(template);
+  const style = blueprintFor(report);
 
   return `<!doctype html>
 <html>
@@ -790,12 +1076,20 @@ function htmlDocument(report: Report, print = false) {
     .audit ul { margin: 8px 0 0; padding-left: 18px; color: ${brand.slate}; font-size: 11px; line-height: 1.55; }
     .signatures { margin-top: 34px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
     .signature { border-top: 1px solid ${brand.navy}; padding-top: 7px; color: ${brand.slate}; font-size: 11px; text-align: center; }
+    .emphasis-receipt .table-wrap { border-width: 2px; border-color: var(--doc-accent); }
+    .emphasis-receipt .totals .grand th, .emphasis-receipt .totals .grand td { background: #ecfdf5; color: #0f766e; }
+    .emphasis-invoice header { border-bottom: 1px solid ${brand.border}; padding-bottom: 22px; }
+    .emphasis-invoice .doc-title h2 { color: var(--doc-accent); }
+    .emphasis-operations .box { border-left: 5px solid var(--doc-accent); }
+    .emphasis-ledger .table-wrap caption { background: #e2e8f0; color: ${brand.navy}; }
+    .emphasis-report .page-note { display: block; }
+    .emphasis-control .reason-box { border-left: 5px solid var(--doc-accent); }
     footer { margin-top: 36px; border-top: 1px solid ${brand.border}; padding-top: 12px; color: ${brand.muted}; font-size: 10px; line-height: 1.5; text-align: center; }
     @media print { body { background: white; } .page { box-shadow: none; margin: 0; } }
   </style>
 </head>
 <body>
-  <main class="page template-${template}" style="--doc-accent: ${style.accent}; --doc-soft: ${style.soft};">
+  <main class="page template-${template} emphasis-${style.emphasis}" style="--doc-accent: ${style.accent}; --doc-soft: ${style.soft};">
     <div class="accent"></div>
     <div class="watermark">SOLVA TRADE</div>
     <header>
@@ -818,7 +1112,7 @@ function htmlDocument(report: Report, print = false) {
       </section>
     </header>
 
-    <section class="intro">${templateIntro(report, transactionRows)}</section>
+    <section class="intro">${templateIntro(report)}</section>
 
     <section class="table-wrap">
       <table>
@@ -840,9 +1134,7 @@ function htmlDocument(report: Report, print = false) {
     </section>
 
     <section class="signatures">
-      <div class="signature">Prepared by</div>
-      <div class="signature">Reviewed by</div>
-      <div class="signature">Received / Approved by</div>
+      ${style.signatures.map((label) => `<div class="signature">${htmlEscape(label)}</div>`).join("")}
     </section>
 
     ${templateOutro(report)}
@@ -944,7 +1236,7 @@ function pdf(report: Report) {
   const canvas = new PdfCanvas();
   const title = titleFor(report);
   const template = templateFor(report);
-  const style = documentStyle(template);
+  const style = blueprintFor(report);
 
   canvas.rect(0, 0, 612, 842, "white");
   canvas.rect(0, 832, 612, 10, "blue");
@@ -1055,19 +1347,18 @@ function pdf(report: Report) {
     canvas.wrap(value, 112, totalsY - 22 - index * 18, 210, 8, "navy");
   });
 
-  canvas.line(48, 96, 176, 96, "navy");
-  canvas.line(242, 96, 370, 96, "navy");
-  canvas.line(436, 96, 564, 96, "navy");
-  canvas.text("Prepared by", 82, 82, 8, "slate");
-  canvas.text("Reviewed by", 278, 82, 8, "slate");
-  canvas.text(template === "grn" ? "Received into stock by" : "Received / Approved by", 452, 82, 8, "slate");
+  const signatureLabels = style.signatures.slice(0, 3);
+  [48, 242, 436].forEach((x, index) => {
+    canvas.line(x, 96, x + 128, 96, "navy");
+    canvas.wrap(signatureLabels[index] ?? "Approved by", x + 16, 82, 104, 8, "slate");
+  });
   if (template === "salesReceipt") {
     canvas.rect(48, 116, 516, 30, "soft");
     canvas.text("SALES RECEIPT SLIP", 62, 130, 8, "blue", true);
     canvas.text(`Amount received: ${report.totals.Total}`, 394, 130, 8, "navy", true);
   }
   canvas.line(48, 58, 564, 58, "border");
-  canvas.wrap(`${report.businessName} document generated by Solva Trade. Printed by ${report.generatedBy} on ${report.generatedAt}.`, 76, 42, 460, 7.5, "muted");
+  canvas.wrap(`${report.businessName} document generated by Solva Trade. ${style.footerNote} Printed by ${report.generatedBy} on ${report.generatedAt}.`, 76, 42, 460, 7.5, "muted");
 
   const content = canvas.output();
   const objects = [

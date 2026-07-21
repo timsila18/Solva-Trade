@@ -71,7 +71,7 @@ export default async function OnboardingPage({
               </div>
             ))}
           </aside>
-          <form action="/api/onboarding/complete" method="post" className="rounded-lg border border-slate-200 bg-white p-5">
+          <form action="/api/onboarding/complete" method="post" encType="multipart/form-data" className="rounded-lg border border-slate-200 bg-white p-5">
             <h2 className="text-xl font-semibold">Business details and setup</h2>
             <div className="mt-5 grid gap-4 md:grid-cols-2">
               {[
@@ -83,13 +83,25 @@ export default async function OnboardingPage({
                 ["County", "county"],
                 ["KRA PIN", "kra_pin"],
                 ["Primary brand colour", "primary_brand_color"],
-                ["Company logo URL or uploaded path", "logo_path"],
               ].map(([field, name]) => (
                 <label key={field} className="text-sm font-medium">
                   {field}
-                  <input name={name} required={name === "logo_path"} className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2" />
+                  <input name={name} className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2" />
                 </label>
               ))}
+              <label className="text-sm font-medium md:col-span-2">
+                Company logo
+                <input
+                  name="logo_file"
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                  required
+                  className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 file:mr-4 file:rounded-md file:border-0 file:bg-emerald-700 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white"
+                />
+                <span className="mt-2 block text-xs leading-5 text-slate-500">
+                  Required for invoices, receipts, GRNs and reports. PNG, JPG, WEBP or SVG, up to 2MB.
+                </span>
+              </label>
               <label className="text-sm font-medium">
                 Country
                 <input name="country" className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2" defaultValue="Kenya" />

@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { parseEmail, parsePassword, redirectTo, redirectWithError } from "@/lib/auth/route-helpers";
 
@@ -17,15 +18,30 @@ export async function POST(request: NextRequest) {
   if (!fullName.success) return redirectWithError(request, "/create-account", "Enter your full name.");
 
   const supabase = await createSupabaseServerClient();
-  const { error } = await supabase.auth.signUp({
-    email: email.data,
-    password: password.data,
-    options: { data: { full_name: fullName.data } },
-  });
+  let signupError: Error | null = null;
 
-  if (error) {
+  try {
+    const admin = createSupabaseAdminClient();
+    const { error } = await admin.auth.admin.createUser({
+      email: email.data,
+      password: password.data,
+      email_confirm: true,
+      user_metadata: { full_name: fullName.data },
+    });
+    signupError = error;
+  } catch {
+    const { error } = await supabase.auth.signUp({
+      email: email.data,
+      password: password.data,
+      options: { data: { full_name: fullName.data } },
+    });
+    signupError = error;
+  }
+
+  if (signupError) {
     return redirectWithError(request, "/create-account", "We could not create that account. Try another email or password.");
   }
 
+  await supabase.auth.signInWithPassword({ email: email.data, password: password.data });
   return redirectTo(request, "/onboarding");
 }
