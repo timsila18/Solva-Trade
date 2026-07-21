@@ -72,6 +72,18 @@ const workflowDocuments: Record<string, string[]> = {
   imports: ["Supplier Profile", "Supplier Purchase History"],
 };
 
+const primaryDocument: Record<string, string> = {
+  requisitions: "Purchase Requisition",
+  "purchase-orders": "Purchase Order (PO)",
+  "goods-received": "Goods Received Note (GRN)",
+  "supplier-bills": "Supplier Invoice Register",
+  returns: "Purchase Return Note",
+  payments: "Payment Voucher",
+  "creditor-ageing": "Supplier Aging Report",
+  reports: "Purchase Order (PO)",
+  imports: "Supplier Profile",
+};
+
 export function generateStaticParams() {
   return Object.keys(workflows).map((workflow) => ({ workflow }));
 }
@@ -94,6 +106,7 @@ export default async function PurchasingWorkflowPage({
       <form action={completeProcessAction} className="mt-6 rounded-lg border border-slate-200 bg-white p-5">
         <input type="hidden" name="module" value="Purchasing" />
         <input type="hidden" name="process" value={config.title} />
+        <input type="hidden" name="document" value={primaryDocument[workflow] ?? config.title} />
         <input type="hidden" name="returnTo" value={`/purchases/${workflow}`} />
         <input type="hidden" name="next" value={`Continue ${config.title}`} />
         <div className="grid gap-4 md:grid-cols-2">

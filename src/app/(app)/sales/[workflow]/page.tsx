@@ -44,6 +44,15 @@ const workflowDocuments: Record<string, string[]> = {
   "debtor-ageing": ["Customer Aging Report", "Outstanding Balance Statement", "Customer Statement"],
 };
 
+const primaryDocument: Record<string, string> = {
+  quotations: "Quotation",
+  orders: "Sales Order",
+  invoices: "Sales Receipt",
+  payments: "Sales Receipt",
+  returns: "Credit Note",
+  "debtor-ageing": "Customer Aging Report",
+};
+
 export function generateStaticParams() {
   return Object.keys(workflows).map((workflow) => ({ workflow }));
 }
@@ -66,6 +75,7 @@ export default async function SalesWorkflowPage({
       <form action={completeProcessAction} className="mt-6 rounded-lg border border-slate-200 bg-white p-5">
         <input type="hidden" name="module" value="Sales" />
         <input type="hidden" name="process" value={config.title} />
+        <input type="hidden" name="document" value={primaryDocument[workflow] ?? config.title} />
         <input type="hidden" name="returnTo" value={`/sales/${workflow}`} />
         <input type="hidden" name="next" value={`Continue ${config.title}`} />
         <div className="grid gap-4 md:grid-cols-2">

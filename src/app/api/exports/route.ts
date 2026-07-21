@@ -37,6 +37,7 @@ type Report = {
 };
 
 type DocumentFamily = "sales" | "purchase" | "inventory" | "distribution" | "finance" | "tax" | "statement" | "report";
+type DocumentTemplate = "receipt" | "invoice" | "grn" | "purchaseOrder" | "statement" | "delivery" | "note" | "report" | "finance" | "inventory";
 
 const brand = {
   navy: "#071A2B",
@@ -169,6 +170,20 @@ function familyFor(report: Pick<Report, "moduleName" | "processName">): Document
 
 function titleFor(report: Report) {
   return report.processName.toUpperCase();
+}
+
+function templateFor(report: Report): DocumentTemplate {
+  const value = `${report.moduleName} ${report.processName}`.toLowerCase();
+  if (value.includes("sales receipt") || value.includes("receipt voucher") || value.includes("payment receipt")) return "receipt";
+  if (value.includes("goods received") || value.includes("grn")) return "grn";
+  if (value.includes("purchase order") || value.includes("purchase requisition") || value.includes("request for quotation") || value.includes("rfq")) return "purchaseOrder";
+  if (value.includes("statement") || value.includes("aging") || value.includes("ageing")) return "statement";
+  if (value.includes("delivery") || value.includes("dispatch") || value.includes("route") || value.includes("vehicle") || value.includes("pod")) return "delivery";
+  if (value.includes("credit note") || value.includes("debit note") || value.includes("return note")) return "note";
+  if (value.includes("cashbook") || value.includes("ledger") || value.includes("voucher") || value.includes("trial balance") || value.includes("balance sheet") || value.includes("income statement")) return "finance";
+  if (value.includes("stock") || value.includes("inventory") || value.includes("bin card") || value.includes("valuation") || value.includes("reorder")) return "inventory";
+  if (value.includes("report") || value.includes("brief") || value.includes("dashboard") || value.includes("action plan")) return "report";
+  return "invoice";
 }
 
 async function tenantContext() {
@@ -411,18 +426,6 @@ function logoHtml(report: Report) {
   return `<span>${htmlEscape(initials(report.businessName))}</span>`;
 }
 
-function documentIntro(report: Report) {
-  const family = familyFor(report);
-  if (family === "purchase") return "Supplier, stock receiving, approval and matching details.";
-  if (family === "distribution") return "Dispatch, delivery, route, vehicle and proof-of-delivery details.";
-  if (family === "finance") return "Cash, bank, ledger, voucher, balance and approval details.";
-  if (family === "tax") return "Tax period, taxable value, compliance and filing details.";
-  if (family === "statement") return "Opening balance, movements, payments and closing balance.";
-  if (family === "report") return "Business insight, supporting figures, commentary and recommended action.";
-  if (family === "inventory") return "Stock, warehouse, batch, movement, count and valuation details.";
-  return "Customer, sale, invoice, receipt, delivery and payment details.";
-}
-
 function lineHeaders(report: Report) {
   const family = familyFor(report);
   if (family === "purchase") return ["#", "Description", "Item Code", "Units", "Qty Received", "Qty Returned", "Total Qty"];
@@ -443,6 +446,141 @@ function lineCells(report: Report, line: ReportLine, index: number) {
   return [line.sku, line.description, String(line.quantity), money(line.unitPrice), money(line.taxAmount), money(line.lineTotal)];
 }
 
+function documentMetaCard(report: Report) {
+  return `
+    <dl class="meta-card">
+      <div><dt>Document No.</dt><dd>${htmlEscape(report.transaction["Reference number"])}</dd></div>
+      <div><dt>Date</dt><dd>${htmlEscape(report.transaction["Document date"])}</dd></div>
+      <div><dt>Terms</dt><dd>${htmlEscape(report.transaction["Payment terms"])}</dd></div>
+      <div><dt>Due / Action Date</dt><dd>${htmlEscape(report.transaction["Due or action date"])}</dd></div>
+    </dl>
+  `;
+}
+
+function templateIntro(report: Report, transactionRows: string) {
+  const template = templateFor(report);
+  if (template === "receipt") {
+    return `
+      <section class="receipt-confirmation">
+        <div>
+          <p class="overline">Amount received</p>
+          <strong>${htmlEscape(report.totals.Total)}</strong>
+          <span>Paid by cash, bank, M-Pesa, cheque or mixed tender as recorded.</span>
+        </div>
+        <div class="receipt-number">
+          <span>Receipt No.</span>
+          <strong>${htmlEscape(report.transaction["Reference number"])}</strong>
+        </div>
+      </section>
+      <section class="two-column">
+        <article class="box"><h3>Received From</h3><p class="party">${htmlEscape(report.partyName)}</p><p>${htmlEscape(report.transaction.Branch)}</p></article>
+        <article class="box"><h3>Payment Details</h3>${documentMetaCard(report)}</article>
+      </section>
+    `;
+  }
+
+  if (template === "grn") {
+    return `
+      <section class="grn-grid">
+        <article class="box"><h3>Party Details</h3><p class="party">${htmlEscape(report.partyName)}</p><p>Supplier delivery received into ${htmlEscape(report.transaction.Branch)}.</p></article>
+        <article class="box"><h3>GRN Details</h3>${documentMetaCard(report)}<p class="small-note">Record accepted, rejected and returned quantities before stock is posted.</p></article>
+      </section>
+    `;
+  }
+
+  if (template === "purchaseOrder") {
+    return `
+      <section class="po-grid">
+        <article class="box dark"><h3>Vendor</h3><p class="party">${htmlEscape(report.partyName)}</p><p>Supplier quotation, tax and delivery details verified before order.</p></article>
+        <article class="box"><h3>Ship To</h3><p class="party">${htmlEscape(report.businessName)}</p><p>${htmlEscape(report.businessLocation)}</p></article>
+        <article class="box"><h3>P.O Details</h3>${documentMetaCard(report)}</article>
+      </section>
+    `;
+  }
+
+  if (template === "statement") {
+    return `
+      <section class="statement-summary">
+        <div><span>Opening balance</span><strong>KES 0.00</strong></div>
+        <div><span>Invoices / Debits</span><strong>${htmlEscape(report.totals.Subtotal)}</strong></div>
+        <div><span>Payments / Credits</span><strong>${htmlEscape(report.totals.Discount)}</strong></div>
+        <div><span>Closing balance</span><strong>${htmlEscape(report.totals["Balance due"])}</strong></div>
+      </section>
+      <section class="two-column">
+        <article class="box"><h3>Account Holder</h3><p class="party">${htmlEscape(report.partyName)}</p><p>Statement period and ageing summary.</p></article>
+        <article class="box"><h3>Statement Details</h3>${documentMetaCard(report)}</article>
+      </section>
+    `;
+  }
+
+  if (template === "delivery") {
+    return `
+      <section class="two-column">
+        <article class="box"><h3>Deliver To</h3><p class="party">${htmlEscape(report.partyName)}</p><p>Delivery address, route, vehicle and driver details.</p></article>
+        <article class="box"><h3>Dispatch Details</h3>${documentMetaCard(report)}<p class="small-note">Customer signs proof of delivery after quantities are verified.</p></article>
+      </section>
+    `;
+  }
+
+  if (template === "note") {
+    return `
+      <section class="two-column">
+        <article class="box"><h3>Adjustment To</h3><p class="party">${htmlEscape(report.partyName)}</p><p>Original invoice, return reason and approval evidence.</p></article>
+        <article class="box"><h3>Credit / Debit Details</h3>${documentMetaCard(report)}</article>
+      </section>
+      <section class="reason-box"><h3>Reason for Adjustment</h3><p>Price correction, returned goods, damaged stock, tax adjustment or approved commercial correction.</p></section>
+    `;
+  }
+
+  if (template === "finance") {
+    return `
+      <section class="statement-summary finance-summary">
+        <div><span>Money In</span><strong>${htmlEscape(report.totals.Total)}</strong></div>
+        <div><span>Money Out</span><strong>${htmlEscape(report.totals.Discount)}</strong></div>
+        <div><span>Tax</span><strong>${htmlEscape(report.totals.Tax)}</strong></div>
+        <div><span>Net Position</span><strong>${htmlEscape(report.totals["Balance due"])}</strong></div>
+      </section>
+      <section class="two-column"><article class="box"><h3>Account Details</h3><dl class="details">${transactionRows}</dl></article><article class="box"><h3>Control Notes</h3><p>Prepared for cashbook, ledger, voucher, reconciliation and audit review.</p></article></section>
+    `;
+  }
+
+  if (template === "report" || template === "inventory") {
+    return `
+      <section class="report-kpis">
+        <div><span>Business Health</span><strong>Ready</strong><small>Monitor daily</small></div>
+        <div><span>Cash / Value</span><strong>${htmlEscape(report.totals.Total)}</strong><small>From posted records</small></div>
+        <div><span>Risk</span><strong>Review</strong><small>Owner action required where flagged</small></div>
+      </section>
+      <section class="reason-box"><h3>Management Commentary</h3><p>This report explains the result, the risk, the owner action and the supporting transaction detail.</p></section>
+    `;
+  }
+
+  return `
+    <section class="invoice-grid">
+      <article class="box"><h3>Bill To</h3><p class="party">${htmlEscape(report.partyName)}</p><p>Customer account, PIN, address and credit terms.</p></article>
+      <article class="box"><h3>Ship / Supply To</h3><p class="party">${htmlEscape(report.transaction.Branch)}</p><p>Place of supply, delivery route and fulfilment details.</p></article>
+      <article class="box"><h3>Invoice Details</h3>${documentMetaCard(report)}</article>
+    </section>
+  `;
+}
+
+function templateOutro(report: Report) {
+  const template = templateFor(report);
+  if (template === "receipt") {
+    return `<section class="receipt-slip"><div><strong>Sales Receipt Slip</strong><span>${htmlEscape(report.partyName)}</span></div><div><strong>Amount Received</strong><span>${htmlEscape(report.totals.Total)}</span></div></section>`;
+  }
+  if (template === "grn") {
+    return `<section class="signatures grn-signatures"><div class="signature">Prepared by</div><div class="signature">Quality checked by</div><div class="signature">Received into stock by</div></section>`;
+  }
+  if (template === "purchaseOrder") {
+    return `<section class="terms"><h3>Terms and Conditions</h3><ol><li>Quote this purchase order number on delivery notes and invoices.</li><li>Deliver only approved quantities and product specifications.</li><li>Price, tax and delivery variances require written approval.</li></ol></section>`;
+  }
+  if (template === "delivery") {
+    return `<section class="pod-box"><strong>Proof of Delivery</strong><span>Name, signature, date, condition of goods and delivery exceptions.</span></section>`;
+  }
+  return "";
+}
+
 function htmlDocument(report: Report, print = false) {
   const transactionRows = Object.entries(report.transaction)
     .map(([label, value]) => `<div><dt>${htmlEscape(label)}</dt><dd>${htmlEscape(value)}</dd></div>`)
@@ -461,6 +599,7 @@ function htmlDocument(report: Report, print = false) {
   const approvalRows = Object.entries(report.approvals)
     .map(([label, value]) => `<div><dt>${htmlEscape(label)}</dt><dd>${htmlEscape(value)}</dd></div>`)
     .join("");
+  const template = templateFor(report);
 
   return `<!doctype html>
 <html>
@@ -485,12 +624,37 @@ function htmlDocument(report: Report, print = false) {
     .doc-title .ref { margin-top: 8px; color: ${brand.muted}; font-size: 12px; }
     .solva-mark { margin-top: 18px; display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; border: 1px solid ${brand.border}; padding: 8px 12px; color: ${brand.blue}; font-size: 12px; font-weight: 800; }
     .solva-dot { display: grid; width: 24px; height: 24px; place-items: center; border-radius: 8px; background: ${brand.navy}; color: ${brand.cyan}; }
-    .intro { position: relative; margin-top: 34px; display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    .intro { position: relative; margin-top: 34px; }
+    .two-column, .grn-grid, .invoice-grid, .po-grid { display: grid; gap: 18px; }
+    .two-column, .grn-grid { grid-template-columns: 1fr 1fr; }
+    .invoice-grid, .po-grid { grid-template-columns: 1fr 1fr 1fr; }
     .panel { border: 1px solid ${brand.border}; border-radius: 10px; background: ${brand.soft}; padding: 16px; }
+    .box { border: 1px solid ${brand.border}; border-radius: 8px; background: white; padding: 14px; min-height: 116px; }
+    .box.dark { background: ${brand.navy}; color: white; }
+    .box.dark h3, .box.dark p { color: white; }
+    .box h3, .reason-box h3, .terms h3 { margin: 0 0 10px; color: ${brand.blue}; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
+    .party { margin: 0 0 6px; font-size: 14px; font-weight: 800; color: ${brand.navy}; }
+    .small-note { margin-top: 10px; color: ${brand.muted}; font-size: 11px; line-height: 1.5; }
     .panel h3 { margin: 0 0 10px; color: ${brand.blue}; font-size: 13px; text-transform: uppercase; letter-spacing: .03em; }
     .details { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 18px; }
+    .meta-card { display: grid; gap: 7px; margin: 0; }
+    .meta-card div { display: grid; grid-template-columns: 90px 1fr; gap: 8px; border-bottom: 1px solid ${brand.border}; padding-bottom: 5px; }
     dt { color: ${brand.muted}; font-size: 10px; font-weight: 800; text-transform: uppercase; }
     dd { margin: 2px 0 0; color: ${brand.navy}; font-size: 12px; line-height: 1.35; }
+    .receipt-confirmation { display: grid; grid-template-columns: 1fr 220px; gap: 18px; margin-bottom: 18px; border-radius: 10px; background: ${brand.navy}; color: white; padding: 18px; }
+    .receipt-confirmation strong { display: block; margin-top: 4px; color: white; font-size: 28px; }
+    .receipt-confirmation span, .overline { color: #dbeafe; font-size: 12px; }
+    .receipt-number { border-left: 1px solid rgba(255,255,255,.25); padding-left: 18px; }
+    .statement-summary, .report-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 18px; }
+    .report-kpis { grid-template-columns: repeat(3, 1fr); }
+    .statement-summary div, .report-kpis div { border-radius: 8px; background: ${brand.surface}; padding: 13px; }
+    .statement-summary span, .report-kpis span { display: block; color: ${brand.muted}; font-size: 11px; font-weight: 800; text-transform: uppercase; }
+    .statement-summary strong, .report-kpis strong { display: block; margin-top: 5px; color: ${brand.blue}; font-size: 17px; }
+    .report-kpis small { display: block; margin-top: 4px; color: ${brand.slate}; line-height: 1.4; }
+    .reason-box, .terms, .pod-box, .receipt-slip { margin-top: 18px; border: 1px solid ${brand.border}; border-radius: 8px; background: ${brand.soft}; padding: 14px; }
+    .receipt-slip { display: grid; grid-template-columns: 1fr 220px; border-style: dashed; }
+    .receipt-slip strong, .receipt-slip span, .pod-box strong, .pod-box span { display: block; }
+    .terms ol { margin: 0; padding-left: 18px; color: ${brand.slate}; font-size: 11px; line-height: 1.6; }
     .table-wrap { position: relative; margin-top: 26px; border: 1px solid ${brand.border}; border-radius: 10px; overflow: hidden; }
     table { width: 100%; border-collapse: collapse; table-layout: fixed; }
     th { background: ${brand.navy}; color: white; font-size: 11px; padding: 10px 8px; text-align: left; }
@@ -511,7 +675,7 @@ function htmlDocument(report: Report, print = false) {
   </style>
 </head>
 <body>
-  <main class="page">
+  <main class="page template-${template}">
     <div class="accent"></div>
     <div class="watermark">SOLVA TRADE</div>
     <header>
@@ -533,17 +697,7 @@ function htmlDocument(report: Report, print = false) {
       </section>
     </header>
 
-    <section class="intro">
-      <article class="panel">
-        <h3>Party Details</h3>
-        <p><strong>${htmlEscape(report.partyName)}</strong></p>
-        <p>${htmlEscape(documentIntro(report))}</p>
-      </article>
-      <article class="panel">
-        <h3>Document Details</h3>
-        <dl class="details">${transactionRows}</dl>
-      </article>
-    </section>
+    <section class="intro">${templateIntro(report, transactionRows)}</section>
 
     <section class="table-wrap">
       <table>
@@ -568,6 +722,8 @@ function htmlDocument(report: Report, print = false) {
       <div class="signature">Reviewed by</div>
       <div class="signature">Received / Approved by</div>
     </section>
+
+    ${templateOutro(report)}
 
     <footer>
       ${htmlEscape(report.businessName)} document generated by Solva Trade. Printed by ${htmlEscape(report.generatedBy)} on ${htmlEscape(report.generatedAt)}.
@@ -650,6 +806,7 @@ function renderPdfTable(canvas: PdfCanvas, report: Report, startY: number) {
 function pdf(report: Report) {
   const canvas = new PdfCanvas();
   const title = titleFor(report);
+  const template = templateFor(report);
 
   canvas.rect(0, 0, 612, 842, "white");
   canvas.rect(0, 832, 612, 10, "blue");
@@ -673,18 +830,61 @@ function pdf(report: Report) {
   canvas.text("S", 386, 706, 13, "cyan", true);
   canvas.text("Solva Trade", 406, 706, 10, "white", true);
 
-  canvas.rect(48, 628, 250, 72, "soft");
-  canvas.rect(314, 628, 250, 72, "soft");
-  canvas.text("PARTY DETAILS", 62, 676, 9, "blue", true);
-  canvas.wrap(report.partyName, 62, 656, 210, 12, "navy", true);
-  canvas.wrap(documentIntro(report), 62, 638, 210, 8.5, "slate");
-  canvas.text("DOCUMENT DETAILS", 328, 676, 9, "blue", true);
-  canvas.text(`Date: ${report.transaction["Document date"]}`, 328, 656, 8.5, "navy");
-  canvas.text(`Due: ${report.transaction["Due or action date"]}`, 328, 642, 8.5, "navy");
-  canvas.text(`Branch: ${report.transaction.Branch}`, 328, 628, 8.5, "navy");
+  let tableStart = 572;
+  if (template === "receipt") {
+    canvas.rect(48, 634, 516, 66, "navy");
+    canvas.text("AMOUNT RECEIVED", 66, 674, 9, "cyan", true);
+    canvas.text(report.totals.Total, 66, 650, 24, "white", true);
+    canvas.text(`Receipt No. ${report.transaction["Reference number"]}`, 374, 666, 10, "white", true);
+    canvas.text(`Received from ${report.partyName}`, 374, 648, 8.5, "white");
+    canvas.text("PAYMENT LINE ITEMS", 48, 604, 11, "blue", true);
+    tableStart = 582;
+  } else if (template === "grn") {
+    canvas.rect(48, 628, 250, 72, "soft");
+    canvas.rect(314, 628, 250, 72, "soft");
+    canvas.text("SUPPLIER / PARTY DETAILS", 62, 676, 9, "blue", true);
+    canvas.wrap(report.partyName, 62, 656, 210, 12, "navy", true);
+    canvas.text("GRN DETAILS", 328, 676, 9, "blue", true);
+    canvas.text(`GRN No: ${report.transaction["Reference number"]}`, 328, 656, 8.5, "navy");
+    canvas.text(`PO No: ${report.transaction["Reference number"].replace("GOO", "PO")}`, 328, 642, 8.5, "navy");
+    canvas.text(`Receiving branch: ${report.transaction.Branch}`, 328, 628, 8.5, "navy");
+    canvas.text("GOODS RECEIVED", 48, 594, 11, "blue", true);
+  } else if (template === "purchaseOrder") {
+    canvas.rect(48, 646, 160, 54, "navy");
+    canvas.rect(220, 646, 160, 54, "surface");
+    canvas.rect(392, 646, 172, 54, "surface");
+    canvas.text("VENDOR", 62, 678, 8, "cyan", true);
+    canvas.wrap(report.partyName, 62, 662, 128, 9, "white", true);
+    canvas.text("SHIP TO", 234, 678, 8, "blue", true);
+    canvas.wrap(report.businessName, 234, 662, 128, 9, "navy", true);
+    canvas.text("P.O DETAILS", 406, 678, 8, "blue", true);
+    canvas.text(report.transaction["Reference number"], 406, 662, 8.5, "navy", true);
+    canvas.text("ORDER ITEMS", 48, 614, 11, "blue", true);
+    tableStart = 592;
+  } else if (template === "statement" || template === "finance" || template === "report" || template === "inventory") {
+    const labels = template === "report" ? ["Health", "Cash / Value", "Risk"] : ["Opening", "Movements", "Closing"];
+    [48, 224, 400].forEach((x, index) => {
+      canvas.rect(x, 642, 164, 58, "surface");
+      canvas.text(labels[index], x + 14, 676, 8, "blue", true);
+      canvas.text(index === 0 ? "Ready" : index === 1 ? report.totals.Total : report.totals["Balance due"], x + 14, 654, 16, "navy", true);
+    });
+    canvas.text(template === "report" ? "INSIGHT DETAILS" : "LEDGER DETAILS", 48, 614, 11, "blue", true);
+    tableStart = 592;
+  } else {
+    canvas.rect(48, 628, 160, 72, "soft");
+    canvas.rect(224, 628, 160, 72, "soft");
+    canvas.rect(400, 628, 164, 72, "soft");
+    canvas.text("BILL TO", 62, 676, 9, "blue", true);
+    canvas.wrap(report.partyName, 62, 656, 124, 10, "navy", true);
+    canvas.text("SUPPLY / DELIVERY", 238, 676, 9, "blue", true);
+    canvas.wrap(report.transaction.Branch, 238, 656, 124, 10, "navy", true);
+    canvas.text("INVOICE DETAILS", 414, 676, 9, "blue", true);
+    canvas.text(`Date: ${report.transaction["Document date"]}`, 414, 656, 8.5, "navy");
+    canvas.text(`Due: ${report.transaction["Due or action date"]}`, 414, 642, 8.5, "navy");
+    canvas.text("INVOICE LINE ITEMS", 48, 594, 11, "blue", true);
+  }
 
-  canvas.text("LINE DETAILS", 48, 594, 11, "blue", true);
-  const yAfterTable = renderPdfTable(canvas, report, 572);
+  const yAfterTable = renderPdfTable(canvas, report, tableStart);
 
   const totalsY = Math.max(180, yAfterTable);
   canvas.text("TOTALS", 384, totalsY, 11, "blue", true);
@@ -706,7 +906,12 @@ function pdf(report: Report) {
   canvas.line(436, 96, 564, 96, "navy");
   canvas.text("Prepared by", 82, 82, 8, "slate");
   canvas.text("Reviewed by", 278, 82, 8, "slate");
-  canvas.text("Received / Approved by", 452, 82, 8, "slate");
+  canvas.text(template === "grn" ? "Received into stock by" : "Received / Approved by", 452, 82, 8, "slate");
+  if (template === "receipt") {
+    canvas.rect(48, 116, 516, 30, "soft");
+    canvas.text("SALES RECEIPT SLIP", 62, 130, 8, "blue", true);
+    canvas.text(`Amount received: ${report.totals.Total}`, 394, 130, 8, "navy", true);
+  }
   canvas.line(48, 58, 564, 58, "border");
   canvas.wrap(`${report.businessName} document generated by Solva Trade. Printed by ${report.generatedBy} on ${report.generatedAt}.`, 76, 42, 460, 7.5, "muted");
 
