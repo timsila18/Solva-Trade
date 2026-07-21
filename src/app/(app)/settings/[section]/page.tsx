@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { completeProcessAction } from "@/app/(app)/actions";
+import { WorkflowFormFields } from "@/components/app/workflow-form-fields";
 import {
   buildDocumentPreview,
   findSettingsSection,
@@ -102,13 +103,8 @@ export default async function SettingsSectionPage({
           <p className="mt-1 text-sm text-slate-600">
             Validated server actions will persist these values tenant-scoped and record audit events.
           </p>
-          <div className="mt-5 grid gap-4 md:grid-cols-2">
-            {section.fields.slice(0, 10).map((field) => (
-              <label key={field} className="text-sm font-medium">
-                {field}
-                <input className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2" placeholder={field} />
-              </label>
-            ))}
+          <div className="mt-5">
+            <WorkflowFormFields fields={section.fields.slice(0, 10)} />
           </div>
           <div className="mt-5 flex flex-wrap gap-3">
             <label className="flex items-center gap-2 rounded-md bg-slate-100 px-3 py-2 text-sm">

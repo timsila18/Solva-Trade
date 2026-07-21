@@ -10,6 +10,18 @@ function safeText(value: FormDataEntryValue | null, fallback: string) {
   return text || fallback;
 }
 
+function documentFieldParams(formData: FormData) {
+  const params = new URLSearchParams();
+  for (const [key, value] of formData.entries()) {
+    if (!key.startsWith("field_") || typeof value !== "string" || !value.trim()) continue;
+    const fieldKey = key.slice("field_".length);
+    const label = safeText(formData.get(`label_${fieldKey}`), fieldKey.replaceAll("_", " "));
+    params.append(`field_${fieldKey}`, value.trim());
+    params.append(`label_${fieldKey}`, label);
+  }
+  return params;
+}
+
 export async function completeProcessAction(formData: FormData) {
   const moduleName = safeText(formData.get("module"), "Solva Trade");
   const processName = safeText(formData.get("process"), "Business process");
@@ -26,6 +38,7 @@ export async function completeProcessAction(formData: FormData) {
     returnTo,
     next,
   });
+  documentFieldParams(formData).forEach((value, key) => params.append(key, value));
 
   try {
     const supabase = await createSupabaseServerClient();
@@ -48,6 +61,7 @@ export async function completeProcessAction(formData: FormData) {
           document: documentName,
           status: "posted",
           source: "workspace_submit",
+          fields: Object.fromEntries(documentFieldParams(formData)),
         },
       });
     }

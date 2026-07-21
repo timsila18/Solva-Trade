@@ -1,41 +1,10 @@
 import type { BusinessSummary, Membership } from "./types";
-import { permissionsForRole } from "./permissions";
 
-export const demoBusinesses: BusinessSummary[] = [
-  {
-    id: "11111111-1111-4111-8111-111111111111",
-    tradingName: "Cymereg Enterprises",
-    legalName: "Cymereg Enterprises",
-    role: "owner",
-    onboardingStatus: "in_progress",
-    industryProfileCode: "distributor",
-    advancedSettingsEnabled: true,
-  },
-];
+export const demoBusinesses: BusinessSummary[] = [];
 
-export const demoBranches = [
-  {
-    id: "33333333-3333-4333-8333-333333333333",
-    businessId: demoBusinesses[0].id,
-    name: "Nairobi Depot",
-    code: "NRB",
-    type: "Distribution Centre",
-    active: true,
-    isDefault: true,
-  },
-];
+export const demoBranches = [];
 
-export const demoMemberships: Membership[] = [
-  {
-    userId: "22222222-2222-4222-8222-222222222222",
-    businessId: demoBusinesses[0].id,
-    role: "owner",
-    permissions: permissionsForRole("owner"),
-    active: true,
-    branchAccessMode: "all",
-    defaultBranchId: demoBranches[0].id,
-  },
-];
+export const demoMemberships: Membership[] = [];
 
 export const setupChecklist = [
   { label: "Complete business profile", complete: true, phase: "ready" },
@@ -54,12 +23,12 @@ export const setupChecklist = [
 ];
 
 export const configurationStats = {
-  activeBranches: 1,
-  stockLocations: 1,
-  activeUsers: 1,
-  taxSetupStatus: "Configured",
-  etimsStatus: "Setup pending",
-  documentNumberingStatus: "Configured",
+  activeBranches: 0,
+  stockLocations: 0,
+  activeUsers: 0,
+  taxSetupStatus: "Not configured",
+  etimsStatus: "Not connected",
+  documentNumberingStatus: "Not configured",
 };
 
 export const completionPercent = Math.round(

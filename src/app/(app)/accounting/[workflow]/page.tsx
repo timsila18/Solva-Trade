@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { completeProcessAction } from "@/app/(app)/actions";
+import { WorkflowFormFields } from "@/components/app/workflow-form-fields";
 import { accountingReports, defaultKenyanSmeAccounts, defaultRoleMappings } from "@/lib/accounting";
 import { diagnosticTypes, journalTypes, setupWizardSteps } from "@/lib/accounting-data";
 
@@ -167,14 +168,7 @@ export default async function AccountingWorkflowPage({
           <input type="hidden" name="process" value={config.title} />
           <input type="hidden" name="returnTo" value={`/accounting/${workflow}`} />
           <input type="hidden" name="next" value={`Continue ${config.title}`} />
-          <div className="grid gap-4 md:grid-cols-2">
-            {config.fields.map((field) => (
-              <label key={field} className="text-sm font-medium">
-                {field}
-                <input className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2" placeholder={field} />
-              </label>
-            ))}
-          </div>
+          <WorkflowFormFields fields={config.fields} />
           <div className="mt-6 flex flex-wrap gap-3">
             <button name="intent" value="Draft saved" className="rounded-md border border-slate-200 px-4 py-2 text-sm font-semibold">Save draft</button>
             <button name="intent" value="Validated" className="rounded-md border border-slate-200 px-4 py-2 text-sm font-semibold">Validate</button>

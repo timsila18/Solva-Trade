@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { Download, Printer } from "lucide-react";
 import { completeProcessAction } from "@/app/(app)/actions";
+import { WorkflowFormFields } from "@/components/app/workflow-form-fields";
 
 const workflows: Record<string, { title: string; description: string; fields: string[] }> = {
   quotations: {
@@ -78,14 +79,7 @@ export default async function SalesWorkflowPage({
         <input type="hidden" name="document" value={primaryDocument[workflow] ?? config.title} />
         <input type="hidden" name="returnTo" value={`/sales/${workflow}`} />
         <input type="hidden" name="next" value={`Continue ${config.title}`} />
-        <div className="grid gap-4 md:grid-cols-2">
-          {config.fields.map((field) => (
-            <label key={field} className="text-sm font-medium">
-              {field}
-              <input className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2" placeholder={field} />
-            </label>
-          ))}
-        </div>
+        <WorkflowFormFields fields={config.fields} />
         <div className="mt-6 flex flex-wrap gap-3">
           <button name="intent" value="Draft saved" className="rounded-md border border-slate-200 px-4 py-2 text-sm font-semibold">Save draft</button>
           <button name="intent" value="Validation previewed" className="rounded-md border border-slate-200 px-4 py-2 text-sm font-semibold">Preview validation</button>

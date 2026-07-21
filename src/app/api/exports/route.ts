@@ -84,51 +84,6 @@ const pdfColors: Record<string, string> = {
   watermark: "0.89 0.96 0.98",
 };
 
-const defaultLines: ReportLine[] = [
-  {
-    sku: "SKU-001",
-    description: "Primary transaction item or service",
-    unit: "Each",
-    quantity: 2,
-    unitPrice: 1250,
-    discount: 0,
-    taxRate: "VAT 16%",
-    taxAmount: 400,
-    lineTotal: 2900,
-    warehouse: "Main Stock",
-    batch: "Batch-001",
-    notes: "Captured as part of the selected process.",
-  },
-  {
-    sku: "SKU-002",
-    description: "Supporting charge, fee, item, or process detail",
-    unit: "Each",
-    quantity: 1,
-    unitPrice: 750,
-    discount: 50,
-    taxRate: "VAT 16%",
-    taxAmount: 112,
-    lineTotal: 812,
-    warehouse: "Nairobi Depot",
-    batch: "Not batch tracked",
-    notes: "Included so exports carry every useful transaction detail.",
-  },
-  {
-    sku: "SKU-003",
-    description: "Delivery, receiving, approval or audit reference",
-    unit: "Service",
-    quantity: 1,
-    unitPrice: 350,
-    discount: 0,
-    taxRate: "VAT 16%",
-    taxAmount: 56,
-    lineTotal: 406,
-    warehouse: "Dispatch",
-    batch: "Reference",
-    notes: "Keeps operational documents useful after download.",
-  },
-];
-
 function csvSafe(value: string) {
   return /^[=+\-@]/.test(value) ? `'${value}` : value;
 }
@@ -163,6 +118,57 @@ function generatedAt() {
     timeStyle: "medium",
     timeZone: "Africa/Nairobi",
   }).format(new Date());
+}
+
+function parseAmount(value: string | null) {
+  if (!value) return 0;
+  const amount = Number(value.replace(/[^\d.-]/g, ""));
+  return Number.isFinite(amount) ? amount : 0;
+}
+
+function submittedFields(searchParams: URLSearchParams) {
+  const fields: Record<string, { label: string; value: string }> = {};
+  searchParams.forEach((value, key) => {
+    if (!key.startsWith("field_")) return;
+    const fieldKey = key.slice("field_".length);
+    const label = searchParams.get(`label_${fieldKey}`) ?? fieldKey.replaceAll("_", " ");
+    if (value.trim()) fields[fieldKey] = { label, value: value.trim() };
+  });
+  return fields;
+}
+
+function fieldValue(fields: Record<string, { label: string; value: string }>, keys: string[], fallback = "") {
+  for (const key of keys) {
+    if (fields[key]?.value) return fields[key].value;
+  }
+  return fallback;
+}
+
+function reportLineFromFields(fields: Record<string, { label: string; value: string }>): ReportLine[] {
+  if (Object.keys(fields).length === 0) return [];
+  const quantity = parseAmount(fieldValue(fields, ["quantity", "ordered_quantity", "received_quantity", "accepted_quantity", "return_quantity", "quantity_sold"], "1"));
+  const unitPrice = parseAmount(fieldValue(fields, ["unit_price", "price", "unit_cost", "rate"], "0"));
+  const discount = parseAmount(fieldValue(fields, ["discount"], "0"));
+  const taxAmount = parseAmount(fieldValue(fields, ["tax", "withholding_tax"], "0"));
+  const explicitTotal = parseAmount(fieldValue(fields, ["total", "amount", "balance_due", "amount_received", "amount_sent"], "0"));
+  const subtotal = parseAmount(fieldValue(fields, ["subtotal"], "0")) || quantity * unitPrice;
+  const lineTotal = explicitTotal || Math.max(0, subtotal - discount + taxAmount);
+  return [
+    {
+      sku: fieldValue(fields, ["product", "sku", "item", "vehicle_stock_item", "account", "report"], "Entered item"),
+      description: fieldValue(fields, ["description", "product", "reason", "purpose", "category", "report"], "Submitted transaction line"),
+      unit: fieldValue(fields, ["unit"], "Each"),
+      quantity: quantity || 1,
+      unitPrice,
+      discount,
+      taxRate: taxAmount ? "Tax entered" : "No tax entered",
+      taxAmount,
+      lineTotal,
+      warehouse: fieldValue(fields, ["warehouse", "branch", "route", "account"], "Selected workspace"),
+      batch: fieldValue(fields, ["batch", "reference", "po_number", "invoice", "document_number"], "Not provided"),
+      notes: "Generated from submitted form values.",
+    },
+  ];
 }
 
 function initials(name: string) {
@@ -299,16 +305,43 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
   const tenant = await tenantContext();
   const moduleName = searchParams.get("module") ?? "Solva Trade";
   const processName = searchParams.get("process") ?? "Business Process";
+  const fields = submittedFields(searchParams);
   const partyName =
     searchParams.get("customer") ??
     searchParams.get("company") ??
     searchParams.get("user") ??
     searchParams.get("party") ??
-    tenant.businessName;
+    fieldValue(fields, ["customer", "supplier", "received_from", "paid_to", "payee", "owner", "driver", "employee"], tenant.businessName);
   const generatedBy = searchParams.get("generatedBy") ?? searchParams.get("printer") ?? tenant.generatedBy;
-  const subtotal = defaultLines.reduce((sum, line) => sum + line.quantity * line.unitPrice - line.discount, 0);
-  const tax = defaultLines.reduce((sum, line) => sum + line.taxAmount, 0);
-  const total = defaultLines.reduce((sum, line) => sum + line.lineTotal, 0);
+  const lines = reportLineFromFields(fields);
+  const subtotal =
+    parseAmount(fieldValue(fields, ["subtotal"], "0")) ||
+    lines.reduce((sum, line) => sum + line.quantity * line.unitPrice - line.discount, 0);
+  const tax = parseAmount(fieldValue(fields, ["tax"], "0")) || lines.reduce((sum, line) => sum + line.taxAmount, 0);
+  const discount = parseAmount(fieldValue(fields, ["discount"], "0")) || lines.reduce((sum, line) => sum + line.discount, 0);
+  const total =
+    parseAmount(fieldValue(fields, ["total", "amount", "amount_received", "amount_sent"], "0")) ||
+    lines.reduce((sum, line) => sum + line.lineTotal, 0) ||
+    Math.max(0, subtotal - discount + tax);
+  const balanceDue = parseAmount(fieldValue(fields, ["balance_due", "outstanding_amount"], "0")) || total;
+  const reference =
+    fieldValue(fields, [
+      "invoice_number",
+      "receipt_number",
+      "payment_number",
+      "quotation_number",
+      "sales_order_number",
+      "po_number",
+      "grn_number",
+      "bill_number",
+      "document_number",
+      "return_number",
+      "transfer_number",
+      "adjustment_number",
+      "count_number",
+    ]) || `${moduleName.slice(0, 3).toUpperCase()}-${processName.slice(0, 3).toUpperCase()}-${Date.now().toString().slice(-6)}`;
+  const documentDate = fieldValue(fields, ["invoice_date", "receipt_date", "payment_date", "received_date", "date", "delivery_date", "needed_by", "as_of_date"], "2026-07-22");
+  const dueDate = fieldValue(fields, ["due_date", "valid_until", "expected_date", "expiry_date", "expected_arrival"], documentDate);
 
   return {
     moduleName,
@@ -326,23 +359,24 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
       "Report owner": partyName,
       Business: tenant.businessName,
       "KRA PIN": tenant.kraPin || "Not provided",
-      "Reference number": `${moduleName.slice(0, 3).toUpperCase()}-${processName.slice(0, 3).toUpperCase()}-0001`,
-      "Document date": "2026-07-21",
-      "Due or action date": "2026-07-28",
-      Branch: "Nairobi Depot",
+      "Reference number": reference,
+      "Document date": documentDate,
+      "Due or action date": dueDate,
+      Branch: fieldValue(fields, ["branch", "dispatch_warehouse", "warehouse", "route"], "Main workspace"),
       Currency: "KES",
-      "Payment terms": "Net 7",
+      "Payment terms": fieldValue(fields, ["payment_terms", "payment_status", "payment_method", "delivery_terms"], "As entered"),
       "Process status": "Ready for review",
       "Source workspace": moduleName,
       "Business process": processName,
+      ...Object.fromEntries(Object.values(fields).map((field) => [field.label, field.value])),
     },
-    lines: defaultLines,
+    lines,
     totals: {
       Subtotal: money(subtotal),
-      Discount: money(defaultLines.reduce((sum, line) => sum + line.discount, 0)),
+      Discount: money(discount),
       Tax: money(tax),
       Total: money(total),
-      "Balance due": money(total),
+      "Balance due": money(balanceDue),
     },
     approvals: {
       Prepared: generatedBy,
@@ -354,7 +388,7 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
       "Created from the selected Solva Trade process.",
       "Includes header details, line details, totals, approval state, and audit context.",
       "CSV output protects spreadsheet users from formula injection.",
-      "Live deployments replace these template rows with posted tenant records.",
+      lines.length ? "Document values come from the submitted workflow fields." : "No posted transaction rows were found for the selected filters.",
       "Company logos are included when the business profile provides one; Solva Trade branding and watermark remain on every report.",
     ],
   };
@@ -675,7 +709,7 @@ function htmlDocument(report: Report, print = false) {
         .map((cell, cellIndex) => `<td class="${cellIndex >= headers.length - 3 ? "num" : ""}">${htmlEscape(cell)}</td>`)
         .join("")}</tr>`,
     )
-    .join("");
+    .join("") || `<tr><td colspan="${headers.length}" class="empty-row">No posted records found for the selected filters.</td></tr>`;
   const totalRows = Object.entries(report.totals)
     .map(([label, value], index, all) => `<tr class="${index === all.length - 1 ? "grand" : ""}"><th>${htmlEscape(label)}</th><td>${htmlEscape(value)}</td></tr>`)
     .join("");
@@ -744,6 +778,7 @@ function htmlDocument(report: Report, print = false) {
     caption { padding: 10px 12px; background: #f8fafc; color: ${brand.slate}; font-size: 11px; font-weight: 800; text-align: left; text-transform: uppercase; }
     th { background: var(--doc-accent); color: white; font-size: 11px; padding: 10px 8px; text-align: left; }
     td { border-top: 1px solid ${brand.border}; color: ${brand.navy}; font-size: 11px; line-height: 1.35; padding: 10px 8px; vertical-align: top; word-break: break-word; }
+    .empty-row { color: ${brand.muted}; text-align: center; padding: 22px 12px; }
     tbody tr:nth-child(even) td { background: #f4f8fc; }
     .num { text-align: right; }
     .after-table { display: grid; grid-template-columns: 1fr 300px; gap: 28px; margin-top: 24px; align-items: start; }
@@ -883,6 +918,12 @@ function renderPdfTable(canvas: PdfCanvas, report: Report, startY: number) {
   });
   y -= 24;
 
+  if (rows.length === 0) {
+    canvas.rect(x, y - 32, 530, 38, "soft");
+    canvas.text("No posted records found for the selected filters.", x + 150, y - 10, 8.5, "muted");
+    return y - 48;
+  }
+
   rows.forEach((row, rowIndex) => {
     const height = 38;
     canvas.rect(x, y - height + 6, 530, height, rowIndex % 2 === 0 ? "white" : "soft");
@@ -920,13 +961,10 @@ function pdf(report: Report) {
   if (report.businessEmail) canvas.text(`Email: ${report.businessEmail}`, 134, 738, 8.5, "slate");
   if (report.kraPin) canvas.text(`KRA PIN: ${report.kraPin}`, 134, 726, 8.5, "slate");
 
-  canvas.wrap(title, 372, 790, 190, 20, "navy", true, 22);
-  canvas.text(style.label, 374, 750, 8, "blue", true);
-  canvas.text(`# ${report.transaction["Reference number"]}`, 374, 736, 9, "muted");
-  canvas.text(`Generated: ${report.generatedAt}`, 374, 722, 8, "muted");
-  canvas.rect(374, 698, 126, 26, "navy");
-  canvas.text("S", 386, 706, 13, "cyan", true);
-  canvas.text("Solva Trade", 406, 706, 10, "white", true);
+  canvas.wrap(title, 372, 792, 190, 17, "navy", true, 20);
+  canvas.text(style.label, 374, 746, 8, "blue", true);
+  canvas.text(`# ${report.transaction["Reference number"]}`, 374, 732, 8.5, "muted");
+  canvas.text(`Generated: ${report.generatedAt}`, 374, 718, 7.5, "muted");
 
   let tableStart = 572;
   if (template === "salesReceipt") {
