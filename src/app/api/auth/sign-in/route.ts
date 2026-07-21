@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
 
   const { data: memberships } = await supabase
     .from("business_memberships")
-    .select("business_id, businesses(onboarding_status)")
+    .select("business_id")
     .eq("active", true)
     .limit(1);
   const membership = memberships?.[0];
@@ -65,7 +65,11 @@ export async function POST(request: NextRequest) {
   }
 
   await setActiveBusinessCookie(membership.business_id);
-  const business = Array.isArray(membership.businesses) ? membership.businesses[0] : membership.businesses;
+  const { data: business } = await supabase
+    .from("businesses")
+    .select("onboarding_status")
+    .eq("id", membership.business_id)
+    .maybeSingle();
   if (business?.onboarding_status !== "complete") return redirectTo(request, "/onboarding");
 
   return redirectTo(request, "/dashboard");
