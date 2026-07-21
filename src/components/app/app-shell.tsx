@@ -10,7 +10,6 @@ import {
   Settings,
   UserPlus,
 } from "lucide-react";
-import { signOutAction } from "@/app/(auth)/actions";
 import { QuickCommand } from "@/components/app/quick-command";
 import { navigationItems } from "@/lib/navigation";
 import { canPerformAction } from "@/lib/permissions";
@@ -146,7 +145,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
                 <Bell className="h-4 w-4" />
               </Link>
               {user ? (
-                <form action={signOutAction} className="shrink-0">
+                <form action="/api/auth/sign-out" method="post" className="shrink-0">
                   <button className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm" aria-label="Logout">
                     <LogOut className="h-4 w-4" />
                     <span className="hidden sm:inline">Logout</span>

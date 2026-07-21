@@ -1,12 +1,6 @@
 import Link from "next/link";
 import Image from "next/image";
 import { ArrowRight, ShieldCheck, Sparkles } from "lucide-react";
-import {
-  createAccountAction,
-  forgotPasswordAction,
-  resetPasswordAction,
-  signInAction,
-} from "@/app/(auth)/actions";
 
 export function AuthCard({
   title,
@@ -23,13 +17,13 @@ export function AuthCard({
 }) {
   const action =
     mode === "sign-in"
-      ? signInAction
+      ? "/api/auth/sign-in"
       : mode === "create-account"
-        ? createAccountAction
+        ? "/api/auth/create-account"
         : mode === "forgot"
-          ? forgotPasswordAction
+          ? "/api/auth/forgot-password"
           : mode === "reset"
-            ? resetPasswordAction
+            ? "/api/auth/reset-password"
             : undefined;
 
   return (
@@ -65,7 +59,7 @@ export function AuthCard({
             </div>
           </div>
         </div>
-        <form action={action} className="rounded-lg border border-white/40 bg-white p-6 text-slate-950 shadow-2xl">
+        <form action={action} method="post" className="rounded-lg border border-white/40 bg-white p-6 text-slate-950 shadow-2xl">
           <h2 className="text-2xl font-semibold">{title}</h2>
           <p className="mt-2 text-sm text-slate-600">{subtitle}</p>
           {error ? (
@@ -81,31 +75,31 @@ export function AuthCard({
           {mode !== "forgot" && mode !== "reset" ? (
             <label className="mt-5 block text-sm font-medium">
               Email
-              <input name="email" className="mt-2 min-h-11 w-full rounded-md border border-slate-300 px-3 py-2" type="email" />
+              <input name="email" className="mt-2 min-h-11 w-full rounded-md border border-slate-300 px-3 py-2" type="email" autoComplete="email" required />
             </label>
           ) : null}
           {mode === "create-account" ? (
             <label className="mt-4 block text-sm font-medium">
               Full name
-              <input name="full_name" className="mt-2 min-h-11 w-full rounded-md border border-slate-300 px-3 py-2" />
+              <input name="full_name" className="mt-2 min-h-11 w-full rounded-md border border-slate-300 px-3 py-2" autoComplete="name" required />
             </label>
           ) : null}
           {mode === "forgot" ? (
             <label className="mt-5 block text-sm font-medium">
               Account email
-              <input name="email" className="mt-2 min-h-11 w-full rounded-md border border-slate-300 px-3 py-2" type="email" />
+              <input name="email" className="mt-2 min-h-11 w-full rounded-md border border-slate-300 px-3 py-2" type="email" autoComplete="email" required />
             </label>
           ) : null}
           {mode !== "forgot" && mode !== "invitation" ? (
             <label className="mt-4 block text-sm font-medium">
               Password
-              <input name="password" className="mt-2 min-h-11 w-full rounded-md border border-slate-300 px-3 py-2" type="password" />
+              <input name="password" className="mt-2 min-h-11 w-full rounded-md border border-slate-300 px-3 py-2" type="password" autoComplete={mode === "sign-in" ? "current-password" : "new-password"} required />
             </label>
           ) : null}
           {mode === "reset" ? (
             <label className="mt-4 block text-sm font-medium">
               Confirm password
-              <input name="confirm_password" className="mt-2 min-h-11 w-full rounded-md border border-slate-300 px-3 py-2" type="password" />
+              <input name="confirm_password" className="mt-2 min-h-11 w-full rounded-md border border-slate-300 px-3 py-2" type="password" autoComplete="new-password" required />
             </label>
           ) : null}
           <button className="mt-6 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-800">
