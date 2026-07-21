@@ -23,14 +23,14 @@ export function PageHero({
   const PrimaryIcon = primaryAction.icon ?? ArrowRight;
 
   return (
-    <section className="overflow-hidden rounded-lg border border-[var(--solva-border)] bg-[linear-gradient(135deg,#ffffff_0%,#eef6ff_58%,#ecfeff_100%)] p-5 shadow-sm sm:p-6">
+    <section className="overflow-hidden rounded-lg border border-[var(--solva-border)] bg-[radial-gradient(circle_at_12px_12px,rgb(20_85_217_/_0.05)_2px,transparent_2px),linear-gradient(135deg,#ffffff_0%,#eef6ff_58%,#ecfeff_100%)] bg-[length:28px_28px,auto] p-5 shadow-sm sm:p-6">
       <div className="grid gap-6 lg:grid-cols-[1fr_320px] lg:items-end">
         <div>
           <p className="text-sm font-semibold text-[var(--solva-blue-700)]">{eyebrow}</p>
-          <h1 className="mt-2 max-w-4xl text-3xl font-semibold tracking-normal text-slate-950 sm:text-4xl">
+          <h1 className="mt-2 max-w-4xl text-4xl font-semibold tracking-normal text-slate-950 sm:text-5xl">
             {title}
           </h1>
-          <p className="mt-3 max-w-3xl text-base leading-7 text-slate-600">{description}</p>
+          <p className="mt-3 max-w-3xl text-lg leading-8 text-slate-600">{description}</p>
           <div className="mt-5 flex flex-col gap-3 sm:flex-row">
             <Link
               href={primaryAction.href}
@@ -50,12 +50,12 @@ export function PageHero({
           </div>
         </div>
         {insight ? (
-          <div className="rounded-lg border border-white/70 bg-white/75 p-4 shadow-sm">
+          <div className="rounded-lg border border-white/70 bg-white/85 p-5 shadow-sm">
             <div className="flex items-center gap-2 text-sm font-semibold text-[var(--solva-blue-700)]">
               <Sparkles className="h-4 w-4" />
               Solva Copilot
             </div>
-            <p className="mt-3 text-sm leading-6 text-slate-600">{insight}</p>
+            <p className="mt-3 text-base leading-7 text-slate-600">{insight}</p>
           </div>
         ) : null}
       </div>

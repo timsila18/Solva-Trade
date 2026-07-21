@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, Banknote, CreditCard, PackagePlus, ReceiptText, ShieldCheck, ShoppingCart, Users } from "lucide-react";
+import { ArrowRight, Banknote, CreditCard, Download, Eye, PackagePlus, ReceiptText, Search, ShieldCheck, ShoppingCart, SlidersHorizontal, Users } from "lucide-react";
 import { DashboardPanel, DashboardTile, EmptyState, MetricCard, MiniBars, PageHero, PlainCard, ProgressRow } from "@/components/ui/premium";
 import {
   alertExamples,
@@ -10,7 +10,7 @@ import {
   timelineFoundation,
 } from "@/lib/business-intelligence-data";
 import { generateRecommendations, rankAlerts } from "@/lib/business-intelligence";
-import { demoBranches, demoBusinesses } from "@/lib/mock-data";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 const alerts = rankAlerts(alertExamples);
 const recommendations = generateRecommendations(alertExamples).slice(0, 3);
@@ -27,12 +27,70 @@ const topActions = [
   { label: "Record Payment", href: "/cash-bank/receipts", icon: Banknote },
 ];
 
-export default function DashboardPage() {
+const attentionRows = [
+  ["Invoices", "No invoices yet", "Draft", "Create", "/sales/invoices"],
+  ["Stock receipts", "No GRNs posted yet", "Ready", "Receive", "/purchases/goods-received"],
+  ["Customers", "Customer list is empty", "Setup", "Add", "/customers/new"],
+  ["Reports", "Daily report is available", "Download", "Export", "/api/exports?module=Reports&process=Daily%20Report&format=pdf"],
+];
+
+function greeting() {
+  const hour = Number(new Intl.DateTimeFormat("en-KE", { hour: "numeric", hour12: false, timeZone: "Africa/Nairobi" }).format(new Date()));
+  if (hour < 12) return "Good morning";
+  if (hour < 17) return "Good afternoon";
+  return "Good evening";
+}
+
+export default async function DashboardPage() {
+  const supabase = await createSupabaseServerClient();
+  const { data: userData } = await supabase.auth.getUser();
+  const user = userData.user;
+  const userName =
+    typeof user?.user_metadata?.full_name === "string"
+      ? user.user_metadata.full_name
+      : user?.email?.split("@")[0] ?? "there";
+  const metadataBusinessId = typeof user?.app_metadata?.active_business_id === "string" ? user.app_metadata.active_business_id : null;
+  const metadataBusinessName =
+    typeof user?.app_metadata?.business_name === "string" ? user.app_metadata.business_name : "Your business";
+
+  let businessName = metadataBusinessName;
+  let branchName = "Main workspace";
+  let businessId = metadataBusinessId;
+
+  if (user) {
+    const { data: membership } = await supabase
+      .from("business_memberships")
+      .select("business_id")
+      .eq("active", true)
+      .limit(1)
+      .maybeSingle();
+    businessId = membership?.business_id ?? businessId;
+
+    if (businessId) {
+      const { data: business } = await supabase
+        .from("businesses")
+        .select("trading_name, legal_name")
+        .eq("id", businessId)
+        .maybeSingle();
+      businessName = business?.trading_name ?? business?.legal_name ?? businessName;
+
+      const { data: branch } = await supabase
+        .from("branches")
+        .select("branch_name")
+        .eq("business_id", businessId)
+        .eq("active", true)
+        .order("is_default", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      branchName = branch?.branch_name ?? branchName;
+    }
+  }
+
   return (
     <div className="pb-24">
       <PageHero
-        eyebrow="Good morning Timothy"
-        title={`${demoBusinesses[0].tradingName} is ready for today.`}
+        eyebrow={`${greeting()} ${userName}`}
+        title={`${businessName} is ready for today.`}
         description="This is the owner view: money in, money owed, stock risks and next actions in plain language before the detailed reports."
         primaryAction={{ label: "Start a Sale", href: "/sales/invoices", icon: ReceiptText }}
         secondaryAction={{ label: "Open Reports", href: "/reports" }}
@@ -58,6 +116,64 @@ export default function DashboardPage() {
             </Link>
           );
         })}
+      </section>
+
+      <section className="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-end">
+          <div>
+            <p className="text-sm font-semibold text-[var(--solva-blue-700)]">Find work quickly</p>
+            <h2 className="mt-1 text-2xl font-semibold tracking-normal text-slate-950">Search customer, invoice, product, supplier, GRN or receipt.</h2>
+          </div>
+          <button className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm">
+            <SlidersHorizontal className="h-4 w-4" />
+            Filter
+            <span className="rounded bg-cyan-50 px-2 py-0.5 text-xs text-[var(--solva-blue-700)]">0</span>
+          </button>
+        </div>
+        <div className="mt-5 grid gap-3 lg:grid-cols-[1fr_150px_150px_150px]">
+          <label className="relative">
+            <Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+            <input
+              className="min-h-12 w-full rounded-md border border-slate-300 bg-white py-3 pl-12 pr-4 text-base text-slate-900 shadow-sm placeholder:text-slate-400"
+              placeholder="Search anything in this business..."
+            />
+          </label>
+          <select className="min-h-12 rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-700" defaultValue="all">
+            <option value="all">All branches</option>
+            <option value="hq">{branchName}</option>
+          </select>
+          <select className="min-h-12 rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-700" defaultValue="all">
+            <option value="all">All statuses</option>
+            <option value="draft">Draft</option>
+            <option value="paid">Paid</option>
+            <option value="overdue">Overdue</option>
+          </select>
+          <select className="min-h-12 rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-700" defaultValue="today">
+            <option value="today">Today</option>
+            <option value="week">This week</option>
+            <option value="month">This month</option>
+          </select>
+        </div>
+      </section>
+
+      <section className="mt-6 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+        <div className="grid grid-cols-[1fr_1fr_120px_110px] gap-4 bg-slate-50 px-5 py-4 text-sm font-semibold text-slate-500">
+          <span>Workspace area</span>
+          <span>What needs attention</span>
+          <span>Status</span>
+          <span className="text-right">Action</span>
+        </div>
+        {attentionRows.map(([area, detail, status, action, href]) => (
+          <div key={area} className="grid min-h-16 grid-cols-[1fr_1fr_120px_110px] items-center gap-4 border-t border-slate-200 px-5 py-4 text-sm">
+            <span className="font-semibold text-slate-950">{area}</span>
+            <span className="text-slate-600">{detail}</span>
+            <span className="w-fit rounded-md bg-cyan-50 px-2.5 py-1 text-xs font-semibold text-[var(--solva-blue-700)]">{status}</span>
+            <Link href={href} className="inline-flex items-center justify-end gap-2 font-semibold text-[var(--solva-blue-700)]">
+              {action === "Export" ? <Download className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              {action}
+            </Link>
+          </div>
+        ))}
       </section>
 
       <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
@@ -123,7 +239,7 @@ export default function DashboardPage() {
               <h2 className="mt-1 text-xl font-semibold">What you need to know now</h2>
             </div>
             <span className="rounded-md bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700">
-              {demoBranches[0].name}
+              {branchName}
             </span>
           </div>
           <div className="mt-5 grid gap-3">

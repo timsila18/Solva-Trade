@@ -9,6 +9,7 @@ import {
   ReceiptText,
   Settings,
   UserPlus,
+  MessageCircle,
 } from "lucide-react";
 import { QuickCommand } from "@/components/app/quick-command";
 import { navigationItems } from "@/lib/navigation";
@@ -31,6 +32,21 @@ const quickCreate = [
   { label: "New Customer", href: "/customers/new", icon: UserPlus },
   { label: "Receive Stock", href: "/purchases/goods-received", icon: PackagePlus },
 ];
+
+const navGroups = [
+  { label: "Command", items: ["Dashboard", "Insights", "Reports"] },
+  { label: "Trading", items: ["Sales", "Customers", "Purchases", "Suppliers"] },
+  { label: "Stock & Routes", items: ["Inventory", "Products", "Distribution"] },
+  { label: "Money", items: ["Cash & Bank", "Expenses", "Accounting", "Financials", "Tax"] },
+  { label: "Company", items: ["Team", "Branches", "Warehouses", "Settings", "Billing", "Imports", "Audit Trail", "Support"] },
+];
+
+const navBadges: Record<string, string> = {
+  Sales: "0",
+  Purchases: "0",
+  Inventory: "0",
+  Reports: "New",
+};
 
 function roleName(role: CoreRole | string | null | undefined) {
   if (role === "owner") return "Business Owner";
@@ -118,10 +134,9 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
     (item) => !item.permission || canPerformAction(membership, item.permission),
   );
   const mainNav = nav.filter((item) => priorityNav.includes(item.label));
-  const moreNav = nav.filter((item) => !priorityNav.includes(item.label));
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,#ecfdf5_0,#f8fafc_32rem)] text-slate-950">
+    <div className="min-h-screen bg-[#f6f8fb] text-slate-950">
       <aside className="fixed inset-y-0 left-0 hidden w-72 border-r border-white/10 bg-[var(--solva-navy-900)] text-white shadow-2xl lg:flex lg:flex-col">
         <div className="border-b border-white/10 px-4 py-5">
           <Link href="/dashboard" className="block rounded-lg px-2 py-2">
@@ -139,42 +154,51 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
           </Link>
         </div>
 
-        <div className="mt-3 min-h-0 flex-1 overflow-y-auto px-4 pb-5 pr-2">
-          <nav className="space-y-1 pr-2">
-            {mainNav.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className="flex min-h-10 items-center justify-between rounded-md px-3 py-2 text-sm font-medium text-blue-50/85 transition hover:bg-white/10 hover:text-white"
-              >
-                <span>{item.label}</span>
-                {item.status === "next_phase" ? (
-                  <span className="text-[10px] uppercase text-cyan-200/70">Soon</span>
-                ) : null}
-              </Link>
-            ))}
+        <div className="mt-3 min-h-0 flex-1 overflow-y-auto px-4 pb-6 pr-2">
+          <nav className="space-y-5 pr-2">
+            {navGroups.map((group) => {
+              const groupItems = nav.filter((item) => group.items.includes(item.label));
+              if (groupItems.length === 0) return null;
+              return (
+                <div key={group.label} className="border-b border-white/10 pb-4 last:border-b-0">
+                  <p className="px-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-cyan-200/70">
+                    {group.label}
+                  </p>
+                  <div className="mt-2 grid gap-1">
+                    {groupItems.map((item, index) => (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        className={`flex min-h-11 items-center justify-between rounded-md px-3 py-2 text-sm font-medium transition ${
+                          index === 0 && group.label === "Command"
+                            ? "bg-white/12 text-white ring-1 ring-cyan-200/20"
+                            : "text-blue-50/75 hover:bg-white/10 hover:text-white"
+                        }`}
+                      >
+                        <span>{item.label}</span>
+                        <span className="flex items-center gap-2">
+                          {navBadges[item.label] ? (
+                            <span className="rounded-md bg-cyan-100 px-2 py-0.5 text-[11px] font-semibold text-[var(--solva-navy-900)]">
+                              {navBadges[item.label]}
+                            </span>
+                          ) : null}
+                          {item.status === "next_phase" ? (
+                            <span className="text-[10px] uppercase text-cyan-200/70">Soon</span>
+                          ) : null}
+                        </span>
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
           </nav>
-
-          <div className="mt-5 border-t border-white/10 pt-4">
-            <p className="px-3 text-xs font-semibold uppercase text-cyan-200/70">More tools</p>
-            <div className="mt-2 grid gap-1 pr-2">
-              {moreNav.map((item) => (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className="rounded-md px-3 py-2 text-sm font-medium text-blue-50/70 transition hover:bg-white/10 hover:text-white"
-                >
-                  {item.label}
-                </Link>
-              ))}
-            </div>
-          </div>
         </div>
 
       </aside>
       <div className="lg:pl-72">
-        <header className="sticky top-0 z-20 border-b border-slate-200/80 bg-white/85 px-4 py-3 backdrop-blur-xl">
-          <div className="grid gap-3 xl:grid-cols-[minmax(220px,320px)_minmax(260px,1fr)_auto] xl:items-center">
+        <header className="sticky top-0 z-20 border-b border-slate-200/80 bg-white/92 px-4 py-3 backdrop-blur-xl">
+          <div className="grid gap-3 xl:grid-cols-[minmax(260px,390px)_minmax(260px,1fr)_auto] xl:items-center">
             <div className="flex min-w-0 items-center gap-3">
               <Link href="/dashboard" className="relative h-10 w-20 shrink-0 overflow-hidden rounded-md bg-[var(--solva-navy-900)] lg:hidden">
                 <Image
@@ -186,7 +210,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
                 />
               </Link>
               <div>
-                <p className="text-xs font-medium text-slate-500">
+                <p className="max-w-[34rem] truncate text-xs font-medium text-slate-500">
                   {user ? `Logged in as ${userName} ${roleName(membership.role)} ${metadataBusinessShortName}` : "You are working in"}
                 </p>
                 <p className="text-sm font-semibold text-slate-950">
@@ -201,7 +225,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
               <QuickCommand />
             </div>
             <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
-              <span className="hidden min-h-10 items-center rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 sm:inline-flex">
+              <span className="hidden min-h-10 items-center rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-sm sm:inline-flex">
                 {branch.name} · {branch.code}
               </span>
               {quickCreate.map((action) => {
@@ -256,6 +280,13 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
           </Link>
         ))}
       </nav>
+      <Link
+        href="/support"
+        aria-label="Open support"
+        className="fixed bottom-20 right-5 z-30 grid h-14 w-14 place-items-center rounded-full bg-[var(--solva-blue-700)] text-white shadow-xl shadow-blue-950/20 transition hover:bg-[var(--solva-navy-900)] lg:bottom-6"
+      >
+        <MessageCircle className="h-6 w-6" />
+      </Link>
     </div>
   );
 }

@@ -4,8 +4,8 @@ import { permissionsForRole } from "./permissions";
 export const demoBusinesses: BusinessSummary[] = [
   {
     id: "11111111-1111-4111-8111-111111111111",
-    tradingName: "Aquamist Nairobi Distributor",
-    legalName: "Aquamist Nairobi Distribution Ltd",
+    tradingName: "Cymereg Enterprises",
+    legalName: "Cymereg Enterprises",
     role: "owner",
     onboardingStatus: "in_progress",
     industryProfileCode: "distributor",
