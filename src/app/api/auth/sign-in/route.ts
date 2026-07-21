@@ -4,6 +4,8 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { setActiveBusinessCookie } from "@/lib/tenant";
 import { parseEmail, parsePassword, redirectTo, redirectWithError } from "@/lib/auth/route-helpers";
 
+const platformRoles = new Set(["super_administrator", "operations_administrator", "support_agent", "security_reviewer", "read_only_auditor"]);
+
 export async function POST(request: NextRequest) {
   const formData = await request.formData();
   const email = parseEmail(formData);
@@ -30,16 +32,33 @@ export async function POST(request: NextRequest) {
   const membership = memberships?.[0];
   if (!membership?.business_id) {
     const { data: userData } = await supabase.auth.getUser();
-    const admin = createSupabaseAdminClient();
-    const { data: platformUser } = userData.user
-      ? await admin
+    if (userData.user && platformRoles.has(String(userData.user.app_metadata?.platform_role ?? ""))) {
+      return redirectTo(request, "/dashboard");
+    }
+
+    let platformUser: { id: string } | null = null;
+    if (userData.user) {
+      try {
+        const admin = createSupabaseAdminClient();
+        const { data } = await admin
           .from("platform_users")
           .select("id")
           .eq("user_id", userData.user.id)
           .eq("active", true)
           .limit(1)
-          .maybeSingle()
-      : { data: null };
+          .maybeSingle();
+        platformUser = data;
+      } catch {
+        const { data } = await supabase
+          .from("platform_users")
+          .select("id")
+          .eq("user_id", userData.user.id)
+          .eq("active", true)
+          .limit(1)
+          .maybeSingle();
+        platformUser = data;
+      }
+    }
 
     if (platformUser?.id) return redirectTo(request, "/dashboard");
     return redirectTo(request, "/onboarding");

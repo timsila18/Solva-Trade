@@ -49,16 +49,24 @@ export async function POST(request: NextRequest) {
     return redirectWithError(request, "/onboarding", "Complete the required business details before saving.");
   }
 
-  const admin = createSupabaseAdminClient();
+  let admin: ReturnType<typeof createSupabaseAdminClient> | null = null;
+  try {
+    admin = createSupabaseAdminClient();
+  } catch {
+    admin = null;
+  }
+  const db = admin ?? supabase;
   const user = userData.user;
-  await admin.from("profiles").upsert({
-    id: user.id,
-    full_name: user.user_metadata?.full_name ?? user.email?.split("@")[0] ?? "Solva Trade user",
-    email: user.email ?? values.data.email ?? "",
-    updated_at: new Date().toISOString(),
-  });
+  if (admin) {
+    await admin.from("profiles").upsert({
+      id: user.id,
+      full_name: user.user_metadata?.full_name ?? user.email?.split("@")[0] ?? "Solva Trade user",
+      email: user.email ?? values.data.email ?? "",
+      updated_at: new Date().toISOString(),
+    });
+  }
 
-  const { data: existingMembership, error: membershipLookupError } = await admin
+  const { data: existingMembership, error: membershipLookupError } = await db
     .from("business_memberships")
     .select("business_id")
     .eq("user_id", user.id)
@@ -90,8 +98,8 @@ export async function POST(request: NextRequest) {
   };
 
   const businessResult = existingMembership?.business_id
-    ? await admin.from("businesses").update(payload).eq("id", existingMembership.business_id).select("id").single()
-    : await admin.from("businesses").insert(payload).select("id").single();
+    ? await db.from("businesses").update(payload).eq("id", existingMembership.business_id).select("id").single()
+    : await db.from("businesses").insert(payload).select("id").single();
 
   if (businessResult.error || !businessResult.data) {
     return redirectWithError(request, "/onboarding", "We could not save the business workspace. Please try again.");
@@ -99,7 +107,7 @@ export async function POST(request: NextRequest) {
 
   const businessId = businessResult.data.id;
   if (!existingMembership?.business_id) {
-    const { error: insertMembershipError } = await admin.from("business_memberships").insert({
+    const { error: insertMembershipError } = await db.from("business_memberships").insert({
       user_id: user.id,
       business_id: businessId,
       role: "owner",
