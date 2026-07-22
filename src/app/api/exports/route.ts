@@ -193,6 +193,98 @@ function reportLineFromFields(fields: Record<string, { label: string; value: str
   ];
 }
 
+function isPurchaseSourceReport(processName: string) {
+  const value = processName.toLowerCase();
+  return (
+    value.includes("purchase source profitability") ||
+    value.includes("direct vs local") ||
+    value.includes("emergency purchase impact") ||
+    value.includes("supplier price comparison")
+  );
+}
+
+function sourceLabel(value: string | null | undefined) {
+  const source = value || "unspecified";
+  return source
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part[0]?.toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+async function activeReportBusinessId() {
+  const supabase = await createSupabaseServerClient();
+  const { data } = await supabase.auth.getUser();
+  const user = data.user;
+  if (!user) return null;
+
+  const { data: membership } = await supabase
+    .from("business_memberships")
+    .select("business_id")
+    .eq("active", true)
+    .limit(1)
+    .maybeSingle();
+
+  return membership?.business_id ?? (typeof user.app_metadata?.active_business_id === "string" ? user.app_metadata.active_business_id : null);
+}
+
+async function purchaseSourceReportLines(processName: string): Promise<ReportLine[]> {
+  const businessId = await activeReportBusinessId();
+  if (!businessId) return [];
+
+  const admin = createSupabaseAdminClient();
+  let query = admin
+    .from("stock_movements")
+    .select(
+      "reference_number, movement_date, source_type, source_supplier_name, quantity_base, unit_cost, total_cost, direct_reference_unit_cost, local_reference_unit_cost, source_unit_cost_variance, source_reason, products(product_name, product_code, sku, default_selling_price_placeholder)",
+    )
+    .eq("business_id", businessId)
+    .eq("direction", "in")
+    .eq("movement_type", "purchase_receipt")
+    .neq("source_type", "unspecified")
+    .order("movement_date", { ascending: false })
+    .limit(200);
+
+  const lower = processName.toLowerCase();
+  if (lower.includes("emergency")) query = query.in("source_type", ["emergency_purchase", "spot_purchase"]);
+
+  const { data } = await query;
+  return (data ?? []).map((row) => {
+    const productRecord = Array.isArray(row.products) ? row.products[0] : row.products;
+    const product = productRecord as
+      | { product_name?: string | null; product_code?: string | null; sku?: string | null; default_selling_price_placeholder?: number | string | null }
+      | null;
+    const quantity = Number(row.quantity_base ?? 0);
+    const unitCost = Number(row.unit_cost ?? 0);
+    const sellingPrice = Number(product?.default_selling_price_placeholder ?? 0);
+    const directBenchmark = Number(row.direct_reference_unit_cost ?? 0);
+    const unitVariance = directBenchmark ? unitCost - directBenchmark : Number(row.source_unit_cost_variance ?? 0);
+    const costVariance = unitVariance * quantity;
+    const potentialProfit = sellingPrice ? (sellingPrice - unitCost) * quantity : Number(row.total_cost ?? 0);
+
+    return {
+      sku: String(product?.sku ?? product?.product_code ?? row.reference_number ?? "SRC"),
+      description: String(product?.product_name ?? "Purchased product"),
+      unit: "Unit",
+      quantity,
+      unitPrice: unitCost,
+      discount: directBenchmark,
+      taxRate: directBenchmark ? `${money(directBenchmark)} direct` : "No direct benchmark",
+      taxAmount: costVariance,
+      lineTotal: potentialProfit,
+      warehouse: String(row.source_supplier_name ?? "Supplier not recorded"),
+      batch: sourceLabel(String(row.source_type ?? "unspecified")),
+      notes:
+        String(row.source_reason ?? "").trim() ||
+        (directBenchmark
+          ? unitVariance > 0
+            ? "Bought above direct-supplier benchmark; review pricing or urgency."
+            : "Bought within or below direct-supplier benchmark."
+          : "Add direct benchmark cost to compare this source."),
+    };
+  });
+}
+
 function initials(name: string) {
   return name
     .split(/\s+/)
@@ -432,6 +524,19 @@ function blueprintFromTerms(report: Report): DocumentBlueprint {
   if (value.includes("quotation comparison")) {
     return { ...base, accent: "#0F766E", soft: "#ECFDF5", label: "Supplier selection worksheet", table: "Supplier quote comparison", headers: ["Item", "Supplier A", "Supplier B", "Supplier C", "Best Price", "Lead Time", "Recommendation"], signatures: ["Prepared by", "Reviewed by", "Selection approved"], footerNote: "Comparison should preserve the reason for choosing a supplier.", emphasis: "report" };
   }
+  if (value.includes("purchase source profitability") || value.includes("direct vs local") || value.includes("emergency purchase impact") || value.includes("supplier price comparison")) {
+    return {
+      ...base,
+      accent: value.includes("emergency") ? "#D8A43B" : value.includes("direct vs local") ? "#1455D9" : "#071A2B",
+      soft: value.includes("emergency") ? "#FFF8E6" : "#EEF6FF",
+      label: "Source-aware purchasing intelligence",
+      table: "Source, supplier, buying cost, benchmark variance and potential margin",
+      headers: ["#", "Product", "Source", "Supplier", "Qty Received", "Unit Cost", "Direct Benchmark", "Cost Variance", "Potential Profit"],
+      signatures: ["Prepared by", "Purchasing review", "Owner decision"],
+      footerNote: "Source reports separate direct supplier, local market, spot, alternative and emergency purchases so owners can protect margin.",
+      emphasis: "report",
+    };
+  }
   if (value.includes("purchase order")) {
     return { ...base, accent: "#1D4ED8", soft: "#EFF6FF", label: "Supplier buying instruction", table: "Ordered items and commercial terms", headers: ["S/No", "Product Code", "Product Name", "Qty", "Unit", "Rate", "Tax", "Amount"], signatures: ["Requisitioner", "Authorised signatory", "Supplier acknowledgement"], footerNote: "Quote the purchase order number on all delivery notes and invoices.", emphasis: "invoice" };
   }
@@ -662,7 +767,9 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
     searchParams.get("party") ??
     fieldValue(fields, ["customer", "supplier", "received_from", "paid_to", "payee", "owner", "driver", "employee"], tenant.businessName);
   const generatedBy = searchParams.get("generatedBy") ?? searchParams.get("printer") ?? tenant.generatedBy;
-  const lines = reportLineFromFields(fields);
+  const submittedLines = reportLineFromFields(fields);
+  const liveSourceLines = isPurchaseSourceReport(processName) ? await purchaseSourceReportLines(processName) : [];
+  const lines = liveSourceLines.length ? liveSourceLines : submittedLines;
   const subtotal =
     parseAmount(fieldValue(fields, ["subtotal"], "0")) ||
     lines.reduce((sum, line) => sum + line.quantity * line.unitPrice - line.discount, 0);
@@ -714,7 +821,7 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
       Branch: fieldValue(fields, ["branch", "dispatch_warehouse", "warehouse", "route"], "Main workspace"),
       Currency: "KES",
       "Payment terms": fieldValue(fields, ["payment_terms", "payment_status", "payment_method", "delivery_terms"], "As entered"),
-      "Process status": "Ready for review",
+      "Process status": liveSourceLines.length ? "Source report from posted receipts" : "Ready for review",
       "Source workspace": moduleName,
       "Business process": processName,
       ...Object.fromEntries(Object.values(fields).map((field) => [field.label, field.value])),
@@ -737,7 +844,11 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
       "Created from the selected Solva Trade process.",
       "Includes header details, line details, totals, approval state, and audit context.",
       "CSV output protects spreadsheet users from formula injection.",
-      lines.length ? "Document values come from the submitted workflow fields." : "No posted transaction rows were found for the selected filters.",
+      liveSourceLines.length
+        ? "Source report values come from posted GRNs and stock receipt movements."
+        : lines.length
+          ? "Document values come from the submitted workflow fields."
+          : "No posted transaction rows were found for the selected filters.",
       "Company logos are included when the business profile provides one; Solva Trade branding and watermark remain on every report.",
     ],
   };
@@ -852,19 +963,24 @@ function valueForHeader(report: Report, line: ReportLine, index: number, header:
   if (h.includes("timestamp")) return report.generatedAt;
   if (h.includes("date") || h.includes("period") || h.includes("needed by") || h.includes("expiry")) return report.transaction["Document date"];
   if (h.includes("document") || h.includes("reference") || h.includes("ref") || h.includes("invoice") || h.includes("po") || h.includes("voucher") || h.includes("receipt") || h.includes("req")) return report.transaction["Reference number"];
-  if (h.includes("customer") || h.includes("supplier") || h.includes("party") || h.includes("payee") || h.includes("source") || h.includes("received from") || h.includes("recipient")) return report.partyName;
+  if (h.includes("source")) return line.batch;
+  if (h.includes("supplier")) return line.warehouse;
+  if (h.includes("customer") || h.includes("party") || h.includes("payee") || h.includes("received from") || h.includes("recipient")) return report.partyName;
   if (h.includes("description") || h.includes("particular") || h.includes("item") || h.includes("product") || h.includes("specification") || h.includes("account name") || h.includes("activity")) return line.description;
   if (h.includes("sku") || h.includes("code") || h.includes("account code")) return line.sku;
   if (h.includes("unit") && !h.includes("price")) return line.unit;
   if (h.includes("ordered")) return String(line.quantity);
   if (h.includes("delivered") || h.includes("received") || h.includes("accepted") || h.includes("loaded") || h.includes("picked") || h.includes("counted") || h.includes("sent")) return String(line.quantity);
-  if (h.includes("returned") || h.includes("rejected") || h.includes("variance") || h.includes("backorder")) return "0";
+  if (h.includes("benchmark")) return line.discount ? money(line.discount) : "Not entered";
+  if (h.includes("variance")) return money(line.taxAmount);
+  if (h.includes("returned") || h.includes("rejected") || h.includes("backorder")) return "0";
   if (h.includes("outstanding") || h.includes("running balance") || h === "balance" || h.includes("closing")) return money(line.lineTotal);
   if (h.includes("qty") || h.includes("quantity") || h.includes("on hand")) return String(line.quantity);
   if (h.includes("tax") || h.includes("vat")) return h.includes("rate") ? line.taxRate : money(line.taxAmount);
   if (h.includes("price") || h.includes("rate") || h.includes("cost")) return money(line.unitPrice);
   if (h.includes("discount")) return money(line.discount);
   if (h.includes("money out") || h.includes("credit") || h.includes("paid")) return money(line.discount);
+  if (h.includes("profit") || h.includes("margin")) return money(line.lineTotal);
   if (h.includes("money in") || h.includes("debit") || h.includes("gross") || h.includes("amount") || h.includes("value") || h.includes("total") || h.includes("cash") || h.includes("sales") || h.includes("purchases") || h.includes("outstanding")) return money(line.lineTotal);
   if (h.includes("warehouse") || h.includes("branch") || h.includes("route") || h.includes("vehicle") || h.includes("location") || h.includes("from") || h.includes("to") || h.includes("bin")) return line.warehouse;
   if (h.includes("batch")) return line.batch;

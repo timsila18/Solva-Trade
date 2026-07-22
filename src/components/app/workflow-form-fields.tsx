@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { CustomerLookup, InvoiceLookup, ProductLookup } from "@/lib/workflow-live-data";
+import type { CustomerLookup, InvoiceLookup, ProductLookup, SupplierLookup } from "@/lib/workflow-live-data";
 
 function fieldKey(label: string) {
   return label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || "field";
@@ -72,11 +72,15 @@ export function WorkflowFormFields({
   customers = [],
   products = [],
   unpaidInvoices = [],
+  suppliers = [],
+  autoFillProductPrice = true,
 }: {
   fields: string[];
   customers?: CustomerLookup[];
   products?: ProductLookup[];
   unpaidInvoices?: InvoiceLookup[];
+  suppliers?: SupplierLookup[];
+  autoFillProductPrice?: boolean;
 }) {
   const normalizedFields = useMemo(() => {
     const hasTax = fields.some((field) => fieldKey(field) === "tax");
@@ -114,8 +118,10 @@ export function WorkflowFormFields({
         const selectedCustomer = customers.find((customer) => customer.name === values.customer || customer.id === values.customer_id);
         const selectedInvoice = unpaidInvoices.find((invoice) => invoice.number === values.invoice || invoice.id === values.invoice_id);
         const isCustomerField = key === "customer";
+        const isSupplierField = key === "supplier" || key === "preferred_supplier";
         const isProductField = key === "product";
         const isInvoiceField = key === "invoice";
+        const selectedSupplier = suppliers.find((supplier) => supplier.name === values[key] || supplier.id === values.supplier_id);
         const resolvedType =
           type === "text" && /^(subtotal|total|tax|amount|balance_due|discount|price|unit_price|quantity)$/.test(key) ? "number" : type;
         const isCalculated =
@@ -136,6 +142,8 @@ export function WorkflowFormFields({
               ? `Saved customer - Code ${selectedCustomer.code}${selectedCustomer.balance ? ` - Balance KES ${selectedCustomer.balance.toLocaleString("en-KE")}` : ""}`
               : isInvoiceField && selectedInvoice
                 ? `Outstanding balance KES ${selectedInvoice.balanceDue.toLocaleString("en-KE")}`
+                : isSupplierField && selectedSupplier
+                  ? `Saved supplier - ${selectedSupplier.code} - ${selectedSupplier.type.replaceAll("_", " ")}`
                 : "";
 
         if (isCustomerField && customers.length > 0) {
@@ -170,6 +178,60 @@ export function WorkflowFormFields({
           );
         }
 
+        if (isSupplierField && suppliers.length > 0) {
+          return (
+            <label key={label} className="text-sm font-medium">
+              {label}
+              <input type="hidden" name={`label_${key}`} value={label} />
+              <input type="hidden" name="field_supplier_id" value={selectedSupplier?.id ?? ""} />
+              <input type="hidden" name="label_supplier_id" value="Supplier ID" />
+              <input
+                name={`field_${key}`}
+                list="supplier-options"
+                required={key === "supplier"}
+                value={values[key] ?? ""}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  const supplier = suppliers.find((item) => item.name === next || item.code === next || item.phone === next);
+                  setValues((current) => ({ ...current, [key]: next, supplier_id: supplier?.id ?? "" }));
+                }}
+                className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2"
+                placeholder="Search supplier by name, code or phone"
+              />
+              <datalist id="supplier-options">
+                {suppliers.map((supplier) => (
+                  <option key={supplier.id} value={supplier.name}>
+                    {supplier.code} {supplier.phone ? `- ${supplier.phone}` : ""} - {supplier.type.replaceAll("_", " ")}
+                  </option>
+                ))}
+              </datalist>
+              {helper ? <span className="mt-1 block text-xs text-slate-500">{helper}</span> : null}
+            </label>
+          );
+        }
+
+        if (key === "source_type") {
+          return (
+            <label key={label} className="text-sm font-medium">
+              {label}
+              <input type="hidden" name={`label_${key}`} value={label} />
+              <select
+                name={`field_${key}`}
+                value={values[key] ?? "direct_supplier"}
+                onChange={(event) => setValues((current) => ({ ...current, [key]: event.target.value }))}
+                className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2"
+              >
+                <option value="direct_supplier">Direct supplier</option>
+                <option value="local_market">Local market supplier</option>
+                <option value="spot_purchase">Spot purchase</option>
+                <option value="alternative_supplier">Alternative supplier</option>
+                <option value="emergency_purchase">Emergency purchase</option>
+              </select>
+              <span className="mt-1 block text-xs text-slate-500">Used for direct-vs-local price and profit reports.</span>
+            </label>
+          );
+        }
+
         if (isProductField && products.length > 0) {
           return (
             <label key={label} className="text-sm font-medium">
@@ -193,8 +255,8 @@ export function WorkflowFormFields({
                     ...current,
                     [key]: next,
                     product_id: product?.id ?? "",
-                    unit_price: product?.price ? String(product.price) : current.unit_price,
-                    price: product?.price ? String(product.price) : current.price,
+                    unit_price: autoFillProductPrice && product?.price ? String(product.price) : current.unit_price,
+                    price: autoFillProductPrice && product?.price ? String(product.price) : current.price,
                     vat_rate: product ? String(product.vatRate) : current.vat_rate,
                     tax_code: product?.vatCode ?? current.tax_code,
                   }));

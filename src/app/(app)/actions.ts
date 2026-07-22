@@ -60,6 +60,23 @@ function productTypeValue(value: string) {
   return typeMap[value.trim().toLowerCase()] ?? "stock_item";
 }
 
+function sourceTypeValue(value: string) {
+  const sourceMap: Record<string, string> = {
+    "direct supplier": "direct_supplier",
+    direct_supplier: "direct_supplier",
+    "local market": "local_market",
+    "local market supplier": "local_market",
+    local_market: "local_market",
+    "spot purchase": "spot_purchase",
+    spot_purchase: "spot_purchase",
+    "alternative supplier": "alternative_supplier",
+    alternative_supplier: "alternative_supplier",
+    "emergency purchase": "emergency_purchase",
+    emergency_purchase: "emergency_purchase",
+  };
+  return sourceMap[value.trim().toLowerCase()] ?? "direct_supplier";
+}
+
 async function getWorkspaceContext(userId: string, fallbackBusinessId?: string | null) {
   const businessId = (await getActiveBusinessId()) || fallbackBusinessId;
   if (!businessId) throw new Error("No active business was selected.");
@@ -281,6 +298,125 @@ async function postCustomerPayment(
     .eq("id", invoiceId);
 }
 
+async function postGoodsReceived(formData: FormData, userId: string, fallbackBusinessId?: string | null) {
+  const { admin, businessId, branchId, warehouseId } = await getWorkspaceContext(userId, fallbackBusinessId);
+  const supplierId = getField(formData, "supplier_id");
+  const productId = getField(formData, "product_id");
+  const deliveredQuantity = getNumber(formData, "received_quantity");
+  const acceptedQuantity = getNumber(formData, "accepted_quantity") || deliveredQuantity;
+  const rejectedQuantity = getNumber(formData, "rejected_quantity");
+  const unitCost = getNumber(formData, "unit_cost");
+  const grnNumber = getField(formData, "grn_number") || `GRN-${Date.now().toString().slice(-8)}`;
+  const receiptDate = getField(formData, "received_date") || new Date().toISOString().slice(0, 10);
+  const sourceType = sourceTypeValue(getField(formData, "source_type"));
+  const directCost = getNumber(formData, "direct_reference_unit_cost");
+  const localCost = getNumber(formData, "local_reference_unit_cost");
+  const sourceVariance = localCost && directCost ? localCost - directCost : 0;
+  const sourceReason = getField(formData, "source_reason") || null;
+
+  if (!supplierId) throw new Error("Select a saved supplier before posting the GRN.");
+  if (!productId) throw new Error("Select a saved product before posting the GRN.");
+  if (acceptedQuantity <= 0) throw new Error("Enter the accepted quantity received.");
+  if (unitCost <= 0) throw new Error("Enter the purchase unit cost for this receipt.");
+
+  const { data: supplier } = await admin
+    .from("suppliers")
+    .select("legal_name, trading_name")
+    .eq("business_id", businessId)
+    .eq("id", supplierId)
+    .maybeSingle();
+  if (!supplier) throw new Error("Selected supplier was not found.");
+
+  const { data: product } = await admin
+    .from("products")
+    .select("product_name")
+    .eq("business_id", businessId)
+    .eq("id", productId)
+    .maybeSingle();
+  if (!product) throw new Error("Selected product was not found.");
+
+  const supplierName = supplier.trading_name || supplier.legal_name;
+  const { data: grn, error: grnError } = await admin
+    .from("goods_received_notes")
+    .insert({
+      business_id: businessId,
+      branch_id: branchId,
+      supplier_id: supplierId,
+      grn_number: grnNumber,
+      supplier_delivery_note_number: getField(formData, "supplier_delivery_note_number") || null,
+      receipt_date: receiptDate,
+      warehouse_id: warehouseId,
+      received_by: userId,
+      status: "posted",
+      source_type: sourceType,
+      source_reason: sourceReason,
+      direct_reference_unit_cost: directCost || null,
+      local_reference_unit_cost: localCost || null,
+      source_unit_cost_variance: sourceVariance || null,
+      notes: [
+        sourceReason ? `Source reason: ${sourceReason}` : "",
+        directCost ? `Direct reference cost: ${directCost}` : "",
+        localCost ? `Local reference cost: ${localCost}` : "",
+      ]
+        .filter(Boolean)
+        .join("; "),
+      posted_at: new Date().toISOString(),
+    })
+    .select("id")
+    .single();
+  if (grnError || !grn) throw new Error(grnError?.message ?? "Could not post the GRN.");
+
+  const { error: itemError } = await admin.from("goods_received_note_items").insert({
+    business_id: businessId,
+    grn_id: grn.id,
+    product_id: productId,
+    supplier_batch: getField(formData, "batch") || null,
+    expiry_date: getField(formData, "expiry_date") || null,
+    delivered_quantity: deliveredQuantity || acceptedQuantity,
+    accepted_quantity: acceptedQuantity,
+    rejected_quantity: rejectedQuantity,
+    base_quantity: acceptedQuantity,
+    unit_cost: unitCost,
+    warehouse_id: warehouseId,
+    quality_status: rejectedQuantity > 0 ? "accepted_with_issues" : "accepted",
+    source_type: sourceType,
+    direct_reference_unit_cost: directCost || null,
+    local_reference_unit_cost: localCost || null,
+    source_unit_cost_variance: sourceVariance || null,
+    source_reason: sourceReason,
+    notes: `Source: ${sourceType.replaceAll("_", " ")} via ${supplierName}`,
+  });
+  if (itemError) throw new Error(itemError.message);
+
+  const { error: movementError } = await admin.from("stock_movements").insert({
+    business_id: businessId,
+    branch_id: branchId,
+    warehouse_id: warehouseId,
+    product_id: productId,
+    movement_type: "purchase_receipt",
+    direction: "in",
+    quantity_base: acceptedQuantity,
+    display_quantity: acceptedQuantity,
+    unit_conversion_factor: 1,
+    unit_cost: unitCost,
+    total_cost: unitCost * acceptedQuantity,
+    reference_document_type: "goods_received_note",
+    reference_document_id: grn.id,
+    reference_number: grnNumber,
+    reason: `Goods received from ${supplierName}`,
+    notes: `Source: ${sourceType.replaceAll("_", " ")}. ${sourceReason ?? ""}`.trim(),
+    source_type: sourceType,
+    source_supplier_id: supplierId,
+    source_supplier_name: supplierName,
+    direct_reference_unit_cost: directCost || null,
+    local_reference_unit_cost: localCost || null,
+    source_unit_cost_variance: sourceVariance || null,
+    source_reason: sourceReason,
+    created_by: userId,
+  });
+  if (movementError) throw new Error(movementError.message);
+}
+
 async function createCustomerRecord(formData: FormData, userId: string, fallbackBusinessId?: string | null) {
   const { admin, businessId, branchId } = await getWorkspaceContext(userId, fallbackBusinessId);
   const name = getField(formData, "customer_name");
@@ -495,6 +631,9 @@ export async function completeProcessAction(formData: FormData) {
       }
       if (intent.toLowerCase().includes("submit") && moduleName === "Sales" && processName === "Customer Payments") {
         await postCustomerPayment(formData, user.id, businessId);
+      }
+      if (moduleName === "Purchasing" && processName === "Goods Received Notes" && intent.toLowerCase().includes("posted")) {
+        await postGoodsReceived(formData, user.id, businessId);
       }
       if (moduleName === "Customers" && processName === "New Customer") {
         await createCustomerRecord(formData, user.id, businessId);

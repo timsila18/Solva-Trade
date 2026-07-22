@@ -31,10 +31,19 @@ export type InvoiceLookup = {
   total: number;
 };
 
+export type SupplierLookup = {
+  id: string;
+  name: string;
+  code: string;
+  phone: string;
+  type: string;
+};
+
 export type SalesWorkflowLookups = {
   customers: CustomerLookup[];
   products: ProductLookup[];
   unpaidInvoices: InvoiceLookup[];
+  suppliers: SupplierLookup[];
 };
 
 async function currentBusinessId() {
@@ -114,10 +123,10 @@ async function vatRateForProduct(
 
 export async function getSalesWorkflowLookups(): Promise<SalesWorkflowLookups> {
   const businessId = await currentBusinessId();
-  if (!businessId) return { customers: [], products: [], unpaidInvoices: [] };
+  if (!businessId) return { customers: [], products: [], unpaidInvoices: [], suppliers: [] };
 
   const admin = createSupabaseAdminClient();
-  const [{ data: customers }, { data: products }, { data: balances }, { data: invoices }] = await Promise.all([
+  const [{ data: customers }, { data: products }, { data: balances }, { data: invoices }, { data: suppliers }] = await Promise.all([
     admin
       .from("customers")
       .select("id, customer_name, customer_code, phone, current_balance")
@@ -141,6 +150,13 @@ export async function getSalesWorkflowLookups(): Promise<SalesWorkflowLookups> {
       .gt("balance_due", 0)
       .in("status", ["posted", "partially_paid", "overdue"])
       .order("invoice_date", { ascending: false })
+      .limit(200),
+    admin
+      .from("suppliers")
+      .select("id, legal_name, trading_name, supplier_code, primary_phone, supplier_type")
+      .eq("business_id", businessId)
+      .in("status", ["approved", "draft", "pending_approval"])
+      .order("legal_name", { ascending: true })
       .limit(200),
   ]);
 
@@ -192,5 +208,12 @@ export async function getSalesWorkflowLookups(): Promise<SalesWorkflowLookups> {
         total: Number(invoice.total_amount ?? 0),
       };
     }),
+    suppliers: (suppliers ?? []).map((supplier) => ({
+      id: supplier.id,
+      name: supplier.trading_name || supplier.legal_name,
+      code: supplier.supplier_code,
+      phone: supplier.primary_phone ?? "",
+      type: supplier.supplier_type,
+    })),
   };
 }

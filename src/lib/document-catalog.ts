@@ -59,11 +59,21 @@ export const documentCatalog: BusinessDocument[] = [
     "Supplier Statement",
     "Purchase Return Note",
     "Outstanding Supplier Balance Statement",
+    "Purchase Source Profitability Report",
+    "Direct vs Local Purchase Price Report",
+    "Emergency Purchase Impact Report",
+    "Supplier Price Comparison",
   ].map((name) => ({
     category: "Purchasing" as const,
     name,
-    description: "Supplier and stock-receiving document with purchase, approval, receipt and matching details.",
-    strategicPlacement: name === "Goods Received Note (GRN)" ? "Shown below the goods-received workflow after stock is received." : "Available inside Purchasing workflows and the document centre.",
+    description: name.includes("Source") || name.includes("Local") || name.includes("Emergency") || name.includes("Supplier Price")
+      ? "Source-aware purchasing report showing direct supplier, local market, spot and emergency buying impact on margin."
+      : "Supplier and stock-receiving document with purchase, approval, receipt and matching details.",
+    strategicPlacement: name === "Goods Received Note (GRN)"
+      ? "Shown below the goods-received workflow after stock is received."
+      : name.includes("Source") || name.includes("Local") || name.includes("Emergency") || name.includes("Supplier Price")
+        ? "Available from Purchasing reports and the document centre for owner price decisions."
+        : "Available inside Purchasing workflows and the document centre.",
     formats,
   })),
   ...[

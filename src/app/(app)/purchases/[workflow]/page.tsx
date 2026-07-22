@@ -3,6 +3,7 @@ import { Download, Printer } from "lucide-react";
 import { completeProcessAction } from "@/app/(app)/actions";
 import { WorkflowFormFields } from "@/components/app/workflow-form-fields";
 import { purchasingReports } from "@/lib/purchasing";
+import { getSalesWorkflowLookups } from "@/lib/workflow-live-data";
 
 const workflows: Record<string, { title: string; description: string; fields: string[]; controls: string }> = {
   requisitions: {
@@ -14,13 +15,13 @@ const workflows: Record<string, { title: string; description: string; fields: st
   "purchase-orders": {
     title: "Purchase Orders",
     description: "Build supplier orders from requisitions, reorder recommendations or direct purchasing.",
-    fields: ["PO number", "Supplier", "Branch", "Expected date", "Product", "Order quantity", "Unit price", "Tax code", "Delivery terms"],
+    fields: ["PO number", "Supplier", "Source type", "Source reason", "Branch", "Expected date", "Product", "Order quantity", "Unit price", "Direct reference unit cost", "Local reference unit cost", "Tax code", "Delivery terms"],
     controls: "Price changes beyond tolerance require reapproval, and sent purchase orders remain immutable except through controlled revisions.",
   },
   "goods-received": {
     title: "Goods Received Notes",
     description: "Receive goods against purchase orders with quantity, batch, expiry and quality inspection details.",
-    fields: ["GRN number", "PO number", "Supplier", "Received date", "Product", "Received quantity", "Accepted quantity", "Rejected quantity", "Batch", "Expiry date"],
+    fields: ["GRN number", "PO number", "Supplier", "Source type", "Source reason", "Received date", "Product", "Received quantity", "Accepted quantity", "Rejected quantity", "Unit cost", "Direct reference unit cost", "Local reference unit cost", "Batch", "Expiry date"],
     controls: "Posted GRNs create purchase receipt stock movements, update inventory balances and preserve rejected or quarantined quantities.",
   },
   "supplier-bills": {
@@ -69,7 +70,7 @@ const workflowDocuments: Record<string, string[]> = {
   returns: ["Purchase Return Note", "Supplier Statement"],
   payments: ["Payment Voucher", "Supplier Payment History", "Outstanding Supplier Balance Statement"],
   "creditor-ageing": ["Supplier Aging Report", "Outstanding Supplier Balance Statement"],
-  reports: ["Purchase Order (PO)", "Goods Received Note (GRN)", "Supplier Invoice Register"],
+  reports: ["Purchase Source Profitability Report", "Direct vs Local Purchase Price Report", "Emergency Purchase Impact Report", "Supplier Price Comparison"],
   imports: ["Supplier Profile", "Supplier Purchase History"],
 };
 
@@ -97,6 +98,7 @@ export default async function PurchasingWorkflowPage({
   const { workflow } = await params;
   const config = workflows[workflow];
   if (!config) notFound();
+  const lookups = await getSalesWorkflowLookups();
 
   return (
     <div className="pb-20">
@@ -110,11 +112,13 @@ export default async function PurchasingWorkflowPage({
         <input type="hidden" name="document" value={primaryDocument[workflow] ?? config.title} />
         <input type="hidden" name="returnTo" value={`/purchases/${workflow}`} />
         <input type="hidden" name="next" value={`Continue ${config.title}`} />
-        <WorkflowFormFields fields={config.fields} />
+        <WorkflowFormFields fields={config.fields} products={lookups.products} suppliers={lookups.suppliers} autoFillProductPrice={false} />
         <div className="mt-6 flex flex-wrap gap-3">
           <button name="intent" value="Draft saved" className="rounded-md border border-slate-200 px-4 py-2 text-sm font-semibold">Save as draft</button>
           <button name="intent" value="Validation previewed" className="rounded-md border border-slate-200 px-4 py-2 text-sm font-semibold">Preview validation</button>
-          <button name="intent" value="Submitted for approval" className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-semibold text-white">Submit for approval</button>
+          <button name="intent" value={workflow === "goods-received" ? "Posted and received" : "Submitted for approval"} className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-semibold text-white">
+            {workflow === "goods-received" ? "Post GRN and receive stock" : "Submit for approval"}
+          </button>
         </div>
       </form>
 
