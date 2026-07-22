@@ -5,6 +5,8 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getActiveBusinessId } from "@/lib/tenant";
 
+type SupabaseWorkspaceClient = ReturnType<typeof createSupabaseAdminClient> | Awaited<ReturnType<typeof createSupabaseServerClient>>;
+
 function safeText(value: FormDataEntryValue | null, fallback: string) {
   const text = typeof value === "string" ? value.trim() : "";
   return text || fallback;
@@ -103,6 +105,34 @@ async function getWorkspaceContext(userId: string, fallbackBusinessId?: string |
   if (!warehouse?.id) throw new Error("Set up a sales warehouse before posting transactions.");
 
   return { admin, businessId, branchId: branch.id as string, warehouseId: warehouse.id as string, userId };
+}
+
+async function getWorkspaceContextForClient(client: SupabaseWorkspaceClient, userId: string, fallbackBusinessId?: string | null) {
+  const businessId = (await getActiveBusinessId()) || fallbackBusinessId;
+  if (!businessId) throw new Error("No active business was selected.");
+
+  const { data: branch } = await client
+    .from("branches")
+    .select("id")
+    .eq("business_id", businessId)
+    .eq("active", true)
+    .order("is_default", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!branch?.id) throw new Error("Set up a branch before posting transactions.");
+
+  const { data: warehouse } = await client
+    .from("warehouses")
+    .select("id")
+    .eq("business_id", businessId)
+    .eq("active", true)
+    .eq("allow_sales_dispatch", true)
+    .order("is_default", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!warehouse?.id) throw new Error("Set up a sales warehouse before posting transactions.");
+
+  return { businessId, branchId: branch.id as string, warehouseId: warehouse.id as string, userId };
 }
 
 async function availableStock(
@@ -437,7 +467,7 @@ async function createCustomerRecord(formData: FormData, userId: string, fallback
   });
 }
 
-async function findUnitId(admin: ReturnType<typeof createSupabaseAdminClient>, businessId: string, value: string) {
+async function findUnitId(admin: SupabaseWorkspaceClient, businessId: string, value: string) {
   if (!value) return null;
   const { data } = await admin
     .from("units_of_measure")
@@ -450,7 +480,7 @@ async function findUnitId(admin: ReturnType<typeof createSupabaseAdminClient>, b
   return data?.id ?? null;
 }
 
-async function findOrCreateCategoryId(admin: ReturnType<typeof createSupabaseAdminClient>, businessId: string, userId: string, value: string) {
+async function findOrCreateCategoryId(admin: SupabaseWorkspaceClient, businessId: string, userId: string, value: string) {
   const name = value.trim();
   if (!name) return null;
   const { data: existing } = await admin
@@ -475,7 +505,7 @@ async function findOrCreateCategoryId(admin: ReturnType<typeof createSupabaseAdm
   return created?.id ?? null;
 }
 
-async function findOrCreateBrandId(admin: ReturnType<typeof createSupabaseAdminClient>, businessId: string, userId: string, value: string, manufacturer: string) {
+async function findOrCreateBrandId(admin: SupabaseWorkspaceClient, businessId: string, userId: string, value: string, manufacturer: string) {
   const name = value.trim();
   if (!name) return null;
   const { data: existing } = await admin
@@ -502,7 +532,8 @@ async function findOrCreateBrandId(admin: ReturnType<typeof createSupabaseAdminC
 }
 
 async function createProductRecord(formData: FormData, userId: string, fallbackBusinessId?: string | null) {
-  const { admin, businessId, branchId, warehouseId } = await getWorkspaceContext(userId, fallbackBusinessId);
+  const admin = await createSupabaseServerClient();
+  const { businessId, branchId, warehouseId } = await getWorkspaceContextForClient(admin, userId, fallbackBusinessId);
   const name = getField(formData, "product_name");
   if (!name) throw new Error("Enter the product name.");
   const productCode = getField(formData, "product_code") || `PRD-${Date.now().toString().slice(-6)}`;
@@ -642,21 +673,25 @@ export async function completeProcessAction(formData: FormData) {
         await createProductRecord(formData, user.id, businessId);
       }
 
-      const admin = createSupabaseAdminClient();
-      await admin.from("audit_logs").insert({
-        business_id: businessId,
-        user_id: user.id,
-        action: intent,
-        module: moduleName,
-        entity_type: documentName,
-        new_value: {
-          process: processName,
-          document: documentName,
-          status: "posted",
-          source: "workspace_submit",
-          fields: Object.fromEntries(documentFieldParams(formData)),
-        },
-      });
+      try {
+        const admin = createSupabaseAdminClient();
+        await admin.from("audit_logs").insert({
+          business_id: businessId,
+          user_id: user.id,
+          action: intent,
+          module: moduleName,
+          entity_type: documentName,
+          new_value: {
+            process: processName,
+            document: documentName,
+            status: "posted",
+            source: "workspace_submit",
+            fields: Object.fromEntries(documentFieldParams(formData)),
+          },
+        });
+      } catch (auditError) {
+        console.warn("Solva Trade audit log skipped", auditError);
+      }
     }
   } catch (error) {
     params.set("error", error instanceof Error ? error.message : "The process could not be completed.");
