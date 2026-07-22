@@ -79,34 +79,6 @@ function sourceTypeValue(value: string) {
   return sourceMap[value.trim().toLowerCase()] ?? "direct_supplier";
 }
 
-async function getWorkspaceContext(userId: string, fallbackBusinessId?: string | null) {
-  const businessId = (await getActiveBusinessId()) || fallbackBusinessId;
-  if (!businessId) throw new Error("No active business was selected.");
-  const admin = createSupabaseAdminClient();
-  const { data: branch } = await admin
-    .from("branches")
-    .select("id")
-    .eq("business_id", businessId)
-    .eq("active", true)
-    .order("is_default", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (!branch?.id) throw new Error("Set up a branch before posting transactions.");
-
-  const { data: warehouse } = await admin
-    .from("warehouses")
-    .select("id")
-    .eq("business_id", businessId)
-    .eq("active", true)
-    .eq("allow_sales_dispatch", true)
-    .order("is_default", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (!warehouse?.id) throw new Error("Set up a sales warehouse before posting transactions.");
-
-  return { admin, businessId, branchId: branch.id as string, warehouseId: warehouse.id as string, userId };
-}
-
 async function getWorkspaceContextForClient(client: SupabaseWorkspaceClient, userId: string, fallbackBusinessId?: string | null) {
   const businessId = (await getActiveBusinessId()) || fallbackBusinessId;
   if (!businessId) throw new Error("No active business was selected.");
@@ -136,7 +108,7 @@ async function getWorkspaceContextForClient(client: SupabaseWorkspaceClient, use
 }
 
 async function availableStock(
-  admin: ReturnType<typeof createSupabaseAdminClient>,
+  admin: SupabaseWorkspaceClient,
   businessId: string,
   branchId: string,
   warehouseId: string,
@@ -153,7 +125,8 @@ async function availableStock(
 }
 
 async function postSalesInvoice(formData: FormData, userId: string, fallbackBusinessId?: string | null) {
-  const { admin, businessId, branchId, warehouseId } = await getWorkspaceContext(userId, fallbackBusinessId);
+  const admin = await createSupabaseServerClient();
+  const { businessId, branchId, warehouseId } = await getWorkspaceContextForClient(admin, userId, fallbackBusinessId);
   const customerId = getField(formData, "customer_id");
   const productId = getField(formData, "product_id");
   const quantity = getNumber(formData, "quantity") || getNumber(formData, "ordered_quantity");
@@ -253,7 +226,8 @@ async function postCustomerPayment(
   invoiceIdOverride?: string,
   amountOverride?: number,
 ) {
-  const { admin, businessId, branchId } = await getWorkspaceContext(userId, fallbackBusinessId);
+  const admin = await createSupabaseServerClient();
+  const { businessId, branchId } = await getWorkspaceContextForClient(admin, userId, fallbackBusinessId);
   const invoiceId = invoiceIdOverride ?? getField(formData, "invoice_id");
   const amount = amountOverride ?? getNumber(formData, "amount");
   const paymentNumber = getField(formData, "payment_number") || `RCPT-${Date.now().toString().slice(-8)}`;
@@ -329,7 +303,8 @@ async function postCustomerPayment(
 }
 
 async function postGoodsReceived(formData: FormData, userId: string, fallbackBusinessId?: string | null) {
-  const { admin, businessId, branchId, warehouseId } = await getWorkspaceContext(userId, fallbackBusinessId);
+  const admin = await createSupabaseServerClient();
+  const { businessId, branchId, warehouseId } = await getWorkspaceContextForClient(admin, userId, fallbackBusinessId);
   const supplierId = getField(formData, "supplier_id");
   const productId = getField(formData, "product_id");
   const deliveredQuantity = getNumber(formData, "received_quantity");
@@ -448,7 +423,8 @@ async function postGoodsReceived(formData: FormData, userId: string, fallbackBus
 }
 
 async function createCustomerRecord(formData: FormData, userId: string, fallbackBusinessId?: string | null) {
-  const { admin, businessId, branchId } = await getWorkspaceContext(userId, fallbackBusinessId);
+  const admin = await createSupabaseServerClient();
+  const { businessId, branchId } = await getWorkspaceContextForClient(admin, userId, fallbackBusinessId);
   const name = getField(formData, "customer_name");
   if (!name) throw new Error("Enter the customer name.");
   const code = `CUS-${Date.now().toString().slice(-6)}`;

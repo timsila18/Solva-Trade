@@ -232,8 +232,8 @@ async function purchaseSourceReportLines(processName: string): Promise<ReportLin
   const businessId = await activeReportBusinessId();
   if (!businessId) return [];
 
-  const admin = createSupabaseAdminClient();
-  let query = admin
+  const supabase = await createSupabaseServerClient();
+  let query = supabase
     .from("stock_movements")
     .select(
       "reference_number, movement_date, source_type, source_supplier_name, quantity_base, unit_cost, total_cost, direct_reference_unit_cost, local_reference_unit_cost, source_unit_cost_variance, source_reason, products(product_name, product_code, sku, default_selling_price_placeholder)",

@@ -1,5 +1,4 @@
 import "server-only";
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getActiveBusinessId } from "@/lib/tenant";
 
@@ -57,7 +56,7 @@ async function currentBusinessId() {
 }
 
 async function vatRateForProduct(
-  admin: ReturnType<typeof createSupabaseAdminClient>,
+  admin: Awaited<ReturnType<typeof createSupabaseServerClient>>,
   businessId: string,
   product: { id: string; default_sales_tax_id: string | null; vat_status: string | null; tax_category: string | null },
 ) {
@@ -125,7 +124,7 @@ export async function getSalesWorkflowLookups(): Promise<SalesWorkflowLookups> {
   const businessId = await currentBusinessId();
   if (!businessId) return { customers: [], products: [], unpaidInvoices: [], suppliers: [] };
 
-  const admin = createSupabaseAdminClient();
+  const admin = await createSupabaseServerClient();
   const [{ data: customers }, { data: products }, { data: balances }, { data: invoices }, { data: suppliers }] = await Promise.all([
     admin
       .from("customers")
