@@ -41,11 +41,21 @@ export const documentCatalog: BusinessDocument[] = [
     "Sales Summary Report",
     "Daily Sales Report",
     "Monthly Sales Report",
+    "Sale Source Profitability Report",
+    "Profit by Purchase Source Report",
+    "Direct Supplier Stock Profit Report",
+    "Local Market Stock Profit Report",
   ].map((name) => ({
     category: "Sales" as const,
     name,
-    description: "Customer-facing sales document with item lines, taxes, totals, payment and delivery context.",
-    strategicPlacement: name === "Sales Receipt" ? "Shown after submitting a sale or customer payment." : "Available inside Sales workflows and the document centre.",
+    description: name.includes("Source") || name.includes("Stock Profit")
+      ? "FIFO source-cost sales report separating direct-supplier, local-market, spot and emergency stock profitability."
+      : "Customer-facing sales document with item lines, taxes, totals, payment and delivery context.",
+    strategicPlacement: name === "Sales Receipt"
+      ? "Shown after submitting a sale or customer payment."
+      : name.includes("Source") || name.includes("Stock Profit")
+        ? "Available from Sales reports and the owner document centre after posted sales consume stock."
+        : "Available inside Sales workflows and the document centre.",
     formats,
   })),
   ...[

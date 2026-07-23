@@ -1,5 +1,53 @@
 import { completeProcessAction } from "@/app/(app)/actions";
-import { supplierSetupSections, supplierTypes } from "@/lib/purchasing-data";
+import { supplierTypes } from "@/lib/purchasing-data";
+
+function keyFor(label: string) {
+  return label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+}
+
+function Field({
+  label,
+  type = "text",
+  required = false,
+  placeholder,
+  step,
+  min,
+}: {
+  label: string;
+  type?: string;
+  required?: boolean;
+  placeholder?: string;
+  step?: string;
+  min?: string;
+}) {
+  const key = keyFor(label);
+  return (
+    <label className="text-sm font-medium">
+      {label}
+      <input type="hidden" name={`label_${key}`} value={label} />
+      <input
+        name={`field_${key}`}
+        type={type}
+        required={required}
+        placeholder={placeholder ?? label}
+        step={step}
+        min={min}
+        className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
+      />
+    </label>
+  );
+}
+
+function Checkbox({ label, defaultChecked = false }: { label: string; defaultChecked?: boolean }) {
+  const key = keyFor(label);
+  return (
+    <label className="flex items-center gap-2 rounded-md bg-slate-100 px-3 py-2 text-sm">
+      <input type="hidden" name={`label_${key}`} value={label} />
+      <input name={`field_${key}`} type="checkbox" value="yes" defaultChecked={defaultChecked} />
+      {label}
+    </label>
+  );
+}
 
 export default function NewSupplierPage() {
   return (
@@ -7,81 +55,124 @@ export default function NewSupplierPage() {
       <p className="text-sm font-semibold text-emerald-700">Supplier setup</p>
       <h1 className="mt-1 text-3xl font-semibold">Create supplier</h1>
       <p className="mt-2 max-w-3xl text-slate-600">
-        Capture identity, tax, contact, payment and product-price details before routing the supplier through approval.
+        Save the supplier once, then use them in purchases, GRNs, source-cost tracking, supplier balances and purchasing reports.
       </p>
 
-      <div className="mt-6 grid gap-6 lg:grid-cols-[240px_1fr_320px]">
-        <aside className="rounded-lg border border-slate-200 bg-white p-4">
-          {supplierSetupSections.map((section, index) => (
-            <div key={section} className="flex items-center gap-3 border-b border-slate-100 py-3 last:border-b-0">
-              <span className="grid h-7 w-7 place-items-center rounded-md bg-emerald-50 text-xs font-semibold text-emerald-800">{index + 1}</span>
-              <span className="text-sm font-medium">{section}</span>
-            </div>
-          ))}
-        </aside>
-
+      <div className="mt-6 grid gap-6 xl:grid-cols-[1fr_340px]">
         <form action={completeProcessAction} className="rounded-lg border border-slate-200 bg-white p-5">
           <input type="hidden" name="module" value="Suppliers" />
           <input type="hidden" name="process" value="New Supplier" />
+          <input type="hidden" name="document" value="Supplier Profile" />
           <input type="hidden" name="intent" value="Supplier saved" />
           <input type="hidden" name="returnTo" value="/suppliers/new" />
           <input type="hidden" name="next" value="Add another supplier" />
-          <h2 className="text-lg font-semibold">Supplier identity</h2>
-          <div className="mt-5 grid gap-4 md:grid-cols-2">
-            {["Legal name", "Trading name", "Supplier code", "KRA PIN", "Registration number", "Primary phone", "Email", "Website"].map((field) => (
-              <label key={field} className="text-sm font-medium">
-                {field}
-                <input className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2" placeholder={field} />
-              </label>
-            ))}
-            <label className="text-sm font-medium">
-              Supplier type
-              <select className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2" defaultValue="Distributor">
-                {supplierTypes.map((type) => (
-                  <option key={type}>{type}</option>
-                ))}
-              </select>
-            </label>
-            <label className="text-sm font-medium">
-              Payment terms
-              <select className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2" defaultValue="Net 30">
-                {["Cash", "Net 7", "Net 14", "Net 30", "Net 60", "Custom"].map((term) => (
-                  <option key={term}>{term}</option>
-                ))}
-              </select>
-            </label>
-            <label className="text-sm font-medium">
-              Credit limit
-              <input className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2" type="number" min="0" step="0.01" />
-            </label>
-            <label className="text-sm font-medium">
-              Opening balance
-              <input className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2" type="number" step="0.01" />
-            </label>
+
+          <div className="grid gap-8">
+            <section>
+              <h2 className="text-lg font-semibold">1. Supplier identity</h2>
+              <div className="mt-5 grid gap-4 md:grid-cols-2">
+                <Field label="Legal name" required />
+                <Field label="Trading name" />
+                <Field label="Supplier code" placeholder="Leave blank to auto-generate" />
+                <Field label="KRA PIN" />
+                <Field label="Registration number" />
+                <label className="text-sm font-medium">
+                  Supplier type
+                  <input type="hidden" name="label_supplier_type" value="Supplier type" />
+                  <select
+                    name="field_supplier_type"
+                    className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
+                    defaultValue="Wholesaler"
+                  >
+                    {supplierTypes.map((type) => (
+                      <option key={type}>{type}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            </section>
+
+            <section>
+              <h2 className="text-lg font-semibold">2. Contact and location</h2>
+              <div className="mt-5 grid gap-4 md:grid-cols-2">
+                <Field label="Primary contact person" />
+                <Field label="Contact title" />
+                <Field label="Primary phone" type="tel" />
+                <Field label="Alternative phone" type="tel" />
+                <Field label="Email" type="email" />
+                <Field label="Website" type="url" placeholder="https://..." />
+                <Field label="Physical address" />
+                <Field label="Town" />
+                <Field label="County" />
+                <Field label="Country" placeholder="Kenya" />
+              </div>
+            </section>
+
+            <section>
+              <h2 className="text-lg font-semibold">3. Terms and source tracking</h2>
+              <div className="mt-5 grid gap-4 md:grid-cols-2">
+                <label className="text-sm font-medium">
+                  Payment terms
+                  <input type="hidden" name="label_payment_terms" value="Payment terms" />
+                  <select
+                    name="field_payment_terms"
+                    className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
+                    defaultValue="Net 30"
+                  >
+                    {["Cash", "Net 7", "Net 14", "Net 30", "Net 60", "Custom"].map((term) => (
+                      <option key={term}>{term}</option>
+                    ))}
+                  </select>
+                </label>
+                <Field label="Credit limit" type="number" min="0" step="0.01" />
+                <Field label="Opening balance" type="number" min="0" step="0.01" />
+                <Field label="Supplier category" placeholder="Direct supplier, local market, spot supplier..." />
+                <Field label="Main products" placeholder="Coke, Aquamist, Predator..." />
+                <Field label="Delivery instructions" />
+              </div>
+              <div className="mt-5 grid gap-3 md:grid-cols-2">
+                <Checkbox label="VAT registered" />
+                <Checkbox label="Preferred supplier" defaultChecked />
+                <Checkbox label="Requires purchase order" defaultChecked />
+                <Checkbox label="Bank details verified" />
+                <Checkbox label="Submit for approval" />
+              </div>
+            </section>
+
+            <section>
+              <h2 className="text-lg font-semibold">4. Notes</h2>
+              <input type="hidden" name="label_notes" value="Notes" />
+              <textarea
+                name="field_notes"
+                rows={4}
+                placeholder="Anything the buyer, storekeeper or accountant should know about this supplier."
+                className="mt-3 w-full rounded-md border border-slate-300 px-3 py-2 outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
+              />
+            </section>
           </div>
 
-          <div className="mt-6 grid gap-3 md:grid-cols-2">
-            {["VAT registered", "Preferred supplier", "Requires purchase order", "Bank details verified", "Attach compliance document", "Submit for approval"].map((field) => (
-              <label key={field} className="flex items-center gap-2 rounded-md bg-slate-100 px-3 py-2 text-sm">
-                <input type="checkbox" defaultChecked={field === "Requires purchase order"} />
-                {field}
-              </label>
-            ))}
+          <div className="mt-7 flex flex-wrap gap-3">
+            <button className="rounded-md bg-emerald-700 px-5 py-3 text-sm font-semibold text-white">Save supplier</button>
+            <a href="/suppliers" className="rounded-md border border-slate-200 bg-white px-5 py-3 text-sm font-semibold">
+              View suppliers
+            </a>
           </div>
-
-          <button className="mt-6 rounded-md bg-emerald-700 px-5 py-3 text-sm font-semibold text-white">Save supplier</button>
         </form>
 
         <aside className="space-y-4">
-          <section className="rounded-lg border border-slate-200 bg-white p-5">
-            <h2 className="font-semibold">Approval controls</h2>
-            <p className="mt-2 text-sm text-slate-600">
-              Suppliers with payment terms, credit limits, bank changes or missing compliance documents can be routed to owner or manager approval.
+          <section className="rounded-lg border border-cyan-100 bg-cyan-50 p-5">
+            <h2 className="font-semibold text-slate-950">Source-cost reporting</h2>
+            <p className="mt-2 text-sm leading-6 text-slate-700">
+              Mark suppliers as direct, local market or spot suppliers in the category/notes. GRNs will capture the actual source and cost, then sales profit reports can separate those margins.
             </p>
           </section>
           <section className="rounded-lg border border-slate-200 bg-white p-5">
-            <h2 className="font-semibold">KRA PIN validation</h2>
-            <p className="mt-2 text-sm text-slate-600">Accepted format follows the Kenyan PIN pattern, such as A123456789B.</p>
+            <h2 className="font-semibold">What happens after save</h2>
+            <div className="mt-4 grid gap-3 text-sm text-slate-700">
+              <p className="rounded-md bg-slate-100 px-3 py-3">Supplier becomes selectable in Purchase Orders and Goods Received Notes.</p>
+              <p className="rounded-md bg-slate-100 px-3 py-3">Opening balance posts to supplier balances when entered.</p>
+              <p className="rounded-md bg-slate-100 px-3 py-3">Supplier profile is immediately downloadable from the completion screen.</p>
+            </div>
           </section>
         </aside>
       </div>

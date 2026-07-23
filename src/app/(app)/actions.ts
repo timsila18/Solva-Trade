@@ -79,6 +79,41 @@ function sourceTypeValue(value: string) {
   return sourceMap[value.trim().toLowerCase()] ?? "direct_supplier";
 }
 
+function supplierTypeValue(value: string) {
+  const supplierMap: Record<string, string> = {
+    manufacturer: "manufacturer",
+    distributor: "distributor",
+    wholesaler: "wholesaler",
+    "farmer / producer": "farmer_producer",
+    "farmer producer": "farmer_producer",
+    farmer_producer: "farmer_producer",
+    importer: "importer",
+    "service provider": "service_provider",
+    service_provider: "service_provider",
+    contractor: "contractor",
+    transporter: "transporter",
+    "utility provider": "utility_provider",
+    utility_provider: "utility_provider",
+    "government entity": "government_entity",
+    government_entity: "government_entity",
+    individual: "individual",
+    other: "other",
+  };
+  return supplierMap[value.trim().toLowerCase()] ?? "other";
+}
+
+function paymentTermsValue(value: string) {
+  const termsMap: Record<string, string> = {
+    cash: "cash",
+    "net 7": "net_7",
+    "net 14": "net_14",
+    "net 30": "net_30",
+    "net 60": "net_60",
+    custom: "custom",
+  };
+  return termsMap[value.trim().toLowerCase()] ?? "net_30";
+}
+
 async function getWorkspaceContextForClient(client: SupabaseWorkspaceClient, userId: string, fallbackBusinessId?: string | null) {
   const businessId = (await getActiveBusinessId()) || fallbackBusinessId;
   if (!businessId) throw new Error("No active business was selected.");
@@ -106,6 +141,13 @@ async function getWorkspaceContextForClient(client: SupabaseWorkspaceClient, use
 
   return { businessId, branchId: branch.id as string, warehouseId: warehouse.id as string, userId };
 }
+
+type SolvaRpcClient = SupabaseWorkspaceClient & {
+  rpc: (
+    fn: string,
+    args?: Record<string, unknown>,
+  ) => Promise<{ data: unknown; error: { message: string } | null }>;
+};
 
 async function availableStock(
   admin: SupabaseWorkspaceClient,
@@ -178,7 +220,7 @@ async function postSalesInvoice(formData: FormData, userId: string, fallbackBusi
     .single();
   if (invoiceError || !invoice) throw new Error(invoiceError?.message ?? "Could not post the invoice.");
 
-  const { error: itemError } = await admin.from("sales_invoice_items").insert({
+  const { data: item, error: itemError } = await admin.from("sales_invoice_items").insert({
     business_id: businessId,
     invoice_id: invoice.id,
     product_id: productId,
@@ -188,12 +230,12 @@ async function postSalesInvoice(formData: FormData, userId: string, fallbackBusi
     unit_price: unitPrice,
     tax_amount: tax,
     line_total: total,
-  });
-  if (itemError) throw new Error(itemError.message);
+  }).select("id").single();
+  if (itemError || !item) throw new Error(itemError?.message ?? "Could not post invoice item.");
 
   if (product.track_inventory) {
     const unitCost = Number(product.standard_cost ?? 0);
-    const { error: movementError } = await admin.from("stock_movements").insert({
+    const { data: movement, error: movementError } = await admin.from("stock_movements").insert({
       business_id: businessId,
       branch_id: branchId,
       warehouse_id: warehouseId,
@@ -210,8 +252,21 @@ async function postSalesInvoice(formData: FormData, userId: string, fallbackBusi
       reference_number: invoiceNumber,
       reason: "Sale submitted from Solva Trade workflow",
       created_by: userId,
+    }).select("id").single();
+    if (movementError || !movement) throw new Error(movementError?.message ?? "Could not post stock movement.");
+
+    const { error: allocationError } = await (admin as SolvaRpcClient).rpc("allocate_sale_fifo_source", {
+      target_business_id: businessId,
+      target_invoice_id: invoice.id,
+      target_invoice_item_id: item.id,
+      target_stock_movement_id: movement.id,
+      target_product_id: productId,
+      target_branch_id: branchId,
+      target_warehouse_id: warehouseId,
+      target_quantity: quantity,
+      target_sale_unit_price: unitPrice,
     });
-    if (movementError) throw new Error(movementError.message);
+    if (allocationError) throw new Error(allocationError.message);
   }
 
   if (paid > 0) {
@@ -443,6 +498,138 @@ async function createCustomerRecord(formData: FormData, userId: string, fallback
   });
 }
 
+async function createSupplierRecord(formData: FormData, userId: string, fallbackBusinessId?: string | null) {
+  const admin = await createSupabaseServerClient();
+  const { businessId, branchId, warehouseId } = await getWorkspaceContextForClient(admin, userId, fallbackBusinessId);
+  const legalName = getField(formData, "legal_name");
+  if (!legalName) throw new Error("Enter the supplier legal name.");
+
+  const code = getField(formData, "supplier_code") || `SUP-${Date.now().toString().slice(-6)}`;
+  const openingBalance = getNumber(formData, "opening_balance");
+  const status = getBoolean(formData, "submit_for_approval") ? "pending_approval" : "approved";
+
+  const { data: supplier, error: supplierError } = await admin
+    .from("suppliers")
+    .insert({
+      business_id: businessId,
+      supplier_type: supplierTypeValue(getField(formData, "supplier_type")),
+      legal_name: legalName,
+      trading_name: getField(formData, "trading_name") || null,
+      supplier_code: code,
+      kra_pin: getField(formData, "kra_pin") || null,
+      vat_registered: getBoolean(formData, "vat_registered"),
+      registration_number: getField(formData, "registration_number") || null,
+      primary_phone: getField(formData, "primary_phone") || null,
+      alternative_phone: getField(formData, "alternative_phone") || null,
+      email: getField(formData, "email") || null,
+      website: getField(formData, "website") || null,
+      physical_address: getField(formData, "physical_address") || null,
+      postal_address: getField(formData, "postal_address") || null,
+      county: getField(formData, "county") || null,
+      town: getField(formData, "town") || null,
+      country: getField(formData, "country") || "Kenya",
+      primary_contact_person: getField(formData, "primary_contact_person") || null,
+      default_currency: "KES",
+      default_payment_terms: paymentTermsValue(getField(formData, "payment_terms")),
+      credit_limit_granted: getNumber(formData, "credit_limit"),
+      default_receiving_branch_id: branchId,
+      default_receiving_warehouse_id: warehouseId,
+      active: true,
+      on_hold: false,
+      approved_supplier: status === "approved" || getBoolean(formData, "preferred_supplier"),
+      supplier_category: getField(formData, "supplier_category") || null,
+      status,
+      notes: [
+        getField(formData, "main_products") ? `Main products: ${getField(formData, "main_products")}` : "",
+        getBoolean(formData, "requires_purchase_order") ? "Requires purchase order before supply." : "",
+        getBoolean(formData, "bank_details_verified") ? "Bank details verified." : "",
+        getField(formData, "notes"),
+      ].filter(Boolean).join(" "),
+      created_by: userId,
+    })
+    .select("id")
+    .single();
+  if (supplierError || !supplier) throw new Error(supplierError?.message ?? "Could not save supplier.");
+
+  const contactName = getField(formData, "primary_contact_person") || legalName;
+  if (contactName || getField(formData, "primary_phone") || getField(formData, "email")) {
+    const { error } = await admin.from("supplier_contacts").insert({
+      business_id: businessId,
+      supplier_id: supplier.id,
+      contact_name: contactName,
+      job_title: getField(formData, "contact_title") || null,
+      phone: getField(formData, "primary_phone") || null,
+      alternative_phone: getField(formData, "alternative_phone") || null,
+      email: getField(formData, "email") || null,
+      contact_type: "primary",
+      preferred_contact: true,
+      notes: getField(formData, "contact_notes") || null,
+    });
+    if (error) throw new Error(error.message);
+  }
+
+  if (getField(formData, "physical_address") || getField(formData, "town") || getField(formData, "county")) {
+    const { error } = await admin.from("supplier_addresses").insert({
+      business_id: businessId,
+      supplier_id: supplier.id,
+      address_name: "Main receiving address",
+      address_type: "receiving",
+      physical_address: getField(formData, "physical_address") || null,
+      town: getField(formData, "town") || null,
+      county: getField(formData, "county") || null,
+      country: getField(formData, "country") || "Kenya",
+      contact_person: getField(formData, "primary_contact_person") || null,
+      phone: getField(formData, "primary_phone") || null,
+      delivery_instructions: getField(formData, "delivery_instructions") || null,
+      is_default: true,
+    });
+    if (error) throw new Error(error.message);
+  }
+
+  if (openingBalance > 0) {
+    const referenceNumber = `SOB-${Date.now().toString().slice(-8)}`;
+    const { error: openingError } = await admin.from("supplier_opening_balances").insert({
+      business_id: businessId,
+      supplier_id: supplier.id,
+      branch_id: branchId,
+      reference_number: referenceNumber,
+      document_date: new Date().toISOString().slice(0, 10),
+      amount: openingBalance,
+      balance_type: "outstanding_bill",
+      notes: "Opening supplier balance captured during supplier setup.",
+      approval_status: "approved",
+      posted_at: new Date().toISOString(),
+      created_by: userId,
+    });
+    if (openingError) throw new Error(openingError.message);
+
+    const { error: transactionError } = await admin.from("supplier_transactions").insert({
+      business_id: businessId,
+      branch_id: branchId,
+      supplier_id: supplier.id,
+      transaction_type: "opening_balance",
+      transaction_date: new Date().toISOString().slice(0, 10),
+      reference_type: "supplier_opening_balance",
+      reference_number: referenceNumber,
+      credit_amount: openingBalance,
+      currency: "KES",
+      notes: "Opening amount owed to supplier.",
+      created_by: userId,
+    });
+    if (transactionError) throw new Error(transactionError.message);
+
+    await admin.from("supplier_balances").upsert({
+      business_id: businessId,
+      supplier_id: supplier.id,
+      branch_id: branchId,
+      currency: "KES",
+      opening_balance: openingBalance,
+      current_balance: openingBalance,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "business_id,supplier_id,branch_id,currency" });
+  }
+}
+
 async function findUnitId(admin: SupabaseWorkspaceClient, businessId: string, value: string) {
   if (!value) return null;
   const { data } = await admin
@@ -644,6 +831,9 @@ export async function completeProcessAction(formData: FormData) {
       }
       if (moduleName === "Customers" && processName === "New Customer") {
         await createCustomerRecord(formData, user.id, businessId);
+      }
+      if (moduleName === "Suppliers" && processName === "New Supplier") {
+        await createSupplierRecord(formData, user.id, businessId);
       }
       if (moduleName === "Inventory" && processName === "New Product") {
         await createProductRecord(formData, user.id, businessId);

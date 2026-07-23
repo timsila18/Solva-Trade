@@ -203,6 +203,18 @@ function isPurchaseSourceReport(processName: string) {
   );
 }
 
+function isSalesSourceReport(processName: string) {
+  const value = processName.toLowerCase();
+  return (
+    value.includes("sale source profitability") ||
+    value.includes("source profit by sale") ||
+    value.includes("fifo profit") ||
+    value.includes("profit by purchase source") ||
+    value.includes("direct supplier stock profit") ||
+    value.includes("local market stock profit")
+  );
+}
+
 function sourceLabel(value: string | null | undefined) {
   const source = value || "unspecified";
   return source
@@ -281,6 +293,53 @@ async function purchaseSourceReportLines(processName: string): Promise<ReportLin
             ? "Bought above direct-supplier benchmark; review pricing or urgency."
             : "Bought within or below direct-supplier benchmark."
           : "Add direct benchmark cost to compare this source."),
+    };
+  });
+}
+
+async function salesSourceReportLines(processName: string): Promise<ReportLine[]> {
+  const businessId = await activeReportBusinessId();
+  if (!businessId) return [];
+
+  const supabase = await createSupabaseServerClient();
+  let query = supabase
+    .from("sales_source_allocations")
+    .select(
+      "source_type, source_supplier_name, quantity, unit_cost, total_cost, sale_unit_price, sale_value, gross_profit, allocated_at, products(product_name, product_code, sku), sales_invoices(invoice_number, invoice_date, customers(customer_name))",
+    )
+    .eq("business_id", businessId)
+    .order("allocated_at", { ascending: false })
+    .limit(300);
+
+  const lower = processName.toLowerCase();
+  if (lower.includes("direct")) query = query.eq("source_type", "direct_supplier");
+  if (lower.includes("local market")) query = query.eq("source_type", "local_market");
+
+  const { data } = await query;
+  return (data ?? []).map((row) => {
+    const productRecord = Array.isArray(row.products) ? row.products[0] : row.products;
+    const invoiceRecord = Array.isArray(row.sales_invoices) ? row.sales_invoices[0] : row.sales_invoices;
+    const customerRecord = Array.isArray(invoiceRecord?.customers) ? invoiceRecord?.customers[0] : invoiceRecord?.customers;
+    const product = productRecord as { product_name?: string | null; product_code?: string | null; sku?: string | null } | null;
+    const invoice = invoiceRecord as { invoice_number?: string | null; invoice_date?: string | null } | null;
+    const customer = customerRecord as { customer_name?: string | null } | null;
+    const margin = Number(row.sale_value ?? 0) ? (Number(row.gross_profit ?? 0) / Number(row.sale_value ?? 1)) * 100 : 0;
+
+    return {
+      sku: String(product?.sku ?? product?.product_code ?? invoice?.invoice_number ?? "SALE"),
+      description: `${String(product?.product_name ?? "Sold product")} - ${String(invoice?.invoice_number ?? "invoice")} ${customer?.customer_name ? `for ${customer.customer_name}` : ""}`.trim(),
+      unit: "Unit",
+      quantity: Number(row.quantity ?? 0),
+      unitPrice: Number(row.unit_cost ?? 0),
+      discount: Number(row.sale_unit_price ?? 0),
+      taxRate: `${margin.toFixed(1)}% margin`,
+      taxAmount: Number(row.total_cost ?? 0),
+      lineTotal: Number(row.gross_profit ?? 0),
+      warehouse: String(row.source_supplier_name ?? "Source supplier not recorded"),
+      batch: sourceLabel(String(row.source_type ?? "unspecified")),
+      notes: Number(row.gross_profit ?? 0) >= 0
+        ? "Positive gross profit from this FIFO/source allocation."
+        : "Loss-making source allocation; review buying price, selling price or urgency.",
     };
   });
 }
@@ -537,6 +596,19 @@ function blueprintFromTerms(report: Report): DocumentBlueprint {
       emphasis: "report",
     };
   }
+  if (value.includes("sale source profitability") || value.includes("source profit by sale") || value.includes("fifo profit") || value.includes("profit by purchase source") || value.includes("direct supplier stock profit") || value.includes("local market stock profit")) {
+    return {
+      ...base,
+      accent: value.includes("local market") ? "#B45309" : value.includes("direct") ? "#047857" : "#071A2B",
+      soft: value.includes("local market") ? "#FFF7ED" : "#ECFDF5",
+      label: "FIFO source-cost sales profitability",
+      table: "Sale, product, source supplier, FIFO cost, sale value and gross profit",
+      headers: ["#", "Invoice / Product", "Source", "Supplier", "Qty Sold", "FIFO Unit Cost", "Sale Price", "Cost Value", "Gross Profit", "Margin"],
+      signatures: ["Prepared by", "Margin reviewed by", "Owner decision"],
+      footerNote: "This report allocates each sale to the actual stock cost layer consumed so direct-supplier and local-market margins can be compared.",
+      emphasis: "report",
+    };
+  }
   if (value.includes("purchase order")) {
     return { ...base, accent: "#1D4ED8", soft: "#EFF6FF", label: "Supplier buying instruction", table: "Ordered items and commercial terms", headers: ["S/No", "Product Code", "Product Name", "Qty", "Unit", "Rate", "Tax", "Amount"], signatures: ["Requisitioner", "Authorised signatory", "Supplier acknowledgement"], footerNote: "Quote the purchase order number on all delivery notes and invoices.", emphasis: "invoice" };
   }
@@ -768,7 +840,11 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
     fieldValue(fields, ["customer", "supplier", "received_from", "paid_to", "payee", "owner", "driver", "employee"], tenant.businessName);
   const generatedBy = searchParams.get("generatedBy") ?? searchParams.get("printer") ?? tenant.generatedBy;
   const submittedLines = reportLineFromFields(fields);
-  const liveSourceLines = isPurchaseSourceReport(processName) ? await purchaseSourceReportLines(processName) : [];
+  const liveSourceLines = isPurchaseSourceReport(processName)
+    ? await purchaseSourceReportLines(processName)
+    : isSalesSourceReport(processName)
+      ? await salesSourceReportLines(processName)
+      : [];
   const lines = liveSourceLines.length ? liveSourceLines : submittedLines;
   const subtotal =
     parseAmount(fieldValue(fields, ["subtotal"], "0")) ||
@@ -845,7 +921,9 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
       "Includes header details, line details, totals, approval state, and audit context.",
       "CSV output protects spreadsheet users from formula injection.",
       liveSourceLines.length
-        ? "Source report values come from posted GRNs and stock receipt movements."
+        ? isSalesSourceReport(processName)
+          ? "Source profit values come from FIFO allocation of posted sales against received stock cost layers."
+          : "Source report values come from posted GRNs and stock receipt movements."
         : lines.length
           ? "Document values come from the submitted workflow fields."
           : "No posted transaction rows were found for the selected filters.",
@@ -977,10 +1055,13 @@ function valueForHeader(report: Report, line: ReportLine, index: number, header:
   if (h.includes("outstanding") || h.includes("running balance") || h === "balance" || h.includes("closing")) return money(line.lineTotal);
   if (h.includes("qty") || h.includes("quantity") || h.includes("on hand")) return String(line.quantity);
   if (h.includes("tax") || h.includes("vat")) return h.includes("rate") ? line.taxRate : money(line.taxAmount);
+  if (h.includes("sale price")) return money(line.discount);
+  if (h.includes("cost value")) return money(line.taxAmount);
   if (h.includes("price") || h.includes("rate") || h.includes("cost")) return money(line.unitPrice);
   if (h.includes("discount")) return money(line.discount);
   if (h.includes("money out") || h.includes("credit") || h.includes("paid")) return money(line.discount);
-  if (h.includes("profit") || h.includes("margin")) return money(line.lineTotal);
+  if (h.includes("margin")) return line.taxRate;
+  if (h.includes("profit")) return money(line.lineTotal);
   if (h.includes("money in") || h.includes("debit") || h.includes("gross") || h.includes("amount") || h.includes("value") || h.includes("total") || h.includes("cash") || h.includes("sales") || h.includes("purchases") || h.includes("outstanding")) return money(line.lineTotal);
   if (h.includes("warehouse") || h.includes("branch") || h.includes("route") || h.includes("vehicle") || h.includes("location") || h.includes("from") || h.includes("to") || h.includes("bin")) return line.warehouse;
   if (h.includes("batch")) return line.batch;
