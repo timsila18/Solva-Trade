@@ -38,6 +38,28 @@ function getBoolean(formData: FormData, key: string) {
   return getField(formData, key).toLowerCase() === "yes";
 }
 
+function fieldsPayload(formData: FormData) {
+  const fields: Record<string, { label: string; value: string }> = {};
+  for (const [key, value] of formData.entries()) {
+    if (!key.startsWith("field_") || typeof value !== "string" || !value.trim()) continue;
+    const fieldKey = key.slice("field_".length);
+    fields[fieldKey] = {
+      label: safeText(formData.get(`label_${fieldKey}`), fieldKey.replaceAll("_", " ")),
+      value: value.trim(),
+    };
+  }
+  return fields;
+}
+
+function statusFromIntent(intent: string) {
+  const value = intent.toLowerCase();
+  if (value.includes("draft")) return "draft";
+  if (value.includes("validat") || value.includes("preview")) return "validated";
+  if (value.includes("generat")) return "generated";
+  if (value.includes("post") || value.includes("submit") || value.includes("saved")) return "posted";
+  return "submitted";
+}
+
 function slugCode(value: string, fallback: string) {
   const code = value
     .trim()
@@ -630,6 +652,191 @@ async function createSupplierRecord(formData: FormData, userId: string, fallback
   }
 }
 
+async function findFinanceAccountId(admin: SupabaseWorkspaceClient, businessId: string, value: string) {
+  const account = value.trim();
+  if (!account) return null;
+  const { data } = await admin
+    .from("finance_accounts")
+    .select("id")
+    .eq("business_id", businessId)
+    .or(`account_name.ilike.${account},account_code.ilike.${account}`)
+    .limit(1)
+    .maybeSingle();
+  return data?.id ?? null;
+}
+
+async function postFinanceWorkflow(formData: FormData, userId: string, fallbackBusinessId?: string | null) {
+  const admin = await createSupabaseServerClient();
+  const { businessId, branchId } = await getWorkspaceContextForClient(admin, userId, fallbackBusinessId);
+  const processName = safeText(formData.get("process"), "Cash and Bank");
+  const lower = processName.toLowerCase();
+
+  if (lower === "financial accounts") {
+    const accountName = getField(formData, "account_name");
+    if (!accountName) throw new Error("Enter the financial account name.");
+    const accountCode = getField(formData, "account_code") || `FIN-${Date.now().toString().slice(-6)}`;
+    const { error } = await admin.from("finance_accounts").insert({
+      business_id: businessId,
+      branch_id: branchId,
+      account_name: accountName,
+      account_code: accountCode,
+      account_type: slugCode(getField(formData, "account_type"), "cash"),
+      currency: getField(formData, "currency") || "KES",
+      institution_or_provider: getField(formData, "provider") || null,
+      account_number_masked: getField(formData, "masked_account_number") || null,
+      minimum_balance: getNumber(formData, "minimum_balance") || null,
+      approval_threshold: getNumber(formData, "approval_threshold") || null,
+      notes: getField(formData, "responsible_user") || null,
+      active: true,
+      created_by: userId,
+    });
+    if (error) throw new Error(error.message);
+    return;
+  }
+
+  if (lower === "expenses") {
+    const amount = getNumber(formData, "amount");
+    if (amount <= 0) throw new Error("Enter the expense amount.");
+    const financeAccountId = await findFinanceAccountId(admin, businessId, getField(formData, "account"));
+    const expenseNumber = getField(formData, "expense_number") || `EXP-${Date.now().toString().slice(-8)}`;
+    const tax = getNumber(formData, "tax");
+    const { error } = await admin.from("expenses").insert({
+      business_id: businessId,
+      branch_id: branchId,
+      expense_number: expenseNumber,
+      expense_date: getField(formData, "date") || new Date().toISOString().slice(0, 10),
+      expense_category: getField(formData, "category") || "General expense",
+      payee: getField(formData, "payee") || "Not specified",
+      finance_account_id: financeAccountId,
+      amount,
+      tax_amount: tax,
+      total_paid: amount + tax,
+      description: getField(formData, "description") || getField(formData, "attachment") || null,
+      approval_status: "approved",
+      posted_status: "posted",
+      created_by: userId,
+    });
+    if (error) throw new Error(error.message);
+  }
+}
+
+function accountClassValue(value: string) {
+  const normalized = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+  const allowed = new Set(["assets", "liabilities", "equity", "revenue", "cost_of_sales", "expenses", "other_income", "other_expenses"]);
+  return allowed.has(normalized) ? normalized : "expenses";
+}
+
+async function postAccountingWorkflow(formData: FormData, userId: string, fallbackBusinessId?: string | null) {
+  const admin = await createSupabaseServerClient();
+  const { businessId } = await getWorkspaceContextForClient(admin, userId, fallbackBusinessId);
+  const processName = safeText(formData.get("process"), "Accounting");
+  const lower = processName.toLowerCase();
+
+  if (lower === "accounting setup wizard") {
+    const { error } = await admin.from("accounting_setup_progress").upsert({
+      business_id: businessId,
+      current_step: "activation_readiness",
+      use_recommended_chart: getField(formData, "use_recommended_chart").toLowerCase() !== "no",
+      readiness_checks: fieldsPayload(formData),
+      saved_payload: fieldsPayload(formData),
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "business_id" });
+    if (error) throw new Error(error.message);
+    return;
+  }
+
+  if (lower === "chart of accounts") {
+    const accountCode = getField(formData, "account_code");
+    const accountName = getField(formData, "account_name");
+    if (!accountCode || !accountName) throw new Error("Enter account code and account name.");
+    const accountClass = accountClassValue(getField(formData, "account_class"));
+    const { error } = await admin.from("chart_of_accounts").insert({
+      business_id: businessId,
+      account_code: accountCode,
+      account_name: accountName,
+      description: getField(formData, "statement_section") || null,
+      account_class: accountClass,
+      account_type: getField(formData, "account_type") || accountClass,
+      account_subtype: getField(formData, "cash_flow_category") || null,
+      normal_balance: getField(formData, "normal_balance").toLowerCase().includes("credit") ? "credit" : "debit",
+      is_control_account: getField(formData, "control_account").toLowerCase().includes("yes"),
+      is_posting_account: !getField(formData, "posting_account").toLowerCase().includes("no"),
+      financial_statement_section: getField(formData, "statement_section") || accountClass,
+      created_by: userId,
+    });
+    if (error) throw new Error(error.message);
+  }
+}
+
+async function postDistributionWorkflow(formData: FormData, userId: string, fallbackBusinessId?: string | null) {
+  const admin = await createSupabaseServerClient();
+  const { businessId, branchId, warehouseId } = await getWorkspaceContextForClient(admin, userId, fallbackBusinessId);
+  const processName = safeText(formData.get("process"), "Distribution");
+  if (processName.toLowerCase() !== "delivery runs") return;
+
+  const runNumber = getField(formData, "run_number") || `RUN-${Date.now().toString().slice(-8)}`;
+  const { error } = await admin.from("delivery_runs").insert({
+    business_id: businessId,
+    branch_id: branchId,
+    delivery_run_number: runNumber,
+    delivery_date: getField(formData, "delivery_date") || new Date().toISOString().slice(0, 10),
+    dispatch_warehouse_id: warehouseId,
+    return_warehouse_id: warehouseId,
+    vehicle_warehouse_id: warehouseId,
+    run_type: "scheduled_delivery",
+    priority: getField(formData, "priority") || "normal",
+    status: "draft",
+    approval_status: "draft",
+    notes: [
+      getField(formData, "route") ? `Route: ${getField(formData, "route")}` : "",
+      getField(formData, "vehicle") ? `Vehicle: ${getField(formData, "vehicle")}` : "",
+      getField(formData, "primary_driver") ? `Primary driver: ${getField(formData, "primary_driver")}` : "",
+    ].filter(Boolean).join("; "),
+    created_by: userId,
+  });
+  if (error) throw new Error(error.message);
+}
+
+async function persistWorkflowRecord(
+  formData: FormData,
+  userId: string,
+  businessId: string,
+  source?: { table: string; id?: string | null },
+) {
+  const admin = await createSupabaseServerClient();
+  const { branchId } = await getWorkspaceContextForClient(admin, userId, businessId);
+  const moduleName = safeText(formData.get("module"), "Solva Trade");
+  const processName = safeText(formData.get("process"), "Business process");
+  const documentName = safeText(formData.get("document"), processName);
+  const intent = safeText(formData.get("intent"), "Completed");
+  const reference = getField(formData, "document_number") ||
+    getField(formData, "reference") ||
+    getField(formData, "invoice_number") ||
+    getField(formData, "receipt_number") ||
+    getField(formData, "run_number") ||
+    `WRK-${Date.now().toString().slice(-8)}`;
+
+  const { error } = await admin.from("workflow_records").insert({
+    business_id: businessId,
+    branch_id: branchId,
+    module_name: moduleName,
+    process_name: processName,
+    document_name: documentName,
+    intent,
+    status: statusFromIntent(intent),
+    reference_number: reference,
+    record_payload: {
+      fields: fieldsPayload(formData),
+      returnTo: safeText(formData.get("returnTo"), "/dashboard"),
+      next: safeText(formData.get("next"), "Open Dashboard"),
+    },
+    source_table: source?.table ?? null,
+    source_record_id: source?.id ?? null,
+    created_by: userId,
+  });
+  if (error) throw new Error(error.message);
+}
+
 async function findUnitId(admin: SupabaseWorkspaceClient, businessId: string, value: string) {
   if (!value) return null;
   const { data } = await admin
@@ -838,6 +1045,16 @@ export async function completeProcessAction(formData: FormData) {
       if (moduleName === "Inventory" && processName === "New Product") {
         await createProductRecord(formData, user.id, businessId);
       }
+      if (moduleName === "Cash and Bank") {
+        await postFinanceWorkflow(formData, user.id, businessId);
+      }
+      if (moduleName === "Accounting") {
+        await postAccountingWorkflow(formData, user.id, businessId);
+      }
+      if (moduleName === "Distribution") {
+        await postDistributionWorkflow(formData, user.id, businessId);
+      }
+      await persistWorkflowRecord(formData, user.id, businessId);
 
       try {
         const admin = createSupabaseAdminClient();

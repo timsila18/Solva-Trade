@@ -344,6 +344,63 @@ async function salesSourceReportLines(processName: string): Promise<ReportLine[]
   });
 }
 
+async function workflowRecordReportLines(moduleName: string, processName: string): Promise<ReportLine[]> {
+  const businessId = await activeReportBusinessId();
+  if (!businessId) return [];
+
+  const supabase = await createSupabaseServerClient();
+  let query = supabase
+    .from("workflow_records")
+    .select("module_name, process_name, reference_number, intent, status, record_payload, created_at")
+    .eq("business_id", businessId)
+    .order("created_at", { ascending: false })
+    .limit(200);
+
+  if (moduleName && moduleName !== "Solva Trade") query = query.eq("module_name", moduleName);
+  if (processName && processName !== "Business Process") query = query.eq("process_name", processName);
+
+  const { data } = await query;
+  return (data ?? []).map((record) => {
+    const payload = record.record_payload as { fields?: Record<string, { label?: string; value?: string }> } | null;
+    const fields = payload?.fields ?? {};
+    const amount = parseAmount(
+      fields.total?.value ??
+      fields.amount?.value ??
+      fields.total_paid?.value ??
+      fields.balance?.value ??
+      fields.closing_cash?.value ??
+      "0",
+    );
+    const quantity = parseAmount(fields.quantity?.value ?? fields.qty?.value ?? fields.rows?.value ?? "1") || 1;
+    const primary =
+      fields.customer?.value ||
+      fields.supplier?.value ||
+      fields.account?.value ||
+      fields.product?.value ||
+      fields.report?.value ||
+      fields.category?.value ||
+      record.process_name;
+
+    return {
+      sku: String(record.reference_number ?? "WORKFLOW"),
+      description: String(primary),
+      unit: "Record",
+      quantity,
+      unitPrice: amount,
+      discount: 0,
+      taxRate: String(record.status ?? "submitted"),
+      taxAmount: parseAmount(fields.tax?.value ?? fields.vat?.value ?? "0"),
+      lineTotal: amount,
+      warehouse: String(fields.branch?.value ?? fields.warehouse?.value ?? record.module_name),
+      batch: String(record.intent ?? record.process_name),
+      notes: Object.values(fields)
+        .slice(0, 4)
+        .map((field) => `${field.label ?? "Field"}: ${field.value ?? ""}`)
+        .join("; ") || "Saved workflow record.",
+    };
+  });
+}
+
 function initials(name: string) {
   return name
     .split(/\s+/)
@@ -845,7 +902,8 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
     : isSalesSourceReport(processName)
       ? await salesSourceReportLines(processName)
       : [];
-  const lines = liveSourceLines.length ? liveSourceLines : submittedLines;
+  const workflowLines = !liveSourceLines.length && !submittedLines.length ? await workflowRecordReportLines(moduleName, processName) : [];
+  const lines = liveSourceLines.length ? liveSourceLines : submittedLines.length ? submittedLines : workflowLines;
   const subtotal =
     parseAmount(fieldValue(fields, ["subtotal"], "0")) ||
     lines.reduce((sum, line) => sum + line.quantity * line.unitPrice - line.discount, 0);
@@ -924,6 +982,8 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
         ? isSalesSourceReport(processName)
           ? "Source profit values come from FIFO allocation of posted sales against received stock cost layers."
           : "Source report values come from posted GRNs and stock receipt movements."
+        : workflowLines.length
+          ? "Report rows come from saved tenant workflow records for this module and process."
         : lines.length
           ? "Document values come from the submitted workflow fields."
           : "No posted transaction rows were found for the selected filters.",
