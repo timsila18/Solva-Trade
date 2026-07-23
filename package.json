@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test": "node tests/run-all.mjs"
+    "test": "node tests/run-all.mjs",
+    "qa:smoke": "node scripts/qa-click-smoke.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.4.0",
@@ -24,6 +25,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.57.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
