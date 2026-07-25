@@ -216,6 +216,26 @@ function isSalesSourceReport(processName: string) {
   );
 }
 
+function isSalesOperationalReport(moduleName: string, processName: string) {
+  const value = `${moduleName} ${processName}`.toLowerCase();
+  return (
+    value.includes("basic daily sales report") ||
+    value.includes("daily sales kpi report") ||
+    value.includes("hourly sales report") ||
+    value.includes("sales rep daily report") ||
+    value.includes("weekly sales activity report") ||
+    value.includes("weekly sales call report") ||
+    value.includes("weekly route sales report") ||
+    value.includes("sales tracking report") ||
+    value.includes("deal loss reasons report") ||
+    value.includes("monthly retail sales summary report") ||
+    value.includes("monthly sales report dashboard") ||
+    value.includes("quarterly sales report") ||
+    value.includes("annual sales performance report") ||
+    value.includes("year-end sales report")
+  );
+}
+
 function isProductMasterReport(moduleName: string, processName: string) {
   const value = `${moduleName} ${processName}`.toLowerCase();
   return (
@@ -836,6 +856,359 @@ async function salesSourceReportLines(processName: string): Promise<ReportLine[]
   });
 }
 
+type SalesInvoiceRow = {
+  id: string;
+  invoice_number?: string | null;
+  invoice_date?: string | null;
+  subtotal?: number | string | null;
+  tax_total?: number | string | null;
+  total_amount?: number | string | null;
+  amount_paid?: number | string | null;
+  balance_due?: number | string | null;
+  status?: string | null;
+  delivery_status?: string | null;
+  created_at?: string | null;
+  customers?: { customer_name?: string | null; customer_code?: string | null } | { customer_name?: string | null; customer_code?: string | null }[] | null;
+  branches?: { branch_name?: string | null; branch_code?: string | null } | { branch_name?: string | null; branch_code?: string | null }[] | null;
+};
+
+type SalesItemRow = {
+  invoice_id?: string | null;
+  product_id?: string | null;
+  invoice_quantity?: number | string | null;
+  unit_price?: number | string | null;
+  tax_amount?: number | string | null;
+  line_total?: number | string | null;
+  products?: { product_name?: string | null; product_code?: string | null; sku?: string | null; standard_cost?: number | string | null } | { product_name?: string | null; product_code?: string | null; sku?: string | null; standard_cost?: number | string | null }[] | null;
+};
+
+function dateKey(value: string | null | undefined) {
+  return value ? String(value).slice(0, 10) : todayIsoDate();
+}
+
+function dayName(value: string) {
+  return new Intl.DateTimeFormat("en-KE", { weekday: "short", timeZone: "Africa/Nairobi" }).format(new Date(`${value}T00:00:00.000Z`)).toUpperCase();
+}
+
+function monthKey(value: string | null | undefined) {
+  return new Intl.DateTimeFormat("en-KE", { month: "short", year: "numeric", timeZone: "Africa/Nairobi" }).format(new Date(`${dateKey(value)}T00:00:00.000Z`));
+}
+
+function quarterKey(value: string | null | undefined) {
+  const date = new Date(`${dateKey(value)}T00:00:00.000Z`);
+  return `${date.getUTCFullYear()} Q${Math.floor(date.getUTCMonth() / 3) + 1}`;
+}
+
+function hourKey(value: string | null | undefined) {
+  const date = value ? new Date(value) : new Date();
+  return new Intl.DateTimeFormat("en-KE", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Africa/Nairobi" }).format(date).slice(0, 2) + ":00";
+}
+
+function relatedOne<T>(value: T | T[] | null | undefined) {
+  return Array.isArray(value) ? value[0] : value ?? null;
+}
+
+async function salesOperationalData() {
+  const businessId = await activeReportBusinessId();
+  if (!businessId) return { invoices: [] as SalesInvoiceRow[], items: [] as SalesItemRow[], allocations: [] as { product_id?: string | null; gross_profit?: number | string | null; total_cost?: number | string | null; sale_value?: number | string | null; quantity?: number | string | null }[] };
+
+  const supabase = await createSupabaseServerClient();
+  const [{ data: invoices }, { data: items }, { data: allocations }] = await Promise.all([
+    supabase
+      .from("sales_invoices")
+      .select("id, invoice_number, invoice_date, subtotal, tax_total, total_amount, amount_paid, balance_due, status, delivery_status, created_at, customers(customer_name, customer_code), branches(branch_name, branch_code)")
+      .eq("business_id", businessId)
+      .order("invoice_date", { ascending: true })
+      .limit(1000),
+    supabase
+      .from("sales_invoice_items")
+      .select("invoice_id, product_id, invoice_quantity, unit_price, tax_amount, line_total, products(product_name, product_code, sku, standard_cost)")
+      .eq("business_id", businessId)
+      .limit(2000),
+    supabase
+      .from("sales_source_allocations")
+      .select("product_id, quantity, total_cost, sale_value, gross_profit")
+      .eq("business_id", businessId)
+      .limit(2000),
+  ]);
+
+  return {
+    invoices: (invoices ?? []) as SalesInvoiceRow[],
+    items: (items ?? []) as SalesItemRow[],
+    allocations: (allocations ?? []) as { product_id?: string | null; gross_profit?: number | string | null; total_cost?: number | string | null; sale_value?: number | string | null; quantity?: number | string | null }[],
+  };
+}
+
+function invoiceBaseLine(invoice: SalesInvoiceRow, index: number): ReportLine {
+  const customer = relatedOne(invoice.customers);
+  const branch = relatedOne(invoice.branches);
+  const total = numberValue(invoice.total_amount);
+  const tax = numberValue(invoice.tax_total);
+  const subtotal = numberValue(invoice.subtotal) || Math.max(0, total - tax);
+  return {
+    sku: String(invoice.invoice_number ?? `SALE-${index + 1}`),
+    description: String(customer?.customer_name ?? "Walk-in customer"),
+    unit: "Invoice",
+    quantity: 1,
+    unitPrice: subtotal,
+    discount: numberValue(invoice.amount_paid),
+    taxRate: tax ? `${((tax / Math.max(subtotal, 1)) * 100).toFixed(1)}% VAT` : "No VAT",
+    taxAmount: tax,
+    lineTotal: total,
+    warehouse: String(branch?.branch_name ?? branch?.branch_code ?? "Main workspace"),
+    batch: String(invoice.status ?? "posted"),
+    notes: `Delivery: ${String(invoice.delivery_status ?? "not recorded")}. Balance: ${money(numberValue(invoice.balance_due))}.`,
+    details: {
+      "Invoice no.": String(invoice.invoice_number ?? ""),
+      Date: dateKey(invoice.invoice_date),
+      Customer: String(customer?.customer_name ?? "Walk-in customer"),
+      Branch: String(branch?.branch_name ?? branch?.branch_code ?? "Main workspace"),
+      "Sales amount": money(subtotal),
+      "Sales tax": money(tax),
+      "Sales total": money(total),
+      "Amount paid": money(numberValue(invoice.amount_paid)),
+      "Balance due": money(numberValue(invoice.balance_due)),
+      Status: String(invoice.status ?? "posted"),
+      "Delivery status": String(invoice.delivery_status ?? "not recorded"),
+    },
+  };
+}
+
+function itemBaseLine(item: SalesItemRow, invoice: SalesInvoiceRow | undefined, index: number): ReportLine {
+  const product = relatedOne(item.products);
+  const quantity = numberValue(item.invoice_quantity);
+  const unitPrice = numberValue(item.unit_price);
+  const tax = numberValue(item.tax_amount);
+  const total = numberValue(item.line_total);
+  const amount = Math.max(0, total - tax);
+  return {
+    sku: String(product?.sku ?? product?.product_code ?? `ITEM-${index + 1}`),
+    description: String(product?.product_name ?? "Sold item"),
+    unit: "Unit",
+    quantity,
+    unitPrice,
+    discount: numberValue(product?.standard_cost),
+    taxRate: amount ? `${((tax / amount) * 100).toFixed(1)}%` : "No VAT",
+    taxAmount: tax,
+    lineTotal: total,
+    warehouse: invoice ? dateKey(invoice.invoice_date) : "Posted sales",
+    batch: String(invoice?.invoice_number ?? "Invoice"),
+    notes: `Customer: ${String(relatedOne(invoice?.customers)?.customer_name ?? "Walk-in customer")}.`,
+    details: {
+      "Item no": String(product?.product_code ?? product?.sku ?? ""),
+      "Item name": String(product?.product_name ?? "Sold item"),
+      "Item description": String(product?.product_name ?? "Sold item"),
+      Price: money(unitPrice),
+      Qty: quantity.toLocaleString("en-KE", { maximumFractionDigits: 2 }),
+      Amount: money(amount),
+      "Tax rate": amount ? `${((tax / amount) * 100).toFixed(1)}%` : "0%",
+      Tax: money(tax),
+      Total: money(total),
+      "Invoice no.": String(invoice?.invoice_number ?? ""),
+      Date: invoice ? dateKey(invoice.invoice_date) : todayIsoDate(),
+      Customer: String(relatedOne(invoice?.customers)?.customer_name ?? "Walk-in customer"),
+    },
+  };
+}
+
+function groupedSalesLines(invoices: SalesInvoiceRow[], groupBy: "day" | "hour" | "month" | "quarter" | "annual"): ReportLine[] {
+  const groups = new Map<string, { revenue: number; tax: number; customers: Set<string>; invoices: number; paid: number; balance: number }>();
+  for (const invoice of invoices) {
+    const customer = String(relatedOne(invoice.customers)?.customer_name ?? "Walk-in customer");
+    const key =
+      groupBy === "hour"
+        ? hourKey(invoice.created_at ?? invoice.invoice_date)
+        : groupBy === "month"
+          ? monthKey(invoice.invoice_date)
+          : groupBy === "quarter"
+            ? quarterKey(invoice.invoice_date)
+            : groupBy === "annual"
+              ? String(new Date(`${dateKey(invoice.invoice_date)}T00:00:00.000Z`).getUTCFullYear())
+              : dateKey(invoice.invoice_date);
+    const current = groups.get(key) ?? { revenue: 0, tax: 0, customers: new Set<string>(), invoices: 0, paid: 0, balance: 0 };
+    current.revenue += numberValue(invoice.total_amount);
+    current.tax += numberValue(invoice.tax_total);
+    current.paid += numberValue(invoice.amount_paid);
+    current.balance += numberValue(invoice.balance_due);
+    current.invoices += 1;
+    current.customers.add(customer);
+    groups.set(key, current);
+  }
+
+  let previousRevenue = 0;
+  let previousCustomers = 0;
+  return Array.from(groups.entries()).map(([period, values]) => {
+    const customers = values.customers.size;
+    const aov = values.invoices ? values.revenue / values.invoices : 0;
+    const revenueGrowth = previousRevenue ? ((values.revenue - previousRevenue) / previousRevenue) * 100 : 0;
+    const customerGrowth = previousCustomers ? ((customers - previousCustomers) / previousCustomers) * 100 : 0;
+    previousRevenue = values.revenue;
+    previousCustomers = customers;
+    return {
+      sku: period,
+      description: `Sales performance for ${period}`,
+      unit: groupBy,
+      quantity: values.invoices,
+      unitPrice: aov,
+      discount: values.paid,
+      taxRate: `${revenueGrowth.toFixed(1)}% growth`,
+      taxAmount: values.tax,
+      lineTotal: values.revenue,
+      warehouse: "All branches",
+      batch: period,
+      notes: values.balance > 0 ? `Follow up ${money(values.balance)} unpaid balance.` : "Collections are clean for this period.",
+      details: {
+        Period: period,
+        Day: groupBy === "day" ? dayName(period) : period,
+        Revenue: money(values.revenue),
+        "Revenue (KES)": money(values.revenue),
+        Customers: String(customers),
+        "Customers (#)": String(customers),
+        "Transaction count": String(values.invoices),
+        "Average order value": money(aov),
+        "Average order value (KES)": money(aov),
+        "Revenue growth (%)": `${revenueGrowth.toFixed(1)}%`,
+        "Customer growth (%)": `${customerGrowth.toFixed(1)}%`,
+        "AOV growth (%)": "Review",
+        "Sales tax": money(values.tax),
+        "Amount paid": money(values.paid),
+        "Balance due": money(values.balance),
+        Target: money(0),
+        Variance: money(values.revenue),
+        Notes: values.balance > 0 ? "Collections pending" : "No balance due",
+      },
+    };
+  });
+}
+
+function productSalesTrackingLines(items: SalesItemRow[], invoicesById: Map<string, SalesInvoiceRow>, allocations: { product_id?: string | null; gross_profit?: number | string | null; total_cost?: number | string | null; sale_value?: number | string | null; quantity?: number | string | null }[]): ReportLine[] {
+  const profitByProduct = new Map<string, { profit: number; cost: number; saleValue: number; qty: number }>();
+  for (const allocation of allocations) {
+    const key = String(allocation.product_id ?? "unknown");
+    const current = profitByProduct.get(key) ?? { profit: 0, cost: 0, saleValue: 0, qty: 0 };
+    current.profit += numberValue(allocation.gross_profit);
+    current.cost += numberValue(allocation.total_cost);
+    current.saleValue += numberValue(allocation.sale_value);
+    current.qty += numberValue(allocation.quantity);
+    profitByProduct.set(key, current);
+  }
+
+  const grouped = new Map<string, { product: string; sku: string; qty: number; revenue: number; tax: number; cost: number; profit: number }>();
+  for (const item of items) {
+    const product = relatedOne(item.products);
+    const key = String(item.product_id ?? product?.sku ?? product?.product_code ?? product?.product_name ?? "unknown");
+    const current = grouped.get(key) ?? {
+      product: String(product?.product_name ?? "Sold item"),
+      sku: String(product?.sku ?? product?.product_code ?? key),
+      qty: 0,
+      revenue: 0,
+      tax: 0,
+      cost: 0,
+      profit: 0,
+    };
+    current.qty += numberValue(item.invoice_quantity);
+    current.revenue += numberValue(item.line_total);
+    current.tax += numberValue(item.tax_amount);
+    const allocation = profitByProduct.get(String(item.product_id ?? ""));
+    current.cost = allocation?.cost ?? current.cost + numberValue(product?.standard_cost) * numberValue(item.invoice_quantity);
+    current.profit = allocation?.profit ?? current.revenue - current.tax - current.cost;
+    grouped.set(key, current);
+  }
+
+  return Array.from(grouped.values()).map((row) => {
+    const averageSelling = row.qty ? row.revenue / row.qty : 0;
+    const averageCost = row.qty ? row.cost / row.qty : 0;
+    const markup = averageCost ? ((averageSelling - averageCost) / averageCost) * 100 : 0;
+    return {
+      sku: row.sku,
+      description: row.product,
+      unit: "Unit",
+      quantity: row.qty,
+      unitPrice: averageCost,
+      discount: averageSelling,
+      taxRate: `${markup.toFixed(1)}% markup`,
+      taxAmount: row.tax,
+      lineTotal: row.revenue,
+      warehouse: "All branches",
+      batch: row.profit >= 0 ? "Profitable" : "Loss",
+      notes: row.profit >= 0 ? "Product is generating positive gross profit." : "Review cost, pricing or discounts.",
+      details: {
+        "Product name": row.product,
+        "Cost per item": money(averageCost),
+        "Markup percentage": `${markup.toFixed(1)}%`,
+        "Total sold": row.qty.toLocaleString("en-KE", { maximumFractionDigits: 2 }),
+        "Total revenue": money(row.revenue),
+        "Shipping charge per item": money(0),
+        "Shipping cost per item": money(0),
+        "Profit per item": money(row.qty ? row.profit / row.qty : 0),
+        Returns: "0",
+        "Total income": money(row.profit),
+      },
+    };
+  });
+}
+
+async function salesOperationalReportLines(processName: string): Promise<ReportLine[]> {
+  const { invoices, items, allocations } = await salesOperationalData();
+  const invoicesById = new Map(invoices.map((invoice) => [String(invoice.id), invoice]));
+  const lower = processName.toLowerCase();
+
+  if (lower.includes("tracking")) return productSalesTrackingLines(items, invoicesById, allocations);
+  if (lower.includes("hourly")) return groupedSalesLines(invoices, "hour");
+  if (lower.includes("daily sales kpi")) return groupedSalesLines(invoices, "day");
+  if (lower.includes("quarterly")) return groupedSalesLines(invoices, "quarter");
+  if (lower.includes("annual") || lower.includes("year-end")) return groupedSalesLines(invoices, "quarter");
+  if (lower.includes("monthly") || lower.includes("dashboard")) return groupedSalesLines(invoices, "month");
+  if (lower.includes("weekly sales activity")) {
+    return groupedSalesLines(invoices, "day").map((line) => ({
+      ...line,
+      details: {
+        Day: detailValue(line, "Day"),
+        "Cold calls made": "0",
+        "Follow-up calls": detailAmount(detailValue(line, "Balance due")) > 0 ? "1" : "0",
+        "Emails sent": "0",
+        "Meetings arranged": "0",
+        "Visits completed": "0",
+        "Leads generated": "0",
+        "Deals closed": detailValue(line, "Transaction count"),
+        "Products sold": String(line.quantity),
+        "Sales revenue": detailValue(line, "Revenue"),
+        "Target amount": money(0),
+        Variance: detailValue(line, "Revenue"),
+        Notes: detailValue(line, "Notes"),
+      },
+    }));
+  }
+  if (lower.includes("weekly sales call") || lower.includes("weekly route")) return groupedSalesLines(invoices, "day");
+  if (lower.includes("deal loss")) {
+    return [
+      {
+        sku: "NO-LOSS",
+        description: "No lost-deal records posted",
+        unit: "Reason",
+        quantity: 0,
+        unitPrice: 0,
+        discount: 0,
+        taxRate: "0%",
+        taxAmount: 0,
+        lineTotal: 0,
+        warehouse: "Sales pipeline",
+        batch: "Loss reasons",
+        notes: "Solva has no posted lost-deal workflow records for this period. Add opportunity/loss workflows to populate this report.",
+        details: {
+          "Loss reasons": "No lost-deal records posted",
+          "Lost count": "0",
+          "Lost value": money(0),
+          "Recommended action": "Start recording rejected quotations, cancelled orders and lost opportunities.",
+        },
+      },
+    ];
+  }
+  if (lower.includes("sales rep")) return items.map((item, index) => itemBaseLine(item, invoicesById.get(String(item.invoice_id)), index));
+  if (lower.includes("basic daily")) return items.map((item, index) => itemBaseLine(item, invoicesById.get(String(item.invoice_id)), index));
+  return invoices.map((invoice, index) => invoiceBaseLine(invoice, index));
+}
+
 async function workflowRecordReportLines(moduleName: string, processName: string): Promise<ReportLine[]> {
   const businessId = await activeReportBusinessId();
   if (!businessId) return [];
@@ -1167,6 +1540,216 @@ const documentBlueprints: Record<string, DocumentBlueprint> = {
     signatures: ["Prepared by", "Reviewed by", "Approved by"],
     footerNote: "Debit notes must state the commercial reason and linked source document.",
     emphasis: "control",
+  },
+  "Basic Daily Sales Report": {
+    accent: "#0F766E",
+    soft: "#ECFDF5",
+    label: "Daily itemized sales register",
+    table: "Items sold, quantity, tax and total",
+    intro: [
+      ["Sales Day", "Summarizes posted invoices and item lines for the selected day.", "meta"],
+      ["Cash Desk", "Shows sales amount, tax and total for daily reconciliation.", "note"],
+      ["Prepared For", "Used by sales staff, cashier, manager and accountant.", "party"],
+    ],
+    headers: ["Item no", "Item name", "Item description", "Price", "Qty", "Amount", "Tax rate", "Tax", "Total", "Invoice no.", "Date", "Customer"],
+    signatures: ["Prepared by", "Cashier / salesperson", "Manager review"],
+    footerNote: "Use the daily sales report to reconcile invoices, item quantities, VAT and collections before closing the day.",
+    emphasis: "report",
+  },
+  "Daily Sales KPI Report": {
+    accent: "#1455D9",
+    soft: "#EEF6FF",
+    label: "Daily sales KPI and growth report",
+    table: "Revenue, customers, AOV and growth by day",
+    intro: [
+      ["KPI Cycle", "Tracks day-by-day posted sales performance.", "meta"],
+      ["Growth View", "Compares revenue and customer movement against the previous reported day.", "note"],
+      ["Owner Use", "A fast owner view of daily trading health.", "party"],
+    ],
+    headers: ["Day", "Revenue (KES)", "Customers (#)", "Average order value (KES)", "Revenue growth (%)", "Customer growth (%)", "AOV growth (%)", "Sales tax", "Balance due"],
+    signatures: ["Prepared by", "Sales manager", "Owner review"],
+    footerNote: "Use this report as the daily KPI pulse: revenue, customer activity, AOV, VAT and unpaid balances.",
+    emphasis: "report",
+  },
+  "Hourly Sales Report": {
+    accent: "#0891B2",
+    soft: "#ECFEFF",
+    label: "Hourly trading pattern report",
+    table: "Transaction count, item count, average sale and hourly revenue",
+    intro: [
+      ["Trading Hours", "Groups posted sales by creation hour.", "meta"],
+      ["Staffing Insight", "Helps identify busy and quiet sales windows.", "note"],
+      ["Operations Use", "Useful for cash desk planning, route timing and staff coverage.", "party"],
+    ],
+    headers: ["Period", "Transaction count", "Customers (#)", "Average order value (KES)", "Revenue (KES)", "Sales tax", "Balance due", "Notes"],
+    signatures: ["Prepared by", "Cash desk", "Manager review"],
+    footerNote: "Use hourly sales reports to understand demand by time of day and reduce missed sales during peak windows.",
+    emphasis: "report",
+  },
+  "Sales Rep Daily Report": {
+    accent: "#7C3AED",
+    soft: "#F5F3FF",
+    label: "Salesperson daily item report",
+    table: "Items sold, customer, tax and total by representative",
+    intro: [
+      ["Salesperson", "Shows daily item movement from posted invoices.", "meta"],
+      ["Performance", "Useful for salesperson accountability and commission review.", "note"],
+      ["Manager Use", "Review item lines, customers and totals before approval.", "party"],
+    ],
+    headers: ["Invoice no.", "Date", "Customer", "Item no", "Item name", "Price", "Qty", "Amount", "Tax", "Total"],
+    signatures: ["Salesperson", "Cashier", "Manager approval"],
+    footerNote: "Use this daily report to review representative activity, customer coverage and item-level selling.",
+    emphasis: "report",
+  },
+  "Weekly Sales Activity Report": {
+    accent: "#2563EB",
+    soft: "#EFF6FF",
+    label: "Weekly sales activity and target report",
+    table: "Daily activity, deals closed, products sold, revenue, target and variance",
+    intro: [
+      ["Report Week", "Summarizes daily sales activity for the week.", "meta"],
+      ["Target Review", "Shows revenue against target and follow-up requirements.", "note"],
+      ["Sales Management", "Useful for owner, manager and field sales reviews.", "party"],
+    ],
+    headers: ["Day", "Cold calls made", "Follow-up calls", "Emails sent", "Meetings arranged", "Visits completed", "Leads generated", "Deals closed", "Products sold", "Sales revenue", "Target amount", "Variance", "Notes"],
+    signatures: ["Prepared by", "Sales representative", "Sales manager"],
+    footerNote: "Use this report to connect sales activity with actual posted revenue and collection follow-up.",
+    emphasis: "report",
+  },
+  "Weekly Sales Call Report": {
+    accent: "#0E7490",
+    soft: "#ECFEFF",
+    label: "Weekly customer contact and follow-up report",
+    table: "Daily customer activity, closed deals and follow-up notes",
+    intro: [
+      ["Contact Week", "Summarizes sales contact and follow-up activity.", "meta"],
+      ["Customer Follow-up", "Highlights unpaid balances and customer action points.", "note"],
+      ["Sales Discipline", "Useful for route teams and office follow-ups.", "party"],
+    ],
+    headers: ["Day", "Transaction count", "Customers (#)", "Revenue", "Balance due", "Notes"],
+    signatures: ["Prepared by", "Sales representative", "Manager review"],
+    footerNote: "Use weekly call reports to plan customer follow-ups, collections and repeat orders.",
+    emphasis: "report",
+  },
+  "Weekly Route Sales Report": {
+    accent: "#0E7490",
+    soft: "#ECFEFF",
+    label: "Weekly route sales report",
+    table: "Daily route revenue, invoices and balances",
+    intro: [
+      ["Route Week", "Shows week-level sales performance for route or field activity.", "meta"],
+      ["Collections", "Flags balances that need follow-up.", "note"],
+      ["Operations Use", "Helpful for route reconciliation and manager review.", "party"],
+    ],
+    headers: ["Day", "Transaction count", "Customers (#)", "Revenue", "Balance due", "Notes"],
+    signatures: ["Prepared by", "Route salesperson", "Manager review"],
+    footerNote: "Use weekly route sales reports to reconcile field sales and plan the next route cycle.",
+    emphasis: "report",
+  },
+  "Sales Tracking Report": {
+    accent: "#059669",
+    soft: "#ECFDF5",
+    label: "Product revenue, markup and profit tracking",
+    table: "Product revenue, cost, markup, returns and income",
+    intro: [
+      ["Product Revenue", "Tracks sales performance by sold product.", "meta"],
+      ["Margin Control", "Uses standard cost and FIFO/source allocations where available.", "note"],
+      ["Owner Insight", "Shows which products are protecting or leaking profit.", "party"],
+    ],
+    headers: ["Product name", "Cost per item", "Markup percentage", "Total sold", "Total revenue", "Shipping charge per item", "Shipping cost per item", "Profit per item", "Returns", "Total income"],
+    signatures: ["Prepared by", "Sales manager", "Owner review"],
+    footerNote: "Use sales tracking to decide pricing, reorder priorities and product focus.",
+    emphasis: "report",
+  },
+  "Deal Loss Reasons Report": {
+    accent: "#DC2626",
+    soft: "#FEF2F2",
+    label: "Lost opportunity reasons and value",
+    table: "Loss reasons, lost count, lost value and next action",
+    intro: [
+      ["Loss Window", "Tracks rejected quotations, cancelled orders and missed opportunities when recorded.", "meta"],
+      ["Recovery", "Shows where sales are being lost and what to fix.", "note"],
+      ["Management Use", "Useful for pricing, credit, stock availability and competitor review.", "party"],
+    ],
+    headers: ["Loss reasons", "Lost count", "Lost value", "Recommended action"],
+    signatures: ["Prepared by", "Sales manager", "Owner review"],
+    footerNote: "Start recording lost deals so this report can explain lost revenue by reason and value.",
+    emphasis: "control",
+  },
+  "Monthly Retail Sales Summary Report": {
+    accent: "#1455D9",
+    soft: "#EEF6FF",
+    label: "Monthly sales summary",
+    table: "Total sales, orders, customers, VAT and balances",
+    intro: [
+      ["Reporting Period", "Summarizes posted sales for the month.", "meta"],
+      ["Month-End Review", "Shows revenue, customers, average order value and collections.", "note"],
+      ["Accountant Use", "Supports month-end sales, VAT and debtor checks.", "party"],
+    ],
+    headers: ["Period", "Revenue (KES)", "Customers (#)", "Transaction count", "Average order value (KES)", "Sales tax", "Amount paid", "Balance due", "Notes"],
+    signatures: ["Prepared by", "Accountant", "Owner approval"],
+    footerNote: "Use this report to close the month with sales totals, VAT, collections and customer activity in one place.",
+    emphasis: "report",
+  },
+  "Monthly Sales Report Dashboard": {
+    accent: "#334155",
+    soft: "#F8FAFC",
+    label: "Monthly sales dashboard pack",
+    table: "Dashboard metrics for revenue, customer activity and conversion proxy",
+    intro: [
+      ["Dashboard Period", "Presents month-level sales performance in a board-ready format.", "meta"],
+      ["Business View", "Shows revenue, orders, customers, AOV and outstanding balance.", "note"],
+      ["Owner Pack", "Use as the monthly executive sales pack.", "party"],
+    ],
+    headers: ["Period", "Revenue (KES)", "Customers (#)", "Transaction count", "Average order value (KES)", "Revenue growth (%)", "Customer growth (%)", "Balance due", "Notes"],
+    signatures: ["Prepared by", "Sales manager", "Owner review"],
+    footerNote: "Use the monthly dashboard to review sales momentum, customer volume and cash collection risk.",
+    emphasis: "report",
+  },
+  "Quarterly Sales Report": {
+    accent: "#B45309",
+    soft: "#FFF7ED",
+    label: "Quarterly sales actuals and variance report",
+    table: "Quarter revenue, customer count, quota and variance",
+    intro: [
+      ["Quarter", "Groups posted sales by quarter.", "meta"],
+      ["Quota View", "Compares actual sales against configured targets when available.", "note"],
+      ["Management Review", "Useful for quarterly pricing, growth and cash planning.", "party"],
+    ],
+    headers: ["Period", "Revenue (KES)", "Customers (#)", "Transaction count", "Average order value (KES)", "Target", "Variance", "Sales tax", "Balance due"],
+    signatures: ["Prepared by", "Sales manager", "Owner / directors"],
+    footerNote: "Use quarterly reports to review sales consistency, target gaps and collection risk across the year.",
+    emphasis: "report",
+  },
+  "Annual Sales Performance Report": {
+    accent: "#0F766E",
+    soft: "#ECFDF5",
+    label: "Annual sales performance pack",
+    table: "Quarterly revenue, customers, AOV and growth",
+    intro: [
+      ["Annual Review", "Groups posted sales into quarterly performance rows.", "meta"],
+      ["Board View", "Shows sales progress, growth and customer activity for the year.", "note"],
+      ["Strategic Use", "Useful for annual planning, bank packs and owner review.", "party"],
+    ],
+    headers: ["Period", "Revenue (KES)", "Customers (#)", "Transaction count", "Average order value (KES)", "Revenue growth (%)", "Customer growth (%)", "Sales tax", "Balance due"],
+    signatures: ["Prepared by", "Accountant", "Owner / board review"],
+    footerNote: "Use the annual report as the sales section of the year-end business pack.",
+    emphasis: "report",
+  },
+  "Year-End Sales Report": {
+    accent: "#0F766E",
+    soft: "#ECFDF5",
+    label: "Year-end sales board report",
+    table: "Quarterly sales performance, tax and collection position",
+    intro: [
+      ["Year End", "Summarizes posted sales for the financial year.", "meta"],
+      ["Board Pack", "Supports directors, owners, accountants and bank presentations.", "note"],
+      ["Next Year", "Use this to set product, route and customer priorities.", "party"],
+    ],
+    headers: ["Period", "Revenue (KES)", "Customers (#)", "Transaction count", "Average order value (KES)", "Revenue growth (%)", "Customer growth (%)", "Sales tax", "Balance due"],
+    signatures: ["Prepared by", "Accountant", "Owner / board approval"],
+    footerNote: "Use the year-end report to summarize revenue, customer growth, VAT and collection status.",
+    emphasis: "report",
   },
   "Sales Receipt": {
     accent: "#0F766E",
@@ -1564,6 +2147,8 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
     ? await purchaseSourceReportLines(processName)
     : isSalesSourceReport(processName)
       ? await salesSourceReportLines(processName)
+      : isSalesOperationalReport(moduleName, processName)
+        ? await salesOperationalReportLines(processName)
       : isProductMasterReport(moduleName, processName)
         ? await productMasterReportLines()
         : isInventoryOperationalReport(moduleName, processName)
@@ -1627,6 +2212,8 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
           ? "Live product master from saved inventory records"
           : isInventoryOperationalReport(moduleName, processName)
             ? "Live inventory report from saved products, balances, movement and sales allocation records"
+            : isSalesOperationalReport(moduleName, processName)
+              ? "Live sales report from posted invoices, invoice items, customers and source-cost allocations"
           : "Source report from posted receipts"
         : "Ready for review",
       "Source workspace": moduleName,
@@ -1656,6 +2243,8 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
           ? "Product master values come from saved products, product setup details, pack conversions, stock balances and latest purchase receipts."
           : isInventoryOperationalReport(moduleName, processName)
           ? "Inventory report values come from saved products, stock balances, reorder controls, latest receipts and posted sales allocations where applicable."
+          : isSalesOperationalReport(moduleName, processName)
+          ? "Sales report values come from posted invoices, invoice items, customers, branches and FIFO/source-cost allocations where available."
           : isSalesSourceReport(processName)
           ? "Source profit values come from FIFO allocation of posted sales against received stock cost layers."
           : "Source report values come from posted GRNs and stock receipt movements."

@@ -39,8 +39,22 @@ export const documentCatalog: BusinessDocument[] = [
     "Sales Order",
     "Sales Return Note",
     "Sales Summary Report",
+    "Basic Daily Sales Report",
     "Daily Sales Report",
+    "Daily Sales KPI Report",
+    "Hourly Sales Report",
+    "Sales Rep Daily Report",
+    "Weekly Sales Activity Report",
+    "Weekly Sales Call Report",
+    "Weekly Route Sales Report",
+    "Sales Tracking Report",
+    "Deal Loss Reasons Report",
     "Monthly Sales Report",
+    "Monthly Retail Sales Summary Report",
+    "Monthly Sales Report Dashboard",
+    "Quarterly Sales Report",
+    "Annual Sales Performance Report",
+    "Year-End Sales Report",
     "Sale Source Profitability Report",
     "Profit by Purchase Source Report",
     "Direct Supplier Stock Profit Report",
@@ -50,11 +64,45 @@ export const documentCatalog: BusinessDocument[] = [
     name,
     description: name.includes("Source") || name.includes("Stock Profit")
       ? "FIFO source-cost sales report separating direct-supplier, local-market, spot and emergency stock profitability."
-      : "Customer-facing sales document with item lines, taxes, totals, payment and delivery context.",
+      : [
+          "Basic Daily Sales Report",
+          "Daily Sales KPI Report",
+          "Hourly Sales Report",
+          "Sales Rep Daily Report",
+          "Weekly Sales Activity Report",
+          "Weekly Sales Call Report",
+          "Weekly Route Sales Report",
+          "Sales Tracking Report",
+          "Deal Loss Reasons Report",
+          "Monthly Retail Sales Summary Report",
+          "Monthly Sales Report Dashboard",
+          "Quarterly Sales Report",
+          "Annual Sales Performance Report",
+          "Year-End Sales Report",
+        ].includes(name)
+        ? "Sales management report adapted from professional sales-report templates and backed by posted invoices, invoice items, customers and source-cost allocations."
+        : "Customer-facing sales document with item lines, taxes, totals, payment and delivery context.",
     strategicPlacement: name === "Sales Receipt"
       ? "Shown after submitting a sale or customer payment."
       : name.includes("Source") || name.includes("Stock Profit")
         ? "Available from Sales reports and the owner document centre after posted sales consume stock."
+        : [
+            "Basic Daily Sales Report",
+            "Daily Sales KPI Report",
+            "Hourly Sales Report",
+            "Sales Rep Daily Report",
+            "Weekly Sales Activity Report",
+            "Weekly Sales Call Report",
+            "Weekly Route Sales Report",
+            "Sales Tracking Report",
+            "Deal Loss Reasons Report",
+            "Monthly Retail Sales Summary Report",
+            "Monthly Sales Report Dashboard",
+            "Quarterly Sales Report",
+            "Annual Sales Performance Report",
+            "Year-End Sales Report",
+          ].includes(name)
+          ? "Available from Sales reports and grouped by period in the central Reports Centre."
         : "Available inside Sales workflows and the document centre.",
     formats,
   })),

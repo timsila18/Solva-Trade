@@ -62,6 +62,19 @@ const plainWorkflows = salesWorkflows.map((workflow) => {
   return { ...workflow, ...labels[workflow.title] };
 });
 
+const salesReportCards = [
+  ["Basic Daily Sales Report", "Daily itemized sales with product, quantity, tax and total."],
+  ["Daily Sales KPI Report", "Daily revenue, customers, average order value and growth."],
+  ["Hourly Sales Report", "Trading pattern by hour for staffing and cash desk review."],
+  ["Sales Tracking Report", "Product revenue, markup and profit tracking."],
+  ["Weekly Sales Activity Report", "Weekly activity, deals closed, revenue, target and variance."],
+  ["Monthly Sales Report Dashboard", "Month-end sales dashboard for owner and accountant review."],
+] as const;
+
+function exportHref(process: string, format: "pdf" | "excel" | "print") {
+  return `/api/exports?module=Sales&process=${encodeURIComponent(process)}&format=${format}`;
+}
+
 export default function SalesPage() {
   return (
     <div className="pb-24">
@@ -90,6 +103,29 @@ export default function SalesPage() {
             action={workflow.action}
           />
         ))}
+      </section>
+
+      <section className="mt-6">
+        <div className="flex flex-col justify-between gap-2 md:flex-row md:items-end">
+          <div>
+            <p className="text-sm font-semibold text-emerald-700">Sales reports</p>
+            <h2 className="mt-1 text-xl font-semibold">Download the reports sales teams use daily</h2>
+          </div>
+          <Link href="/reports" className="text-sm font-semibold text-[var(--solva-blue-700)]">Open full report centre</Link>
+        </div>
+        <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {salesReportCards.map(([name, description]) => (
+            <article key={name} className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+              <h3 className="font-semibold text-slate-950">{name}</h3>
+              <p className="mt-2 min-h-12 text-sm leading-6 text-slate-600">{description}</p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <a href={exportHref(name, "pdf")} className="rounded-md bg-[var(--solva-blue-700)] px-3 py-2 text-xs font-semibold text-white">PDF</a>
+                <a href={exportHref(name, "excel")} className="rounded-md border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700">Excel</a>
+                <a href={exportHref(name, "print")} className="rounded-md border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700">Print</a>
+              </div>
+            </article>
+          ))}
+        </div>
       </section>
 
       <section className="mt-6 grid gap-4 lg:grid-cols-[1fr_1fr]">
