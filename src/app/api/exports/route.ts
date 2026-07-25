@@ -2877,7 +2877,179 @@ function renderPdfTable(canvas: PdfCanvas, report: Report, startY: number) {
   return y - 16;
 }
 
+function isLandscapePdfReport(report: Report) {
+  const template = templateFor(report);
+  return ["report", "inventoryReport", "stockMovement", "executiveReport"].includes(template);
+}
+
+function pdfDocument(content: string, width: number, height: number) {
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${width} ${height}] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>",
+    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+  ];
+  let document = "%PDF-1.4\n";
+  const offsets = [0];
+  objects.forEach((object, index) => {
+    offsets.push(document.length);
+    document += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  });
+  const xrefOffset = document.length;
+  document += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  document += offsets.slice(1).map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("");
+  document += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+  return document;
+}
+
+function wideReportHeaders(report: Report) {
+  const allHeaders = lineHeaders(report);
+  const preferred: Record<string, string[]> = {
+    "Product Master Report": ["Item no.", "Item name", "Brand", "Category", "Vendor", "Stock quantity", "Cost per item", "Selling price", "Total value", "Reorder status"],
+    "Product Inventory Usage Report": ["Item no.", "Item name", "Vendor", "Qty in stock", "Reorder level", "Qty above / below par", "Order qty", "Total order", "Reorder required (auto-fill)"],
+    "Inventory Aging Report": ["Item no.", "Item name", "Brand", "Category", "Last received", "Age bucket", "Qty in stock", "Inventory value", "Risk level", "Recommended action"],
+    "Inventory Audit Report": ["Item no.", "Item name", "Vendor", "Stock location", "Cost per item", "Stock quantity", "Total value", "Reorder level", "VAT treatment", "Tracking"],
+    "Inventory Discrepancy Report": ["Item no.", "Item name", "Vendor", "On-hand quantity", "Actual item count", "Inventory discrepancy (auto-fill)", "Reorder level", "Item discontinued?"],
+    "Inventory Damage Report": ["Item no.", "Name", "Vendor", "Condition", "Damage report", "Quantity", "Asset value", "Total value"],
+    "Sales Tracking Report": ["Product name", "Cost per item", "Markup percentage", "Total sold", "Total revenue", "Profit per item", "Total income"],
+  };
+  const requested = preferred[report.processName] ?? ["Period", "Item no.", "Item name", "Name", "Customer", "Vendor", "Revenue (KES)", "Stock quantity", "Total value", "Status", "Notes"];
+  const selected = requested.filter((header) => allHeaders.includes(header));
+  return selected.length >= 5 ? selected : allHeaders.slice(0, Math.min(10, allHeaders.length));
+}
+
+function wideTableWidths(headers: string[]) {
+  const weights = headers.map((header) => {
+    const h = header.toLowerCase();
+    if (h.includes("name") || h.includes("description") || h.includes("product")) return 2.35;
+    if (h.includes("vendor") || h.includes("customer") || h.includes("action") || h.includes("tracking")) return 1.55;
+    if (h.includes("value") || h.includes("price") || h.includes("cost") || h.includes("revenue") || h.includes("profit") || h.includes("total")) return 1.15;
+    if (h.includes("qty") || h.includes("quantity") || h.includes("level") || h.includes("stock")) return 1.05;
+    if (h.includes("status") || h.includes("risk") || h.includes("vat")) return 1.05;
+    return 1;
+  });
+  const total = weights.reduce((sum, value) => sum + value, 0);
+  return weights.map((weight, index) => {
+    const width = Math.floor((weight / total) * 746);
+    return index === weights.length - 1 ? 746 - weights.slice(0, -1).reduce((sum, w) => sum + Math.floor((w / total) * 746), 0) : width;
+  });
+}
+
+function renderLandscapePdfTable(canvas: PdfCanvas, report: Report, startY: number) {
+  const headers = wideReportHeaders(report);
+  const rows = report.lines.map((line, index) => headers.map((header) => valueForHeader(report, line, index, header)));
+  const widths = wideTableWidths(headers);
+  const x = 48;
+  let y = startY;
+
+  canvas.rect(x, y - 18, 746, 24, "navy");
+  let cursor = x;
+  headers.forEach((header, index) => {
+    canvas.wrap(header, cursor + 5, y - 4, widths[index] - 10, 7, "white", true, 8);
+    cursor += widths[index];
+  });
+  y -= 28;
+
+  if (!rows.length) {
+    canvas.rect(x, y - 34, 746, 40, "soft");
+    canvas.text("No posted records found for this report yet.", x + 284, y - 12, 8, "muted");
+    return y - 48;
+  }
+
+  let renderedRows = 0;
+  for (const [rowIndex, row] of rows.entries()) {
+    const cellLines = row.map((cell, index) => wrapLineCount(cell, widths[index] - 10, 6.8, 3));
+    const height = Math.max(28, Math.max(...cellLines) * 8.5 + 14);
+    if (y - height < 118) break;
+    canvas.rect(x, y - height + 5, 746, height, rowIndex % 2 === 0 ? "white" : "soft");
+    canvas.line(x, y + 5, x + 746, y + 5, "border", 0.5);
+    cursor = x;
+    row.forEach((cell, index) => {
+      canvas.wrap(cell || "-", cursor + 5, y - 7, widths[index] - 10, 6.8, "navy", false, 8.5);
+      cursor += widths[index];
+    });
+    y -= height;
+    renderedRows += 1;
+  }
+
+  if (renderedRows < rows.length) {
+    canvas.rect(x, y - 22, 746, 24, "surface");
+    canvas.text(`PDF shows ${renderedRows} of ${rows.length} rows for readability. Download Excel or CSV for the complete dataset.`, x + 12, y - 8, 7.5, "blue", true);
+    y -= 28;
+  }
+
+  canvas.line(x, y + 5, x + 746, y + 5, "border", 0.5);
+  return y - 12;
+}
+
+function landscapePdf(report: Report) {
+  const canvas = new PdfCanvas();
+  const style = blueprintFor(report);
+  const title = titleFor(report);
+  const recordCount = report.lines.length.toLocaleString("en-KE");
+
+  canvas.rect(0, 0, 842, 595, "white");
+  canvas.rect(0, 586, 842, 9, "navy");
+  canvas.rect(0, 586, 280, 9, "blue");
+  canvas.rect(280, 586, 280, 9, "cyan");
+  canvas.rect(560, 586, 282, 9, "gold");
+  canvas.text("SOLVA TRADE", 214, 300, 54, "watermark", true);
+  canvas.text("Run. Grow. Lead.", 332, 280, 15, "watermark");
+
+  canvas.rect(48, 500, 54, 50, "surface");
+  canvas.text(initials(report.businessName), 61, 520, 17, "blue", true);
+  canvas.text(report.businessName, 118, 538, 17, "navy", true);
+  canvas.wrap(`${report.businessLocation}${report.kraPin ? ` | KRA PIN: ${report.kraPin}` : ""}`, 118, 518, 330, 8, "slate");
+  canvas.text(title, 482, 538, 18, "navy", true);
+  canvas.text(style.label, 484, 518, 8, "blue", true);
+  canvas.text(`Reference: ${report.transaction["Reference number"]}`, 484, 504, 8, "muted");
+  canvas.rect(700, 506, 94, 28, "navy");
+  canvas.text("SOLVA", 714, 518, 12, "white", true);
+  canvas.text("TRADE", 760, 518, 9, "cyan", true);
+
+  canvas.rect(48, 444, 746, 42, "soft");
+  const detailCards = [
+    ["Generated by", `${report.generatedBy} - ${roleLabel(report.generatedByRole)}`],
+    ["Generated on", report.generatedAt],
+    ["Scope", `${report.moduleName} | ${report.transaction.Branch}`],
+    ["Total records", recordCount],
+  ];
+  detailCards.forEach(([label, value], index) => {
+    const x = 66 + index * 178;
+    canvas.text(label.toUpperCase(), x, 468, 6.8, "muted", true);
+    canvas.wrap(value, x, 454, 150, 8.5, "navy", index === 3);
+  });
+
+  const kpis = [
+    ["Subtotal", report.totals.Subtotal],
+    ["Tax", report.totals.Tax],
+    ["Total", report.totals.Total],
+  ];
+  kpis.forEach(([label, value], index) => {
+    const x = 48 + index * 166;
+    canvas.rect(x, 396, 150, 32, "surface");
+    canvas.text(label.toUpperCase(), x + 12, 416, 6.8, "muted", true);
+    canvas.text(value, x + 12, 403, 9.5, "blue", true);
+  });
+  canvas.wrap(style.footerNote, 562, 420, 232, 7.6, "slate", false, 9);
+
+  canvas.text("REPORT DETAILS", 48, 376, 9, "blue", true);
+  const yAfterTable = renderLandscapePdfTable(canvas, report, 354);
+
+  const footerY = Math.max(36, Math.min(84, yAfterTable));
+  canvas.line(48, footerY, 794, footerY, "border", 0.5);
+  canvas.text(`${report.businessName} | ${report.processName}`, 48, footerY - 16, 7.2, "muted");
+  canvas.text(`Generated by Solva Trade on ${report.generatedAt}`, 318, footerY - 16, 7.2, "muted");
+  canvas.text("Page 1 of 1", 746, footerY - 16, 7.2, "muted");
+
+  return pdfDocument(canvas.output(), 842, 595);
+}
+
 function pdf(report: Report) {
+  if (isLandscapePdfReport(report)) return landscapePdf(report);
+
   const canvas = new PdfCanvas();
   const title = titleFor(report);
   const template = templateFor(report);
@@ -3012,27 +3184,7 @@ function pdf(report: Report) {
   canvas.line(48, 58, 564, 58, "border");
   canvas.wrap(`${report.businessName} document generated by Solva Trade. ${style.footerNote} Printed by ${report.generatedBy} on ${report.generatedAt}.`, 76, 42, 460, 7.5, "muted");
 
-  const content = canvas.output();
-  const objects = [
-    "<< /Type /Catalog /Pages 2 0 R >>",
-    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 842] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>",
-    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>",
-    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
-  ];
-  let document = "%PDF-1.4\n";
-  const offsets = [0];
-  objects.forEach((object, index) => {
-    offsets.push(document.length);
-    document += `${index + 1} 0 obj\n${object}\nendobj\n`;
-  });
-  const xrefOffset = document.length;
-  document += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
-  document += offsets.slice(1).map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("");
-  document += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
-
-  return document;
+  return pdfDocument(canvas.output(), 612, 842);
 }
 
 export async function GET(request: NextRequest) {
