@@ -436,7 +436,7 @@ async function productMasterReportLines(): Promise<ReportLine[]> {
       unit: details["Base unit"] || "Unit",
       quantity: balance.quantity,
       unitPrice: standardCost,
-      discount: numberValue(product.default_selling_price_placeholder),
+      discount: 0,
       taxRate: details["VAT treatment"],
       taxAmount: stockValue,
       lineTotal: stockValue,
@@ -2161,14 +2161,17 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
           : [];
   const workflowLines = !liveSourceLines.length && !submittedLines.length ? await workflowRecordReportLines(moduleName, processName) : [];
   const lines = liveSourceLines.length ? liveSourceLines : submittedLines.length ? submittedLines : workflowLines;
-  const subtotal =
-    parseAmount(fieldValue(fields, ["subtotal"], "0")) ||
-    lines.reduce((sum, line) => sum + line.quantity * line.unitPrice - line.discount, 0);
-  const tax = parseAmount(fieldValue(fields, ["tax"], "0")) || lines.reduce((sum, line) => sum + line.taxAmount, 0);
-  const discount = parseAmount(fieldValue(fields, ["discount"], "0")) || lines.reduce((sum, line) => sum + line.discount, 0);
+  const isValuationReport = isProductMasterReport(moduleName, processName) || isInventoryOperationalReport(moduleName, processName);
+  const lineValueTotal = lines.reduce((sum, line) => sum + line.lineTotal, 0);
+  const subtotal = isValuationReport
+    ? lineValueTotal
+    : parseAmount(fieldValue(fields, ["subtotal"], "0")) ||
+      lines.reduce((sum, line) => sum + Math.max(0, line.quantity * line.unitPrice - line.discount), 0);
+  const tax = isValuationReport ? 0 : parseAmount(fieldValue(fields, ["tax"], "0")) || lines.reduce((sum, line) => sum + line.taxAmount, 0);
+  const discount = isValuationReport ? 0 : parseAmount(fieldValue(fields, ["discount"], "0")) || lines.reduce((sum, line) => sum + line.discount, 0);
   const total =
-    parseAmount(fieldValue(fields, ["total", "amount", "amount_received", "amount_sent"], "0")) ||
-    lines.reduce((sum, line) => sum + line.lineTotal, 0) ||
+    (isValuationReport ? lineValueTotal : parseAmount(fieldValue(fields, ["total", "amount", "amount_received", "amount_sent"], "0"))) ||
+    lineValueTotal ||
     Math.max(0, subtotal - discount + tax);
   const balanceDue = parseAmount(fieldValue(fields, ["balance_due", "outstanding_amount"], "0")) || total;
   const reference =
@@ -3023,9 +3026,15 @@ function landscapePdf(report: Report) {
   });
 
   const kpis = [
-    ["Subtotal", report.totals.Subtotal],
-    ["Tax", report.totals.Tax],
-    ["Total", report.totals.Total],
+    isProductMasterReport(report.moduleName, report.processName) || isInventoryOperationalReport(report.moduleName, report.processName)
+      ? ["Stock value", report.totals.Total]
+      : ["Subtotal", report.totals.Subtotal],
+    isProductMasterReport(report.moduleName, report.processName) || isInventoryOperationalReport(report.moduleName, report.processName)
+      ? ["Records", recordCount]
+      : ["Tax", report.totals.Tax],
+    isProductMasterReport(report.moduleName, report.processName) || isInventoryOperationalReport(report.moduleName, report.processName)
+      ? ["Review status", report.lines.length ? "Ready" : "No records"]
+      : ["Total", report.totals.Total],
   ];
   kpis.forEach(([label, value], index) => {
     const x = 48 + index * 166;
