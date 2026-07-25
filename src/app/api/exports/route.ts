@@ -15,6 +15,7 @@ type ReportLine = {
   warehouse: string;
   batch: string;
   notes: string;
+  details?: Record<string, string>;
 };
 
 type Report = {
@@ -213,6 +214,185 @@ function isSalesSourceReport(processName: string) {
     value.includes("direct supplier stock profit") ||
     value.includes("local market stock profit")
   );
+}
+
+function isProductMasterReport(moduleName: string, processName: string) {
+  const value = `${moduleName} ${processName}`.toLowerCase();
+  return (
+    value.includes("product master") ||
+    value.includes("printable inventory") ||
+    value.includes("product catalogue") ||
+    value.includes("inventory master")
+  );
+}
+
+function numberValue(value: unknown) {
+  const amount = Number(value ?? 0);
+  return Number.isFinite(amount) ? amount : 0;
+}
+
+async function productMasterReportLines(): Promise<ReportLine[]> {
+  const businessId = await activeReportBusinessId();
+  if (!businessId) return [];
+
+  const supabase = await createSupabaseServerClient();
+  const { data: products } = await supabase
+    .from("products")
+    .select(
+      "id, product_name, short_name, product_code, sku, barcode, description, product_type, category_id, brand_id, manufacturer, base_unit_id, purchase_unit_id, selling_unit_id, track_inventory, track_batches, track_expiry, track_serial_numbers, track_returnable_packaging, tax_category, vat_status, preferred_costing_method, standard_cost, default_selling_price_placeholder, minimum_selling_price, reorder_level, reorder_quantity, maximum_stock_level, lead_time_days, shelf_life_days, weight, volume, active, archived, created_at",
+    )
+    .eq("business_id", businessId)
+    .order("product_name", { ascending: true })
+    .limit(1000);
+
+  const rows = products ?? [];
+  if (!rows.length) return [];
+
+  const ids = rows.map((row) => String(row.id));
+  const categoryIds = Array.from(new Set(rows.map((row) => row.category_id).filter(Boolean).map(String)));
+  const brandIds = Array.from(new Set(rows.map((row) => row.brand_id).filter(Boolean).map(String)));
+  const unitIds = Array.from(
+    new Set(
+      rows
+        .flatMap((row) => [row.base_unit_id, row.purchase_unit_id, row.selling_unit_id])
+        .filter(Boolean)
+        .map(String),
+    ),
+  );
+
+  const [{ data: categories }, { data: brands }, { data: units }, { data: balances }, { data: packs }, { data: receipts }] = await Promise.all([
+    categoryIds.length
+      ? supabase.from("product_categories").select("id, category_name").in("id", categoryIds)
+      : Promise.resolve({ data: [] }),
+    brandIds.length ? supabase.from("brands").select("id, brand_name, manufacturer_or_owner").in("id", brandIds) : Promise.resolve({ data: [] }),
+    unitIds.length ? supabase.from("units_of_measure").select("id, name, symbol").in("id", unitIds) : Promise.resolve({ data: [] }),
+    supabase
+      .from("stock_balances")
+      .select("product_id, quantity_on_hand, available_quantity, average_unit_cost, total_inventory_value, reorder_status")
+      .eq("business_id", businessId)
+      .in("product_id", ids),
+    supabase
+      .from("product_pack_units")
+      .select("product_id, conversion_factor, barcode, sku, default_purchase_unit, default_sales_unit, from_unit_id, to_unit_id")
+      .eq("business_id", businessId)
+      .in("product_id", ids)
+      .eq("active", true),
+    supabase
+      .from("stock_movements")
+      .select("product_id, movement_date, reference_number, source_supplier_name")
+      .eq("business_id", businessId)
+      .in("product_id", ids)
+      .eq("movement_type", "purchase_receipt")
+      .order("movement_date", { ascending: false }),
+  ]);
+
+  const categoryMap = new Map((categories ?? []).map((row) => [String(row.id), String(row.category_name ?? "")]));
+  const brandMap = new Map((brands ?? []).map((row) => [String(row.id), row as { brand_name?: string | null; manufacturer_or_owner?: string | null }]));
+  const unitMap = new Map((units ?? []).map((row) => [String(row.id), `${row.name ?? "Unit"}${row.symbol ? ` (${row.symbol})` : ""}`]));
+  const balanceMap = new Map<string, { quantity: number; available: number; averageCost: number; value: number; status: string }>();
+  for (const balance of balances ?? []) {
+    const key = String(balance.product_id);
+    const current = balanceMap.get(key) ?? { quantity: 0, available: 0, averageCost: 0, value: 0, status: "healthy" };
+    const quantity = current.quantity + numberValue(balance.quantity_on_hand);
+    const available = current.available + numberValue(balance.available_quantity);
+    const value = current.value + numberValue(balance.total_inventory_value);
+    balanceMap.set(key, {
+      quantity,
+      available,
+      averageCost: quantity ? value / quantity : numberValue(balance.average_unit_cost),
+      value,
+      status: String(balance.reorder_status ?? current.status),
+    });
+  }
+
+  const packMap = new Map<string, string>();
+  for (const pack of packs ?? []) {
+    if (packMap.has(String(pack.product_id))) continue;
+    const fromUnit = unitMap.get(String(pack.from_unit_id)) ?? "Purchase unit";
+    const toUnit = unitMap.get(String(pack.to_unit_id)) ?? "Base unit";
+    const sku = pack.sku ? `, SKU ${pack.sku}` : "";
+    const barcode = pack.barcode ? `, barcode ${pack.barcode}` : "";
+    packMap.set(String(pack.product_id), `1 ${fromUnit} = ${numberValue(pack.conversion_factor)} ${toUnit}${sku}${barcode}`);
+  }
+
+  const receiptMap = new Map<string, { date: string; supplier: string; reference: string }>();
+  for (const receipt of receipts ?? []) {
+    const key = String(receipt.product_id);
+    if (receiptMap.has(key)) continue;
+    receiptMap.set(key, {
+      date: String(receipt.movement_date ?? "").slice(0, 10),
+      supplier: String(receipt.source_supplier_name ?? ""),
+      reference: String(receipt.reference_number ?? ""),
+    });
+  }
+
+  return rows.map((product) => {
+    const brand = product.brand_id ? brandMap.get(String(product.brand_id)) : null;
+    const balance = balanceMap.get(String(product.id)) ?? { quantity: 0, available: 0, averageCost: 0, value: 0, status: "no stock" };
+    const standardCost = numberValue(product.standard_cost) || balance.averageCost;
+    const stockValue = balance.value || standardCost * balance.quantity;
+    const reorderLevel = numberValue(product.reorder_level);
+    const reorderStatus =
+      !product.track_inventory ? "not tracked" : balance.quantity <= 0 ? "out of stock" : reorderLevel && balance.available <= reorderLevel ? "reorder" : balance.status || "ok";
+    const receipt = receiptMap.get(String(product.id));
+    const details = {
+      "Reorder status": reorderStatus,
+      "Item no.": String(product.product_code ?? ""),
+      SKU: String(product.sku ?? ""),
+      Barcode: String(product.barcode ?? ""),
+      "Date of last order": receipt?.date || "No receipt posted",
+      "Item name": String(product.product_name ?? ""),
+      Brand: String(brand?.brand_name ?? ""),
+      Category: product.category_id ? categoryMap.get(String(product.category_id)) ?? "" : "",
+      Vendor: receipt?.supplier || "Not recorded",
+      "Stock location": "All warehouses",
+      Description: String(product.description ?? product.short_name ?? ""),
+      "Base unit": product.base_unit_id ? unitMap.get(String(product.base_unit_id)) ?? "" : "",
+      "Purchase unit": product.purchase_unit_id ? unitMap.get(String(product.purchase_unit_id)) ?? "" : "",
+      "Selling unit": product.selling_unit_id ? unitMap.get(String(product.selling_unit_id)) ?? "" : "",
+      "Pack conversion": packMap.get(String(product.id)) ?? "No pack conversion",
+      "Cost per item": money(standardCost),
+      "Selling price": money(numberValue(product.default_selling_price_placeholder)),
+      "Minimum selling price": money(numberValue(product.minimum_selling_price)),
+      "Stock quantity": balance.quantity.toLocaleString("en-KE", { maximumFractionDigits: 2 }),
+      "Available quantity": balance.available.toLocaleString("en-KE", { maximumFractionDigits: 2 }),
+      "Total value": money(stockValue),
+      "Reorder level": reorderLevel.toLocaleString("en-KE", { maximumFractionDigits: 2 }),
+      "Days per reorder": product.lead_time_days ? String(product.lead_time_days) : "Not set",
+      "Item reorder quantity": numberValue(product.reorder_quantity).toLocaleString("en-KE", { maximumFractionDigits: 2 }),
+      "Max stock level": product.maximum_stock_level ? numberValue(product.maximum_stock_level).toLocaleString("en-KE", { maximumFractionDigits: 2 }) : "Not set",
+      "VAT treatment": String(product.vat_status ?? product.tax_category ?? "Not set"),
+      "Product type": String(product.product_type ?? "").replaceAll("_", " "),
+      Tracking: [
+        product.track_inventory ? "inventory" : "",
+        product.track_batches ? "batch" : "",
+        product.track_expiry ? "expiry" : "",
+        product.track_serial_numbers ? "serial" : "",
+        product.track_returnable_packaging ? "returnable packaging" : "",
+      ].filter(Boolean).join(", ") || "not tracked",
+      Manufacturer: String(product.manufacturer ?? brand?.manufacturer_or_owner ?? ""),
+      "Shelf life days": product.shelf_life_days ? String(product.shelf_life_days) : "Not set",
+      Weight: product.weight ? String(product.weight) : "Not set",
+      Volume: product.volume ? String(product.volume) : "Not set",
+      Status: product.archived ? "Archived" : product.active ? "Active" : "Inactive",
+    };
+
+    return {
+      sku: details.SKU || details["Item no."],
+      description: details["Item name"],
+      unit: details["Base unit"] || "Unit",
+      quantity: balance.quantity,
+      unitPrice: standardCost,
+      discount: numberValue(product.default_selling_price_placeholder),
+      taxRate: details["VAT treatment"],
+      taxAmount: stockValue,
+      lineTotal: stockValue,
+      warehouse: details["Stock location"],
+      batch: details["Reorder status"],
+      notes: `${details.Brand || "No brand"} - ${details.Category || "No category"} - ${details["Pack conversion"]}`,
+      details,
+    };
+  });
 }
 
 function sourceLabel(value: string | null | undefined) {
@@ -415,6 +595,42 @@ function titleFor(report: Report) {
 }
 
 const documentBlueprints: Record<string, DocumentBlueprint> = {
+  "Product Master Report": {
+    accent: "#1455D9",
+    soft: "#EEF6FF",
+    label: "Complete product and inventory master",
+    table: "Product setup, stock value, reorder and tax details",
+    intro: [
+      ["Inventory Value", "Total value is based on current stock balances and standard or average cost.", "meta"],
+      ["Reorder Control", "Reorder status compares available quantity against the product reorder level.", "note"],
+      ["Product Setup", "Includes units, pack conversion, VAT treatment, tracking flags and status.", "party"],
+    ],
+    headers: [
+      "Reorder status",
+      "Item no.",
+      "Date of last order",
+      "Item name",
+      "Brand",
+      "Category",
+      "Vendor",
+      "Stock location",
+      "Description",
+      "Base unit",
+      "Pack conversion",
+      "Cost per item",
+      "Selling price",
+      "Stock quantity",
+      "Total value",
+      "Reorder level",
+      "Days per reorder",
+      "Item reorder quantity",
+      "VAT treatment",
+      "Status",
+    ],
+    signatures: ["Prepared by", "Stock controller", "Owner / accountant review"],
+    footerNote: "Use this report to review product setup completeness, stock value, reorder needs and tax treatment before purchasing or selling.",
+    emphasis: "report",
+  },
   "Quotation": {
     accent: "#7C3AED",
     soft: "#F5F3FF",
@@ -901,7 +1117,9 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
     ? await purchaseSourceReportLines(processName)
     : isSalesSourceReport(processName)
       ? await salesSourceReportLines(processName)
-      : [];
+      : isProductMasterReport(moduleName, processName)
+        ? await productMasterReportLines()
+        : [];
   const workflowLines = !liveSourceLines.length && !submittedLines.length ? await workflowRecordReportLines(moduleName, processName) : [];
   const lines = liveSourceLines.length ? liveSourceLines : submittedLines.length ? submittedLines : workflowLines;
   const subtotal =
@@ -955,7 +1173,11 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
       Branch: fieldValue(fields, ["branch", "dispatch_warehouse", "warehouse", "route"], "Main workspace"),
       Currency: "KES",
       "Payment terms": fieldValue(fields, ["payment_terms", "payment_status", "payment_method", "delivery_terms"], "As entered"),
-      "Process status": liveSourceLines.length ? "Source report from posted receipts" : "Ready for review",
+      "Process status": liveSourceLines.length
+        ? isProductMasterReport(moduleName, processName)
+          ? "Live product master from saved inventory records"
+          : "Source report from posted receipts"
+        : "Ready for review",
       "Source workspace": moduleName,
       "Business process": processName,
       ...Object.fromEntries(Object.values(fields).map((field) => [field.label, field.value])),
@@ -979,7 +1201,9 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
       "Includes header details, line details, totals, approval state, and audit context.",
       "CSV output protects spreadsheet users from formula injection.",
       liveSourceLines.length
-        ? isSalesSourceReport(processName)
+        ? isProductMasterReport(moduleName, processName)
+          ? "Product master values come from saved products, product setup details, pack conversions, stock balances and latest purchase receipts."
+          : isSalesSourceReport(processName)
           ? "Source profit values come from FIFO allocation of posted sales against received stock cost layers."
           : "Source report values come from posted GRNs and stock receipt movements."
         : workflowLines.length
@@ -993,6 +1217,7 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
 }
 
 function csv(report: Report) {
+  const reportHeaders = lineHeaders(report);
   const detailHeaders = [
     "module",
     "process",
@@ -1026,9 +1251,10 @@ function csv(report: Report) {
     "review_status",
     "approval_status",
     "audit_notes",
+    ...reportHeaders.map((header) => `report_${header.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "")}`),
   ];
   const auditNotes = report.auditTrail.join(" | ");
-  const rows = report.lines.map((line) => [
+  const rows = report.lines.map((line, index) => [
     report.moduleName,
     report.processName,
     report.partyName,
@@ -1061,6 +1287,7 @@ function csv(report: Report) {
     report.approvals.Reviewed,
     report.approvals.Approved,
     auditNotes,
+    ...lineCells(report, line, index),
   ]);
 
   return [detailHeaders, ...rows]
@@ -1097,6 +1324,10 @@ function lineHeaders(report: Report) {
 
 function valueForHeader(report: Report, line: ReportLine, index: number, header: string) {
   const h = header.toLowerCase();
+  const directDetail = line.details?.[header];
+  if (directDetail !== undefined) return directDetail;
+  const matchingDetail = Object.entries(line.details ?? {}).find(([key]) => key.toLowerCase() === h);
+  if (matchingDetail) return matchingDetail[1];
   if (h === "#" || h.includes("s/no") || h.includes("line") || h.includes("stop")) return String(index + 1);
   if (h.includes("timestamp")) return report.generatedAt;
   if (h.includes("date") || h.includes("period") || h.includes("needed by") || h.includes("expiry")) return report.transaction["Document date"];
@@ -1445,11 +1676,19 @@ class PdfCanvas {
 }
 
 function renderPdfTable(canvas: PdfCanvas, report: Report, startY: number) {
-  const headers = lineHeaders(report);
-  const rows = report.lines.map((line, index) => lineCells(report, line, index));
+  const allHeaders = lineHeaders(report);
+  const headers =
+    allHeaders.length > 10
+      ? allHeaders.filter((header) =>
+          ["Reorder status", "Item no.", "Item name", "Brand", "Category", "Cost per item", "Stock quantity", "Total value", "Reorder level", "Status"].includes(header),
+        )
+      : allHeaders;
+  const rows = report.lines.map((line, index) => headers.map((header) => valueForHeader(report, line, index, header)));
   const x = 48;
   const widths =
-    headers.length === 8
+    headers.length === 10
+      ? [54, 46, 86, 48, 54, 56, 48, 58, 48, 32]
+      : headers.length === 8
       ? [30, 96, 72, 46, 58, 68, 66, 94]
       : headers.length === 7
         ? [54, 116, 74, 62, 62, 72, 90]

@@ -18,6 +18,7 @@ const ownerQuestions = [
 ];
 
 const fastDownloadPairs = [
+  ["Inventory", "Product Master Report"],
   ["Sales", "Sales Receipt"],
   ["Sales", "Tax Invoice"],
   ["Purchasing", "Goods Received Note (GRN)"],
@@ -35,6 +36,68 @@ const fastDownloadPairs = [
 const fastDownloadDocuments = fastDownloadPairs
   .map(([category, name]) => documentCatalog.find((document) => document.category === category && document.name === name))
   .filter((document): document is BusinessDocument => Boolean(document));
+
+const periodGroups = [
+  {
+    title: "Daily Reports",
+    description: "Operational reports used before, during and after today's work.",
+    documents: [
+      ["Executive", "Morning Business Brief"],
+      ["Sales", "Daily Sales Report"],
+      ["Inventory", "Product Master Report"],
+      ["Inventory", "Reorder List"],
+      ["Finance", "Cashbook"],
+      ["Distribution", "Driver Collection Summary"],
+      ["Operations", "Daily Operations Report"],
+    ],
+  },
+  {
+    title: "Weekly Reports",
+    description: "Review movement, debt, supplier performance and stock risk every week.",
+    documents: [
+      ["Sales", "Sales Summary Report"],
+      ["Customers", "Customer Aging Report"],
+      ["Inventory", "Stock Movement Report"],
+      ["Inventory", "Slow-Moving Stock Report"],
+      ["Purchasing", "Supplier Price Comparison"],
+      ["Executive", "Cash Recovery Report"],
+      ["Executive", "Inventory Opportunity Report"],
+    ],
+  },
+  {
+    title: "Monthly Reports",
+    description: "Management, accountant and owner packs for month-end review.",
+    documents: [
+      ["Sales", "Monthly Sales Report"],
+      ["Finance", "Income Statement (Profit & Loss)"],
+      ["Finance", "Balance Sheet"],
+      ["Finance", "Trial Balance"],
+      ["Tax", "VAT Report"],
+      ["Executive", "Business Health Report"],
+      ["Executive", "Profit Leakage Report"],
+      ["Executive", "Executive Board Report"],
+    ],
+  },
+  {
+    title: "Annual Reports",
+    description: "Year-end, compliance and strategic performance reports.",
+    documents: [
+      ["Finance", "General Ledger"],
+      ["Finance", "Budget vs Actual Report"],
+      ["Tax", "Tax Compliance Summary"],
+      ["Compliance", "Audit Trail Report"],
+      ["System", "Usage Report"],
+      ["Executive", "Branch Performance Report"],
+      ["Executive", "Business Action Plan"],
+    ],
+  },
+] as const;
+
+function documentsFromPairs(pairs: readonly (readonly [string, string])[]) {
+  return pairs
+    .map(([category, name]) => documentCatalog.find((document) => document.category === category && document.name === name))
+    .filter((document): document is BusinessDocument => Boolean(document));
+}
 
 function exportHref(document: BusinessDocument, format: "pdf" | "excel" | "print") {
   return `/api/exports?module=${encodeURIComponent(document.category)}&process=${encodeURIComponent(document.name)}&format=${format}`;
@@ -100,6 +163,48 @@ export default function ReportsPage() {
               </div>
             </article>
           ))}
+        </div>
+      </section>
+
+      <section className="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
+          <div>
+            <p className="text-sm font-semibold text-[var(--solva-blue-700)]">Central Reports Centre</p>
+            <h2 className="mt-1 text-2xl font-semibold tracking-normal text-slate-950">Reports grouped by daily, weekly, monthly and annual use.</h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
+              Every report remains available by business area below, but these period groups make it easier for owners, staff and accountants to know what to open first.
+            </p>
+          </div>
+        </div>
+        <div className="mt-5 grid gap-4 xl:grid-cols-2">
+          {periodGroups.map((group) => {
+            const docs = documentsFromPairs(group.documents);
+            return (
+              <article key={group.title} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-lg font-semibold text-slate-950">{group.title}</h3>
+                    <p className="mt-1 text-sm leading-6 text-slate-600">{group.description}</p>
+                  </div>
+                  <span className="rounded-md bg-white px-2.5 py-1 text-xs font-semibold text-slate-600">{docs.length} reports</span>
+                </div>
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  {docs.map((document) => (
+                    <div key={`${group.title}-${document.category}-${document.name}`} className="rounded-lg border border-slate-200 bg-white p-3">
+                      <p className="text-xs font-semibold uppercase text-slate-500">{document.category}</p>
+                      <h4 className="mt-1 font-semibold text-slate-950">{document.name}</h4>
+                      <p className="mt-2 min-h-10 text-xs leading-5 text-slate-600">{document.description}</p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <a href={exportHref(document, "pdf")} className="rounded-md bg-[var(--solva-blue-700)] px-3 py-2 text-xs font-semibold text-white">PDF</a>
+                        <a href={exportHref(document, "excel")} className="rounded-md border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs font-semibold text-[var(--solva-blue-700)]">Excel</a>
+                        <a href={exportHref(document, "print")} className="rounded-md border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700">Print</a>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </article>
+            );
+          })}
         </div>
       </section>
 

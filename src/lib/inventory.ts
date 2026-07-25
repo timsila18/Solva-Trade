@@ -161,6 +161,7 @@ export function expiryStatus(expiryDate: string | null, now = new Date(), warnin
 }
 
 export const inventoryReports = [
+  "Product Master Report",
   "Stock on Hand",
   "Available Stock",
   "Stock by Branch",

@@ -87,6 +87,7 @@ export const documentCatalog: BusinessDocument[] = [
     formats,
   })),
   ...[
+    "Product Master Report",
     "Stock Card",
     "Bin Card",
     "Stock Movement Report",
@@ -104,8 +105,12 @@ export const documentCatalog: BusinessDocument[] = [
   ].map((name) => ({
     category: "Inventory" as const,
     name,
-    description: "Inventory control document for quantities, warehouses, batches, movements and valuation.",
-    strategicPlacement: "Available from Inventory, product records, stock counts, transfers and the document centre.",
+    description: name === "Product Master Report"
+      ? "Complete product catalogue with setup details, units, pack conversion, VAT treatment, cost, selling price, stock value and reorder status."
+      : "Inventory control document for quantities, warehouses, batches, movements and valuation.",
+    strategicPlacement: name === "Product Master Report"
+      ? "Available from Products, Inventory Reports and the central Reports Centre after products are added."
+      : "Available from Inventory, product records, stock counts, transfers and the document centre.",
     formats,
   })),
   ...[
