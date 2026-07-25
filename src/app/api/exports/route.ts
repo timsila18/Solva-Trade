@@ -2450,9 +2450,17 @@ function signatureLabelsFor(report: Report) {
   return blueprintFor(report).signatures.slice(0, 3);
 }
 
+function splitForPdfCell(value: string, maxChars: number) {
+  const matcher = new RegExp(`.{1,${maxChars}}`, "g");
+  return String(value || "-")
+    .split(/\s+/)
+    .flatMap((word) => (word.length > maxChars ? word.match(matcher) ?? [word] : [word]))
+    .filter((word): word is string => Boolean(word));
+}
+
 function wrapLineCount(value: string, maxWidth: number, size: number, maxLines = 4) {
   const maxChars = Math.max(8, Math.floor(maxWidth / (size * 0.48)));
-  const words = String(value || "-").split(/\s+/).filter(Boolean);
+  const words = splitForPdfCell(value, maxChars);
   if (!words.length) return 1;
   let lines = 0;
   let current = "";
@@ -2757,7 +2765,7 @@ class PdfCanvas {
 
   wrap(value: string, x: number, y: number, width: number, size = 10, color = "navy", bold = false, leading = size + 4) {
     const maxChars = Math.max(8, Math.floor(width / (size * 0.52)));
-    const words = value.split(/\s+/);
+    const words = splitForPdfCell(value, maxChars);
     const rows: string[] = [];
     let current = "";
     words.forEach((word) => {
@@ -2777,6 +2785,25 @@ class PdfCanvas {
   output() {
     return this.ops.join("\n");
   }
+}
+
+function pdfTableWidths(report: Report, headers: string[]) {
+  if (report.processName === "Product Master Report") return [76, 154, 62, 58, 58, 72, 50];
+  if (report.processName === "Product Inventory Usage Report") return [72, 154, 56, 58, 70, 54, 66];
+  if (report.processName === "Inventory Aging Report") return [72, 150, 70, 58, 72, 48, 60];
+  if (report.processName === "Inventory Audit Report") return [70, 144, 80, 66, 58, 72, 40];
+  if (report.processName === "Inventory Discrepancy Report") return [72, 144, 62, 68, 76, 56, 52];
+  if (report.processName === "Inventory Damage Report") return [74, 142, 64, 88, 44, 58, 60];
+  if (report.processName === "Sales Tracking Report") return [146, 64, 64, 58, 72, 62, 64];
+  return headers.length === 7
+    ? [72, 148, 66, 66, 60, 68, 50]
+    : headers.length === 8
+      ? [46, 126, 58, 58, 62, 62, 62, 56]
+      : headers.length === 6
+        ? [62, 172, 70, 72, 72, 82]
+        : headers.length === 5
+          ? [156, 58, 92, 78, 146]
+          : [62, 220, 44, 76, 58, 70];
 }
 
 function renderPdfTable(canvas: PdfCanvas, report: Report, startY: number) {
@@ -2807,16 +2834,7 @@ function renderPdfTable(canvas: PdfCanvas, report: Report, startY: number) {
   const headers = allHeaders.length > 7 ? (preferredHeaders.length >= 4 ? preferredHeaders.slice(0, 7) : allHeaders.slice(0, 7)) : allHeaders;
   const rows = report.lines.map((line, index) => headers.map((header) => valueForHeader(report, line, index, header)));
   const x = 48;
-  const widths =
-    headers.length === 7
-      ? [54, 142, 68, 70, 62, 72, 62]
-      : headers.length === 8
-      ? [46, 126, 58, 58, 62, 62, 62, 56]
-        : headers.length === 6
-          ? [62, 172, 70, 72, 72, 82]
-          : headers.length === 5
-            ? [156, 58, 92, 78, 146]
-            : [62, 220, 44, 76, 58, 70];
+  const widths = pdfTableWidths(report, headers);
   let y = startY;
 
   canvas.rect(x, y - 22, 530, 26, "navy");
