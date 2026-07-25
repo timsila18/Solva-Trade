@@ -2410,6 +2410,26 @@ function lineCells(report: Report, line: ReportLine, index: number) {
   return lineHeaders(report).map((header) => valueForHeader(report, line, index, header));
 }
 
+function wrapLineCount(value: string, maxWidth: number, size: number, maxLines = 4) {
+  const maxChars = Math.max(8, Math.floor(maxWidth / (size * 0.48)));
+  const words = String(value || "-").split(/\s+/).filter(Boolean);
+  if (!words.length) return 1;
+  let lines = 0;
+  let current = "";
+  for (const word of words) {
+    const next = current ? `${current} ${word}` : word;
+    if (next.length > maxChars && current) {
+      lines += 1;
+      current = word;
+      if (lines >= maxLines) return maxLines;
+    } else {
+      current = next;
+    }
+  }
+  if (current) lines += 1;
+  return Math.min(maxLines, Math.max(1, lines));
+}
+
 function documentMetaCard(report: Report) {
   return `
     <dl class="meta-card">
@@ -2719,57 +2739,51 @@ class PdfCanvas {
 
 function renderPdfTable(canvas: PdfCanvas, report: Report, startY: number) {
   const allHeaders = lineHeaders(report);
-  const pdfPreferredHeaders = [
-    "Reorder status",
-    "Reorder required (auto-fill)",
-    "Discrepancy (auto-fill)",
+  const compactReportHeaders: Record<string, string[]> = {
+    "Product Master Report": ["Item no.", "Item name", "Brand", "Category", "Stock quantity", "Total value", "Reorder status"],
+    "Product Inventory Usage Report": ["Item no.", "Item name", "Qty in stock", "Reorder level", "Qty above / below par", "Order qty", "Total order"],
+    "Inventory Aging Report": ["Item no.", "Item name", "Age bucket", "Qty in stock", "Inventory value", "Risk level", "Recommended action"],
+    "Inventory Audit Report": ["Item no.", "Item name", "Stock location", "Cost per item", "Stock quantity", "Total value", "VAT treatment"],
+    "Inventory Discrepancy Report": ["Item no.", "Item name", "On-hand quantity", "Actual item count", "Inventory discrepancy (auto-fill)", "Reorder level", "Item discontinued?"],
+    "Inventory Damage Report": ["Item no.", "Name", "Condition", "Damage report", "Quantity", "Asset value", "Total value"],
+    "Sales Tracking Report": ["Product name", "Cost per item", "Markup percentage", "Total sold", "Total revenue", "Profit per item", "Total income"],
+  };
+  const pdfPreferredHeaders = compactReportHeaders[report.processName] ?? [
     "Item no.",
     "Item name",
     "Name",
-    "Brand",
-    "Category",
+    "Customer",
     "Vendor",
-    "Stock location",
-    "Condition",
-    "Age bucket",
-    "Risk level",
-    "Cost per item",
-    "Unit cost",
+    "Period",
+    "Revenue (KES)",
     "Stock quantity",
-    "Qty in stock",
-    "Current quantity",
     "Total value",
-    "Inventory value",
-    "Current value",
-    "Reorder level",
     "Status",
-    "Recommended action",
+    "Notes",
   ];
-  const preferredHeaders = allHeaders.filter((header) => pdfPreferredHeaders.includes(header)).slice(0, 10);
-  const headers = allHeaders.length > 10 ? (preferredHeaders.length >= 5 ? preferredHeaders : allHeaders.slice(0, 10)) : allHeaders;
+  const preferredHeaders = pdfPreferredHeaders.filter((header) => allHeaders.includes(header));
+  const headers = allHeaders.length > 7 ? (preferredHeaders.length >= 4 ? preferredHeaders.slice(0, 7) : allHeaders.slice(0, 7)) : allHeaders;
   const rows = report.lines.map((line, index) => headers.map((header) => valueForHeader(report, line, index, header)));
   const x = 48;
   const widths =
-    headers.length === 10
-      ? [54, 46, 86, 48, 54, 56, 48, 58, 48, 32]
+    headers.length === 7
+      ? [54, 142, 68, 70, 62, 72, 62]
       : headers.length === 8
-      ? [30, 96, 72, 46, 58, 68, 66, 94]
-      : headers.length === 7
-        ? [54, 116, 74, 62, 62, 72, 90]
+      ? [46, 126, 58, 58, 62, 62, 62, 56]
         : headers.length === 6
-          ? [62, 178, 54, 78, 70, 88]
+          ? [62, 172, 70, 72, 72, 82]
           : headers.length === 5
             ? [156, 58, 92, 78, 146]
             : [62, 220, 44, 76, 58, 70];
   let y = startY;
 
-  canvas.rect(x, y - 18, 530, 22, "navy");
+  canvas.rect(x, y - 22, 530, 26, "navy");
   let cursor = x;
   headers.forEach((header, index) => {
-    canvas.text(header, cursor + 5, y - 10, 7.5, "white", true);
+    canvas.wrap(header, cursor + 5, y - 8, (widths[index] ?? 70) - 10, 7, "white", true, 8);
     cursor += widths[index] ?? 70;
   });
-  y -= 24;
+  y -= 30;
 
   if (rows.length === 0) {
     canvas.rect(x, y - 32, 530, 38, "soft");
@@ -2777,17 +2791,27 @@ function renderPdfTable(canvas: PdfCanvas, report: Report, startY: number) {
     return y - 48;
   }
 
-  rows.forEach((row, rowIndex) => {
-    const height = 38;
+  let renderedRows = 0;
+  for (const [rowIndex, row] of rows.entries()) {
+    const cellLines = row.map((cell, index) => wrapLineCount(cell, (widths[index] ?? 70) - 10, 7.2, 3));
+    const height = Math.max(32, Math.max(...cellLines) * 10 + 16);
+    if (y - height < 220) break;
     canvas.rect(x, y - height + 6, 530, height, rowIndex % 2 === 0 ? "white" : "soft");
     canvas.line(x, y + 6, x + 530, y + 6);
     cursor = x;
     row.forEach((cell, index) => {
-      canvas.wrap(cell, cursor + 5, y - 8, (widths[index] ?? 70) - 10, 7.5, "navy", false, 9);
+      canvas.wrap(cell || "-", cursor + 5, y - 8, (widths[index] ?? 70) - 10, 7.2, "navy", false, 10);
       cursor += widths[index] ?? 70;
     });
     y -= height;
-  });
+    renderedRows += 1;
+  }
+
+  if (renderedRows < rows.length) {
+    canvas.rect(x, y - 26, 530, 28, "surface");
+    canvas.text(`Showing ${renderedRows} of ${rows.length} rows in PDF. Download Excel or CSV for all columns and all rows.`, x + 12, y - 10, 8, "blue", true);
+    y -= 34;
+  }
 
   canvas.line(x, y + 6, x + 530, y + 6, "border");
   return y - 16;
