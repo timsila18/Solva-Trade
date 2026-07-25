@@ -19,6 +19,8 @@ const ownerQuestions = [
 
 const fastDownloadPairs = [
   ["Inventory", "Product Master Report"],
+  ["Inventory", "Product Inventory Usage Report"],
+  ["Inventory", "Inventory Aging Report"],
   ["Sales", "Sales Receipt"],
   ["Sales", "Tax Invoice"],
   ["Purchasing", "Goods Received Note (GRN)"],
@@ -45,6 +47,9 @@ const periodGroups = [
       ["Executive", "Morning Business Brief"],
       ["Sales", "Daily Sales Report"],
       ["Inventory", "Product Master Report"],
+      ["Inventory", "Product Inventory Usage Report"],
+      ["Inventory", "Inventory Discrepancy Report"],
+      ["Inventory", "Inventory Damage Report"],
       ["Inventory", "Reorder List"],
       ["Finance", "Cashbook"],
       ["Distribution", "Driver Collection Summary"],
@@ -57,7 +62,10 @@ const periodGroups = [
     documents: [
       ["Sales", "Sales Summary Report"],
       ["Customers", "Customer Aging Report"],
+      ["Inventory", "Weekly Inventory Report"],
       ["Inventory", "Stock Movement Report"],
+      ["Inventory", "Inventory Aging Report"],
+      ["Inventory", "Inventory Audit Report"],
       ["Inventory", "Slow-Moving Stock Report"],
       ["Purchasing", "Supplier Price Comparison"],
       ["Executive", "Cash Recovery Report"],
@@ -69,6 +77,8 @@ const periodGroups = [
     description: "Management, accountant and owner packs for month-end review.",
     documents: [
       ["Sales", "Monthly Sales Report"],
+      ["Inventory", "Monthly Inventory Report"],
+      ["Inventory", "Inventory Sales Report"],
       ["Finance", "Income Statement (Profit & Loss)"],
       ["Finance", "Balance Sheet"],
       ["Finance", "Trial Balance"],
@@ -83,6 +93,7 @@ const periodGroups = [
     description: "Year-end, compliance and strategic performance reports.",
     documents: [
       ["Finance", "General Ledger"],
+      ["Inventory", "Annual Inventory Report"],
       ["Finance", "Budget vs Actual Report"],
       ["Tax", "Tax Compliance Summary"],
       ["Compliance", "Audit Trail Report"],

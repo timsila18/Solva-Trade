@@ -226,9 +226,41 @@ function isProductMasterReport(moduleName: string, processName: string) {
   );
 }
 
+function isInventoryOperationalReport(moduleName: string, processName: string) {
+  const value = `${moduleName} ${processName}`.toLowerCase();
+  return (
+    value.includes("weekly inventory report") ||
+    value.includes("monthly inventory report") ||
+    value.includes("annual inventory report") ||
+    value.includes("inventory damage report") ||
+    value.includes("product inventory usage report") ||
+    value.includes("inventory sales report") ||
+    value.includes("inventory discrepancy report") ||
+    value.includes("inventory aging report") ||
+    value.includes("inventory audit report")
+  );
+}
+
 function numberValue(value: unknown) {
   const amount = Number(value ?? 0);
   return Number.isFinite(amount) ? amount : 0;
+}
+
+function detailAmount(value: string | undefined) {
+  if (!value) return 0;
+  const amount = Number(value.replace(/[^\d.-]/g, ""));
+  return Number.isFinite(amount) ? amount : 0;
+}
+
+function detailValue(line: ReportLine, key: string, fallback = "") {
+  return line.details?.[key] ?? fallback;
+}
+
+function periodLabel(kind: "week" | "month" | "year") {
+  const now = new Date();
+  if (kind === "year") return new Intl.DateTimeFormat("en-KE", { year: "numeric", timeZone: "Africa/Nairobi" }).format(now);
+  if (kind === "month") return new Intl.DateTimeFormat("en-KE", { month: "long", year: "numeric", timeZone: "Africa/Nairobi" }).format(now);
+  return `Week of ${todayIsoDate()}`;
 }
 
 async function productMasterReportLines(): Promise<ReportLine[]> {
@@ -393,6 +425,286 @@ async function productMasterReportLines(): Promise<ReportLine[]> {
       details,
     };
   });
+}
+
+function inventoryPeriodReportLines(base: ReportLine[], processName: string): ReportLine[] {
+  const lower = processName.toLowerCase();
+  const period = lower.includes("annual") ? periodLabel("year") : lower.includes("monthly") ? periodLabel("month") : periodLabel("week");
+  const periodColumns = lower.includes("annual")
+    ? ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
+    : lower.includes("monthly")
+      ? ["Week 1", "Week 2", "Week 3", "Week 4", "Month total"]
+      : ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
+
+  return base.map((line) => {
+    const quantity = detailAmount(detailValue(line, "Stock quantity"));
+    const value = detailAmount(detailValue(line, "Total value"));
+    const periodDetails = Object.fromEntries(periodColumns.map((column) => [column, column === periodColumns.at(-1) ? quantity.toLocaleString("en-KE") : ""]));
+    return {
+      ...line,
+      taxAmount: value,
+      lineTotal: value,
+      notes: `Inventory snapshot for ${period}. ${detailValue(line, "Reorder status", "Review")} status.`,
+      details: {
+        Period: period,
+        ...periodDetails,
+        "Item no.": detailValue(line, "Item no."),
+        Name: detailValue(line, "Item name"),
+        Description: detailValue(line, "Description"),
+        Type: detailValue(line, "Product type"),
+        Remarks: detailValue(line, "Reorder status"),
+        Department: detailValue(line, "Category"),
+        Space: detailValue(line, "Stock location"),
+        Condition: quantity > 0 ? "Good" : "No stock on hand",
+        Vendor: detailValue(line, "Vendor"),
+        "Service years remaining": detailValue(line, "Shelf life days"),
+        "Current quantity": quantity.toLocaleString("en-KE", { maximumFractionDigits: 2 }),
+        "Current value": money(value),
+        Status: detailValue(line, "Status"),
+      },
+    };
+  });
+}
+
+function inventoryDamageReportLines(base: ReportLine[]): ReportLine[] {
+  return base.map((line) => {
+    const quantity = detailAmount(detailValue(line, "Stock quantity"));
+    const unitCost = detailAmount(detailValue(line, "Cost per item"));
+    const damagedQuantity = 0;
+    return {
+      ...line,
+      quantity: damagedQuantity,
+      unitPrice: unitCost,
+      taxAmount: unitCost,
+      lineTotal: 0,
+      batch: "Damage register",
+      notes: "No damage movement posted for this item in live inventory records.",
+      details: {
+        "Item no.": detailValue(line, "Item no."),
+        Name: detailValue(line, "Item name"),
+        Description: detailValue(line, "Description"),
+        Type: detailValue(line, "Product type"),
+        Department: detailValue(line, "Category"),
+        Space: detailValue(line, "Stock location"),
+        "Date of last order": detailValue(line, "Date of last order"),
+        Vendor: detailValue(line, "Vendor"),
+        "Purchase price per item": detailValue(line, "Cost per item"),
+        "Warranty expiry date": "Not recorded",
+        Condition: quantity > 0 ? "Good" : "No stock on hand",
+        "Damage report": "No damage posted",
+        Quantity: String(damagedQuantity),
+        "Asset value": money(unitCost),
+        "Total value": money(0),
+        Model: detailValue(line, "SKU"),
+        "Vendor no.": detailValue(line, "Vendor"),
+      },
+    };
+  });
+}
+
+function inventoryUsageReportLines(base: ReportLine[]): ReportLine[] {
+  return base.map((line) => {
+    const quantity = detailAmount(detailValue(line, "Available quantity") || detailValue(line, "Stock quantity"));
+    const reorderLevel = detailAmount(detailValue(line, "Reorder level"));
+    const reorderQty = detailAmount(detailValue(line, "Item reorder quantity"));
+    const aboveBelow = quantity - reorderLevel;
+    const reorderRequired = reorderLevel > 0 && quantity <= reorderLevel ? "YES" : "NO";
+    return {
+      ...line,
+      taxAmount: aboveBelow,
+      lineTotal: reorderQty * detailAmount(detailValue(line, "Cost per item")),
+      batch: reorderRequired === "YES" ? "Reorder required" : "In stock",
+      notes: reorderRequired === "YES" ? "Buy this item or confirm incoming purchase order." : "Current quantity is above reorder level.",
+      details: {
+        "Reorder required (auto-fill)": reorderRequired,
+        "Item on reorder?": "Not recorded",
+        "Item no.": detailValue(line, "Item no."),
+        "Date of stock check": todayIsoDate(),
+        "Item name": detailValue(line, "Item name"),
+        Vendor: detailValue(line, "Vendor"),
+        "Vendor SKU": detailValue(line, "SKU"),
+        "Qty in stock": quantity.toLocaleString("en-KE", { maximumFractionDigits: 2 }),
+        "Reorder level": reorderLevel.toLocaleString("en-KE", { maximumFractionDigits: 2 }),
+        "Qty above / below par": aboveBelow.toLocaleString("en-KE", { maximumFractionDigits: 2 }),
+        "Days per reorder": detailValue(line, "Days per reorder"),
+        "Date of last order": detailValue(line, "Date of last order"),
+        "Date received / restocked": detailValue(line, "Date of last order"),
+        "Ordered by": "Purchasing team",
+        "Unit cost": detailValue(line, "Cost per item"),
+        "Order qty": reorderQty.toLocaleString("en-KE", { maximumFractionDigits: 2 }),
+        "Total order": money(reorderQty * detailAmount(detailValue(line, "Cost per item"))),
+      },
+    };
+  });
+}
+
+function inventoryDiscrepancyReportLines(base: ReportLine[]): ReportLine[] {
+  return base.map((line) => {
+    const quantity = detailAmount(detailValue(line, "Stock quantity"));
+    const reorderLevel = detailAmount(detailValue(line, "Reorder level"));
+    return {
+      ...line,
+      taxAmount: 0,
+      lineTotal: quantity * detailAmount(detailValue(line, "Cost per item")),
+      batch: "Count pending",
+      notes: "No physical count has been entered against this item in the selected period.",
+      details: {
+        "Reorder (auto-fill)": reorderLevel > 0 && quantity <= reorderLevel ? "YES" : "NO",
+        "Discrepancy (auto-fill)": "Not counted",
+        "Item no.": detailValue(line, "Item no."),
+        "Date of last order": detailValue(line, "Date of last order"),
+        "Item name": detailValue(line, "Item name"),
+        Vendor: detailValue(line, "Vendor"),
+        "Stock location": detailValue(line, "Stock location"),
+        Description: detailValue(line, "Description"),
+        "On-hand quantity": quantity.toLocaleString("en-KE", { maximumFractionDigits: 2 }),
+        "Actual item count": "Not entered",
+        "Inventory discrepancy (auto-fill)": "Awaiting count",
+        "Reorder level": detailValue(line, "Reorder level"),
+        "Days per reorder": detailValue(line, "Days per reorder"),
+        "Item reorder quantity": detailValue(line, "Item reorder quantity"),
+        "Item discontinued?": detailValue(line, "Status") === "Archived" ? "YES" : "NO",
+      },
+    };
+  });
+}
+
+function inventoryAgingReportLines(base: ReportLine[]): ReportLine[] {
+  return base.map((line) => {
+    const lastOrder = detailValue(line, "Date of last order");
+    const receivedDate = /^\d{4}-\d{2}-\d{2}$/.test(lastOrder) ? new Date(`${lastOrder}T00:00:00.000Z`) : null;
+    const ageDays = receivedDate ? Math.max(0, Math.floor((Date.now() - receivedDate.getTime()) / 86_400_000)) : 0;
+    const bucket = !receivedDate ? "No receipt posted" : ageDays <= 30 ? "0-30 days" : ageDays <= 60 ? "31-60 days" : ageDays <= 90 ? "61-90 days" : "Over 90 days";
+    const value = detailAmount(detailValue(line, "Total value"));
+    return {
+      ...line,
+      taxRate: bucket,
+      taxAmount: ageDays,
+      lineTotal: value,
+      batch: bucket,
+      notes: bucket === "Over 90 days" ? "Review pricing, promotion or supplier buying quantity." : "Stock age is within normal review range.",
+      details: {
+        "Item no.": detailValue(line, "Item no."),
+        "Item name": detailValue(line, "Item name"),
+        Brand: detailValue(line, "Brand"),
+        Category: detailValue(line, "Category"),
+        "Stock location": detailValue(line, "Stock location"),
+        "Last received": lastOrder,
+        "Age days": receivedDate ? String(ageDays) : "Not available",
+        "Age bucket": bucket,
+        "Qty in stock": detailValue(line, "Stock quantity"),
+        "Unit cost": detailValue(line, "Cost per item"),
+        "Inventory value": detailValue(line, "Total value"),
+        "Risk level": bucket === "Over 90 days" ? "High" : bucket === "61-90 days" ? "Medium" : "Low",
+        "Recommended action": bucket === "Over 90 days" ? "Discount, bundle, return or stop reordering" : "Monitor normal movement",
+      },
+    };
+  });
+}
+
+function inventoryAuditReportLines(base: ReportLine[]): ReportLine[] {
+  return base.map((line) => {
+    const quantity = detailAmount(detailValue(line, "Stock quantity"));
+    const reorderLevel = detailAmount(detailValue(line, "Reorder level"));
+    return {
+      ...line,
+      taxAmount: detailAmount(detailValue(line, "Total value")),
+      lineTotal: detailAmount(detailValue(line, "Total value")),
+      batch: "Audit extract",
+      notes: `Audit row includes setup, costing, balance and reorder controls. ${line.notes}`,
+      details: {
+        "Reorder (auto-fill)": reorderLevel > 0 && quantity <= reorderLevel ? "YES" : "NO",
+        "Item no.": detailValue(line, "Item no."),
+        "Date of last order": detailValue(line, "Date of last order"),
+        "Item name": detailValue(line, "Item name"),
+        Vendor: detailValue(line, "Vendor"),
+        "Stock location": detailValue(line, "Stock location"),
+        Description: detailValue(line, "Description"),
+        "Cost per item": detailValue(line, "Cost per item"),
+        "Stock quantity": detailValue(line, "Stock quantity"),
+        "Total value": detailValue(line, "Total value"),
+        "Reorder level": detailValue(line, "Reorder level"),
+        "Days per reorder": detailValue(line, "Days per reorder"),
+        "Item reorder quantity": detailValue(line, "Item reorder quantity"),
+        "Item discontinued?": detailValue(line, "Status") === "Archived" ? "YES" : "NO",
+        "VAT treatment": detailValue(line, "VAT treatment"),
+        Tracking: detailValue(line, "Tracking"),
+      },
+    };
+  });
+}
+
+async function inventorySalesReportLines(): Promise<ReportLine[]> {
+  const businessId = await activeReportBusinessId();
+  if (!businessId) return [];
+
+  const supabase = await createSupabaseServerClient();
+  const { data } = await supabase
+    .from("sales_source_allocations")
+    .select("allocated_at, quantity, sale_value, sale_unit_price, gross_profit")
+    .eq("business_id", businessId)
+    .order("allocated_at", { ascending: true })
+    .limit(1000);
+
+  const grouped = new Map<string, { revenue: number; units: number; grossProfit: number }>();
+  for (const row of data ?? []) {
+    const date = row.allocated_at ? new Date(String(row.allocated_at)) : new Date();
+    const key = new Intl.DateTimeFormat("en-KE", { month: "short", year: "numeric", timeZone: "Africa/Nairobi" }).format(date);
+    const current = grouped.get(key) ?? { revenue: 0, units: 0, grossProfit: 0 };
+    current.revenue += numberValue(row.sale_value);
+    current.units += numberValue(row.quantity);
+    current.grossProfit += numberValue(row.gross_profit);
+    grouped.set(key, current);
+  }
+
+  let previousRevenue = 0;
+  let previousUnits = 0;
+  let previousAov = 0;
+  return Array.from(grouped.entries()).map(([period, values]) => {
+    const aov = values.units ? values.revenue / values.units : 0;
+    const revenueGrowth = previousRevenue ? ((values.revenue - previousRevenue) / previousRevenue) * 100 : 0;
+    const unitGrowth = previousUnits ? ((values.units - previousUnits) / previousUnits) * 100 : 0;
+    const aovGrowth = previousAov ? ((aov - previousAov) / previousAov) * 100 : 0;
+    previousRevenue = values.revenue;
+    previousUnits = values.units;
+    previousAov = aov;
+    return {
+      sku: period,
+      description: `Inventory sales performance for ${period}`,
+      unit: "Month",
+      quantity: values.units,
+      unitPrice: aov,
+      discount: values.grossProfit,
+      taxRate: `${revenueGrowth.toFixed(1)}% revenue growth`,
+      taxAmount: values.grossProfit,
+      lineTotal: values.revenue,
+      warehouse: "All sales channels",
+      batch: period,
+      notes: values.grossProfit >= 0 ? "Positive gross profit from posted sales allocations." : "Negative gross profit; review source costs and selling prices.",
+      details: {
+        "Month / year": period,
+        "Revenue (KES)": money(values.revenue),
+        "Units sold (#)": values.units.toLocaleString("en-KE", { maximumFractionDigits: 2 }),
+        "Avg order value (KES)": money(aov),
+        "Revenue growth (%)": `${revenueGrowth.toFixed(1)}%`,
+        "Units sold growth (%)": `${unitGrowth.toFixed(1)}%`,
+        "AOV growth (%)": `${aovGrowth.toFixed(1)}%`,
+        "Gross profit": money(values.grossProfit),
+      },
+    };
+  });
+}
+
+async function inventoryOperationalReportLines(processName: string): Promise<ReportLine[]> {
+  if (processName.toLowerCase().includes("sales")) return inventorySalesReportLines();
+  const base = await productMasterReportLines();
+  const lower = processName.toLowerCase();
+  if (lower.includes("damage")) return inventoryDamageReportLines(base);
+  if (lower.includes("usage")) return inventoryUsageReportLines(base);
+  if (lower.includes("discrepancy")) return inventoryDiscrepancyReportLines(base);
+  if (lower.includes("aging")) return inventoryAgingReportLines(base);
+  if (lower.includes("audit")) return inventoryAuditReportLines(base);
+  return inventoryPeriodReportLines(base, processName);
 }
 
 function sourceLabel(value: string | null | undefined) {
@@ -629,6 +941,141 @@ const documentBlueprints: Record<string, DocumentBlueprint> = {
     ],
     signatures: ["Prepared by", "Stock controller", "Owner / accountant review"],
     footerNote: "Use this report to review product setup completeness, stock value, reorder needs and tax treatment before purchasing or selling.",
+    emphasis: "report",
+  },
+  "Weekly Inventory Report": {
+    accent: "#0891B2",
+    soft: "#ECFEFF",
+    label: "Seven-day stock control snapshot",
+    table: "Weekly item quantities, condition and value",
+    intro: [
+      ["Week Scope", "Shows stock status for the current operating week.", "meta"],
+      ["Stock Control", "Highlights item condition, location, vendor and current value.", "note"],
+      ["Review Owner", "Used by storekeepers, managers and owners before weekly buying decisions.", "party"],
+    ],
+    headers: ["Period", "MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN", "Item no.", "Name", "Description", "Type", "Remarks", "Department", "Space", "Condition", "Vendor", "Current quantity", "Current value"],
+    signatures: ["Prepared by", "Stock controller", "Manager review"],
+    footerNote: "Use the weekly inventory report to check stock, review exceptions and prepare weekly purchase or transfer actions.",
+    emphasis: "report",
+  },
+  "Monthly Inventory Report": {
+    accent: "#1455D9",
+    soft: "#EEF6FF",
+    label: "Month-end stock summary",
+    table: "Monthly item balances and value",
+    intro: [
+      ["Month Scope", "Summarizes inventory position for the current month.", "meta"],
+      ["Valuation", "Uses saved stock balances and current cost values.", "note"],
+      ["Management Use", "Supports month-end review, reorder planning and stock valuation checks.", "party"],
+    ],
+    headers: ["Period", "Week 1", "Week 2", "Week 3", "Week 4", "Month total", "Item no.", "Name", "Description", "Type", "Remarks", "Department", "Space", "Condition", "Vendor", "Current quantity", "Current value", "Status"],
+    signatures: ["Prepared by", "Accountant / stock controller", "Owner approval"],
+    footerNote: "Use this month-end report to reconcile stock quantities, reorder status and inventory value before management accounts.",
+    emphasis: "report",
+  },
+  "Annual Inventory Report": {
+    accent: "#0F766E",
+    soft: "#ECFDF5",
+    label: "Annual inventory movement and value view",
+    table: "Yearly item availability and value by month",
+    intro: [
+      ["Year Scope", "Provides a year-oriented inventory review for annual planning.", "meta"],
+      ["Business Control", "Shows current item status against monthly planning columns.", "note"],
+      ["Audit Use", "Useful for annual review, valuation support and insurance schedules.", "party"],
+    ],
+    headers: ["Period", "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC", "Item no.", "Name", "Description", "Type", "Remarks", "Department", "Vendor", "Current quantity", "Current value"],
+    signatures: ["Prepared by", "Accountant", "Owner / auditor review"],
+    footerNote: "Use the annual report as a year-end inventory control pack, then reconcile it with stock counts and financial statements.",
+    emphasis: "report",
+  },
+  "Inventory Damage Report": {
+    accent: "#DC2626",
+    soft: "#FEF2F2",
+    label: "Damaged stock and loss control register",
+    table: "Damage condition, quantity, value and vendor context",
+    intro: [
+      ["Damage Control", "Records damaged, spoiled or unusable stock by item.", "meta"],
+      ["Loss Exposure", "Shows asset value and total value exposure for owner review.", "note"],
+      ["Approval", "Damage write-offs must be reviewed before financial posting.", "party"],
+    ],
+    headers: ["Item no.", "Name", "Description", "Type", "Department", "Space", "Date of last order", "Vendor", "Purchase price per item", "Warranty expiry date", "Condition", "Damage report", "Quantity", "Asset value", "Total value", "Model", "Vendor no."],
+    signatures: ["Reported by", "Verified by", "Approved write-off by"],
+    footerNote: "Damage reports should support write-offs, supplier claims, insurance claims and stock accountability.",
+    emphasis: "control",
+  },
+  "Product Inventory Usage Report": {
+    accent: "#7C3AED",
+    soft: "#F5F3FF",
+    label: "Usage and reorder planning report",
+    table: "Reorder status, stock check, supplier and order quantities",
+    intro: [
+      ["Usage Control", "Shows which products are above or below reorder levels.", "meta"],
+      ["Buying Guide", "Calculates reorder quantity and estimated order value from product setup.", "note"],
+      ["Operations Use", "Used daily by storekeepers and buyers before placing orders.", "party"],
+    ],
+    headers: ["Reorder required (auto-fill)", "Item on reorder?", "Item no.", "Date of stock check", "Item name", "Vendor", "Vendor SKU", "Qty in stock", "Reorder level", "Qty above / below par", "Days per reorder", "Date of last order", "Date received / restocked", "Ordered by", "Unit cost", "Order qty", "Total order"],
+    signatures: ["Prepared by", "Buyer review", "Owner / manager approval"],
+    footerNote: "Use this report as the buying worksheet for reorder actions and stock availability decisions.",
+    emphasis: "report",
+  },
+  "Inventory Sales Report": {
+    accent: "#059669",
+    soft: "#ECFDF5",
+    label: "Inventory sales and margin trend",
+    table: "Revenue, units sold, average order value and growth",
+    intro: [
+      ["Sales Period", "Groups posted sales allocations by month.", "meta"],
+      ["Profit View", "Shows gross profit from posted source-cost allocations.", "note"],
+      ["Owner Review", "Supports pricing, stock mix and reorder decisions.", "party"],
+    ],
+    headers: ["Month / year", "Revenue (KES)", "Units sold (#)", "Avg order value (KES)", "Revenue growth (%)", "Units sold growth (%)", "AOV growth (%)", "Gross profit"],
+    signatures: ["Prepared by", "Sales manager", "Owner review"],
+    footerNote: "Inventory sales reports should be reviewed together with stock source costs to protect margins.",
+    emphasis: "report",
+  },
+  "Inventory Discrepancy Report": {
+    accent: "#EA580C",
+    soft: "#FFF7ED",
+    label: "Physical count variance worksheet",
+    table: "System stock, physical count and discrepancy action",
+    intro: [
+      ["Count Control", "Compares saved stock balances against entered physical counts.", "meta"],
+      ["Exception Review", "Flags items awaiting count or needing adjustment.", "note"],
+      ["Approval", "Inventory discrepancies require manager or owner approval before adjustment.", "party"],
+    ],
+    headers: ["Reorder (auto-fill)", "Discrepancy (auto-fill)", "Item no.", "Date of last order", "Item name", "Vendor", "Stock location", "Description", "On-hand quantity", "Actual item count", "Inventory discrepancy (auto-fill)", "Reorder level", "Days per reorder", "Item reorder quantity", "Item discontinued?"],
+    signatures: ["Counted by", "Verified by", "Adjustment approved by"],
+    footerNote: "Use discrepancy reports after stock counts to document differences and approve stock adjustments.",
+    emphasis: "control",
+  },
+  "Inventory Aging Report": {
+    accent: "#B45309",
+    soft: "#FFF7ED",
+    label: "Stock age and slow movement risk",
+    table: "Last receipt, age bucket, inventory value and action",
+    intro: [
+      ["Age Review", "Uses latest receipt date where available to show aging risk.", "meta"],
+      ["Risk Control", "Highlights slow-moving or old stock for pricing and reorder decisions.", "note"],
+      ["Owner Action", "Useful for promotions, supplier negotiations and buying discipline.", "party"],
+    ],
+    headers: ["Item no.", "Item name", "Brand", "Category", "Stock location", "Last received", "Age days", "Age bucket", "Qty in stock", "Unit cost", "Inventory value", "Risk level", "Recommended action"],
+    signatures: ["Prepared by", "Stock manager", "Owner review"],
+    footerNote: "Aging reports help identify old, slow-moving or dead stock before it ties up too much cash.",
+    emphasis: "report",
+  },
+  "Inventory Audit Report": {
+    accent: "#334155",
+    soft: "#F8FAFC",
+    label: "Inventory audit extract",
+    table: "Setup, costing, stock, reorder and tax audit fields",
+    intro: [
+      ["Audit Scope", "Provides a complete inventory control extract for audit review.", "meta"],
+      ["Completeness", "Includes product setup, cost, stock balance, reorder and tax treatment.", "note"],
+      ["Audit Use", "Useful for internal control checks, accountant review and owner sign-off.", "party"],
+    ],
+    headers: ["Reorder (auto-fill)", "Item no.", "Date of last order", "Item name", "Vendor", "Stock location", "Description", "Cost per item", "Stock quantity", "Total value", "Reorder level", "Days per reorder", "Item reorder quantity", "Item discontinued?", "VAT treatment", "Tracking"],
+    signatures: ["Prepared by", "Accountant / controller", "Owner / auditor sign-off"],
+    footerNote: "Use the audit report to verify product setup, stock value, reorder controls and tax treatment.",
     emphasis: "report",
   },
   "Quotation": {
@@ -1119,7 +1566,9 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
       ? await salesSourceReportLines(processName)
       : isProductMasterReport(moduleName, processName)
         ? await productMasterReportLines()
-        : [];
+        : isInventoryOperationalReport(moduleName, processName)
+          ? await inventoryOperationalReportLines(processName)
+          : [];
   const workflowLines = !liveSourceLines.length && !submittedLines.length ? await workflowRecordReportLines(moduleName, processName) : [];
   const lines = liveSourceLines.length ? liveSourceLines : submittedLines.length ? submittedLines : workflowLines;
   const subtotal =
@@ -1176,6 +1625,8 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
       "Process status": liveSourceLines.length
         ? isProductMasterReport(moduleName, processName)
           ? "Live product master from saved inventory records"
+          : isInventoryOperationalReport(moduleName, processName)
+            ? "Live inventory report from saved products, balances, movement and sales allocation records"
           : "Source report from posted receipts"
         : "Ready for review",
       "Source workspace": moduleName,
@@ -1203,6 +1654,8 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
       liveSourceLines.length
         ? isProductMasterReport(moduleName, processName)
           ? "Product master values come from saved products, product setup details, pack conversions, stock balances and latest purchase receipts."
+          : isInventoryOperationalReport(moduleName, processName)
+          ? "Inventory report values come from saved products, stock balances, reorder controls, latest receipts and posted sales allocations where applicable."
           : isSalesSourceReport(processName)
           ? "Source profit values come from FIFO allocation of posted sales against received stock cost layers."
           : "Source report values come from posted GRNs and stock receipt movements."
@@ -1677,12 +2130,34 @@ class PdfCanvas {
 
 function renderPdfTable(canvas: PdfCanvas, report: Report, startY: number) {
   const allHeaders = lineHeaders(report);
-  const headers =
-    allHeaders.length > 10
-      ? allHeaders.filter((header) =>
-          ["Reorder status", "Item no.", "Item name", "Brand", "Category", "Cost per item", "Stock quantity", "Total value", "Reorder level", "Status"].includes(header),
-        )
-      : allHeaders;
+  const pdfPreferredHeaders = [
+    "Reorder status",
+    "Reorder required (auto-fill)",
+    "Discrepancy (auto-fill)",
+    "Item no.",
+    "Item name",
+    "Name",
+    "Brand",
+    "Category",
+    "Vendor",
+    "Stock location",
+    "Condition",
+    "Age bucket",
+    "Risk level",
+    "Cost per item",
+    "Unit cost",
+    "Stock quantity",
+    "Qty in stock",
+    "Current quantity",
+    "Total value",
+    "Inventory value",
+    "Current value",
+    "Reorder level",
+    "Status",
+    "Recommended action",
+  ];
+  const preferredHeaders = allHeaders.filter((header) => pdfPreferredHeaders.includes(header)).slice(0, 10);
+  const headers = allHeaders.length > 10 ? (preferredHeaders.length >= 5 ? preferredHeaders : allHeaders.slice(0, 10)) : allHeaders;
   const rows = report.lines.map((line, index) => headers.map((header) => valueForHeader(report, line, index, header)));
   const x = 48;
   const widths =

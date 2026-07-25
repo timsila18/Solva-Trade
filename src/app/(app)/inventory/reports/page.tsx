@@ -12,6 +12,31 @@ const featuredReports = [
     process: "Inventory Valuation Report",
   },
   {
+    name: "Product Inventory Usage Report",
+    description: "Inventory Count-style reorder worksheet showing stock check date, vendor SKU, quantity in stock, reorder level, quantity above or below par and estimated order value.",
+    process: "Product Inventory Usage Report",
+  },
+  {
+    name: "Inventory Aging Report",
+    description: "Stock age report showing last received date, age bucket, quantity, inventory value, risk level and recommended action for slow-moving stock.",
+    process: "Inventory Aging Report",
+  },
+  {
+    name: "Inventory Discrepancy Report",
+    description: "Physical count control report comparing on-hand quantity with actual count, discrepancy status, reorder controls and approval-ready adjustment notes.",
+    process: "Inventory Discrepancy Report",
+  },
+  {
+    name: "Inventory Audit Report",
+    description: "Audit extract covering item setup, vendor, location, cost, quantity, total value, reorder settings, discontinued status, VAT treatment and tracking flags.",
+    process: "Inventory Audit Report",
+  },
+  {
+    name: "Inventory Sales Report",
+    description: "Monthly inventory sales view with revenue, units sold, average order value, growth percentages and gross profit from posted sales allocations.",
+    process: "Inventory Sales Report",
+  },
+  {
     name: "Reorder List",
     description: "Products that need buying attention based on available stock, reorder level, lead time and reorder quantity.",
     process: "Reorder List",

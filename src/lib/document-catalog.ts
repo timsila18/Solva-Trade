@@ -88,6 +88,15 @@ export const documentCatalog: BusinessDocument[] = [
   })),
   ...[
     "Product Master Report",
+    "Weekly Inventory Report",
+    "Monthly Inventory Report",
+    "Annual Inventory Report",
+    "Inventory Damage Report",
+    "Product Inventory Usage Report",
+    "Inventory Sales Report",
+    "Inventory Discrepancy Report",
+    "Inventory Aging Report",
+    "Inventory Audit Report",
     "Stock Card",
     "Bin Card",
     "Stock Movement Report",
@@ -107,10 +116,34 @@ export const documentCatalog: BusinessDocument[] = [
     name,
     description: name === "Product Master Report"
       ? "Complete product catalogue with setup details, units, pack conversion, VAT treatment, cost, selling price, stock value and reorder status."
-      : "Inventory control document for quantities, warehouses, batches, movements and valuation.",
+      : [
+          "Weekly Inventory Report",
+          "Monthly Inventory Report",
+          "Annual Inventory Report",
+          "Inventory Damage Report",
+          "Product Inventory Usage Report",
+          "Inventory Sales Report",
+          "Inventory Discrepancy Report",
+          "Inventory Aging Report",
+          "Inventory Audit Report",
+        ].includes(name)
+        ? "Inventory Count-style operational report with its own professional columns, live inventory context and PDF, Excel, CSV and print formats."
+        : "Inventory control document for quantities, warehouses, batches, movements and valuation.",
     strategicPlacement: name === "Product Master Report"
       ? "Available from Products, Inventory Reports and the central Reports Centre after products are added."
-      : "Available from Inventory, product records, stock counts, transfers and the document centre.",
+      : [
+          "Weekly Inventory Report",
+          "Monthly Inventory Report",
+          "Annual Inventory Report",
+          "Inventory Damage Report",
+          "Product Inventory Usage Report",
+          "Inventory Sales Report",
+          "Inventory Discrepancy Report",
+          "Inventory Aging Report",
+          "Inventory Audit Report",
+        ].includes(name)
+        ? "Available from Inventory Reports and grouped by period in the central Reports Centre."
+        : "Available from Inventory, product records, stock counts, transfers and the document centre.",
     formats,
   })),
   ...[

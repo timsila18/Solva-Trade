@@ -162,6 +162,15 @@ export function expiryStatus(expiryDate: string | null, now = new Date(), warnin
 
 export const inventoryReports = [
   "Product Master Report",
+  "Weekly Inventory Report",
+  "Monthly Inventory Report",
+  "Annual Inventory Report",
+  "Inventory Damage Report",
+  "Product Inventory Usage Report",
+  "Inventory Sales Report",
+  "Inventory Discrepancy Report",
+  "Inventory Aging Report",
+  "Inventory Audit Report",
   "Stock on Hand",
   "Available Stock",
   "Stock by Branch",
