@@ -9,7 +9,8 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "node tests/run-all.mjs",
-    "qa:smoke": "node scripts/qa-click-smoke.mjs"
+    "qa:smoke": "node scripts/qa-click-smoke.mjs",
+    "qa:process": "node scripts/qa-process-smoke.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.4.0",
