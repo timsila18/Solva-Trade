@@ -69,20 +69,20 @@ export function QuickCommand() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="flex min-h-11 w-full items-center gap-3 rounded-md border border-slate-200 bg-white px-3 text-left text-sm text-slate-500 shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50/50"
+        className="flex min-h-10 w-full items-center gap-3 rounded-[6px] border border-slate-300 bg-white px-3 text-left text-sm text-slate-500 transition hover:border-slate-500"
       >
-        <Search className="h-4 w-4 text-emerald-700" />
-        <span className="min-w-0 flex-1 truncate">Search anything or create something new</span>
+        <Search className="h-4 w-4 text-[var(--solva-blue-700)]" />
+        <span className="min-w-0 flex-1 truncate">Search customer, invoice, product, supplier, GRN or receipt</span>
         <kbd className="hidden rounded border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-500 sm:inline">
           Ctrl K
         </kbd>
       </button>
 
       {open ? (
-        <div className="fixed inset-0 z-50 bg-slate-950/30 px-3 py-16 backdrop-blur-sm" role="dialog" aria-modal="true">
-          <div className="mx-auto max-w-2xl overflow-hidden rounded-lg border border-white/40 bg-white shadow-2xl">
+        <div className="fixed inset-0 z-50 bg-slate-950/35 px-3 py-16 backdrop-blur-sm" role="dialog" aria-modal="true">
+          <div className="mx-auto max-w-2xl overflow-hidden border border-slate-200 bg-white shadow-2xl">
             <div className="flex items-center gap-3 border-b border-slate-100 px-4 py-3">
-              <Search className="h-5 w-5 text-emerald-700" />
+              <Search className="h-5 w-5 text-[var(--solva-blue-700)]" />
               <input
                 autoFocus
                 value={query}
@@ -93,7 +93,7 @@ export function QuickCommand() {
               <button
                 type="button"
                 onClick={() => setOpen(false)}
-                className="grid h-9 w-9 place-items-center rounded-md text-slate-500 hover:bg-slate-100"
+                className="grid h-9 w-9 place-items-center rounded-[6px] text-slate-500 hover:bg-slate-100"
                 aria-label="Close command search"
               >
                 <X className="h-4 w-4" />
@@ -108,16 +108,16 @@ export function QuickCommand() {
                       key={`${command.group}-${command.label}`}
                       href={command.href}
                       onClick={() => setOpen(false)}
-                      className="flex items-center gap-3 rounded-md px-3 py-3 transition hover:bg-emerald-50"
+                      className="flex items-center gap-3 border-b border-slate-100 px-3 py-3 transition last:border-b-0 hover:bg-slate-50"
                     >
-                      <span className="grid h-10 w-10 place-items-center rounded-md bg-emerald-50 text-emerald-800">
+                      <span className="grid h-10 w-10 place-items-center rounded-[6px] bg-blue-50 text-[var(--solva-blue-700)]">
                         <Icon className="h-5 w-5" />
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block text-sm font-semibold text-slate-950">{command.label}</span>
                         <span className="block truncate text-sm text-slate-500">{command.hint}</span>
                       </span>
-                      <span className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-500">
+                      <span className="rounded-[4px] bg-slate-100 px-2 py-1 text-xs font-medium text-slate-500">
                         {command.group}
                       </span>
                     </Link>

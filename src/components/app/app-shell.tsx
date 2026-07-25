@@ -63,8 +63,6 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
   const metadataRole = typeof user?.app_metadata?.business_role === "string" ? user.app_metadata.business_role : "owner";
   const metadataBusinessName =
     typeof user?.app_metadata?.business_name === "string" ? user.app_metadata.business_name : "your business";
-  const metadataBusinessShortName =
-    typeof user?.app_metadata?.business_short_name === "string" ? user.app_metadata.business_short_name : metadataBusinessName;
   const userName =
     typeof user?.user_metadata?.full_name === "string"
       ? user.user_metadata.full_name
@@ -136,11 +134,11 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
   const mainNav = nav.filter((item) => priorityNav.includes(item.label));
 
   return (
-    <div className="min-h-screen bg-[#f6f8fb] text-slate-950">
-      <aside className="fixed inset-y-0 left-0 hidden w-72 border-r border-white/10 bg-[var(--solva-navy-900)] text-white shadow-2xl lg:flex lg:flex-col">
-        <div className="border-b border-white/10 px-4 py-5">
-          <Link href="/dashboard" className="block rounded-lg px-2 py-2">
-            <span className="block overflow-hidden rounded-md border border-cyan-300/20 bg-[#03111f] p-2 shadow-lg shadow-blue-950/30">
+    <div className="min-h-screen bg-[#f3f6fa] text-slate-950">
+      <aside className="fixed inset-y-0 left-0 hidden w-[17rem] border-r border-slate-950 bg-[var(--solva-navy-900)] text-white shadow-xl lg:flex lg:flex-col">
+        <div className="border-b border-white/10 px-4 py-4">
+          <Link href="/dashboard" className="block rounded-[6px] px-1 py-1">
+            <span className="block overflow-hidden rounded-[6px] border border-cyan-300/15 bg-[#03111f] p-2">
               <Image
                 src="/solva-trade-logo.png"
                 alt="Solva Trade"
@@ -150,7 +148,8 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
                 className="h-auto w-full"
               />
             </span>
-            <h1 className="mt-3 text-xl font-semibold tracking-normal">Run. Grow. Lead.</h1>
+            <h1 className="mt-3 text-base font-semibold tracking-normal">Business operations console</h1>
+            <p className="mt-1 text-xs text-blue-100/65">Sales, stock, money and reports</p>
           </Link>
         </div>
 
@@ -169,7 +168,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
                       <Link
                         key={item.href}
                         href={item.href}
-                        className={`flex min-h-11 items-center justify-between rounded-md px-3 py-2 text-sm font-medium transition ${
+                        className={`flex min-h-10 items-center justify-between rounded-[6px] px-3 py-2 text-sm font-medium transition ${
                           index === 0 && group.label === "Command"
                             ? "bg-white/12 text-white ring-1 ring-cyan-200/20"
                             : "text-blue-50/75 hover:bg-white/10 hover:text-white"
@@ -196,8 +195,8 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
         </div>
 
       </aside>
-      <div className="lg:pl-72">
-        <header className="sticky top-0 z-20 border-b border-slate-200/80 bg-white/92 px-4 py-3 backdrop-blur-xl">
+      <div className="lg:pl-[17rem]">
+        <header className="sticky top-0 z-20 border-b border-slate-200 bg-white px-4 py-3">
           <div className="grid gap-3 xl:grid-cols-[minmax(260px,390px)_minmax(260px,1fr)_auto] xl:items-center">
             <div className="flex min-w-0 items-center gap-3">
               <Link href="/dashboard" className="relative h-10 w-20 shrink-0 overflow-hidden rounded-md bg-[var(--solva-navy-900)] lg:hidden">
@@ -211,11 +210,11 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
               </Link>
               <div>
                 <p className="max-w-[34rem] truncate text-xs font-medium text-slate-500">
-                  {user ? `Logged in as ${userName} ${roleName(membership.role)} ${metadataBusinessShortName}` : "You are working in"}
+                  {user ? `Logged in as ${userName}` : "You are working in"}
                 </p>
                 <p className="text-sm font-semibold text-slate-950">
                   {business.tradingName}
-                  <span className="ml-2 rounded bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
+                  <span className="ml-2 rounded-[4px] bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
                     {roleName(membership.role)}
                   </span>
                 </p>
@@ -225,7 +224,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
               <QuickCommand />
             </div>
             <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
-              <span className="hidden min-h-10 items-center rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-sm sm:inline-flex">
+              <span className="hidden min-h-10 items-center rounded-[6px] border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 sm:inline-flex">
                 {branch.name} · {branch.code}
               </span>
               {quickCreate.map((action) => {
@@ -234,22 +233,22 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
                   <Link
                     key={action.href}
                     href={action.href}
-                    className="inline-flex min-h-10 shrink-0 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-cyan-300 hover:text-[var(--solva-blue-700)]"
+                    className="inline-flex min-h-10 shrink-0 items-center gap-2 rounded-[6px] border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:border-slate-500 hover:text-slate-950"
                   >
                     <Icon className="h-4 w-4" />
                     <span className="hidden sm:inline">{action.label}</span>
                   </Link>
                 );
               })}
-              <Link href="/support" className="grid h-10 w-10 shrink-0 place-items-center rounded-md border border-slate-200 bg-white text-slate-600 shadow-sm">
+              <Link href="/support" className="grid h-10 w-10 shrink-0 place-items-center rounded-[6px] border border-slate-300 bg-white text-slate-600">
                 <CircleHelp className="h-4 w-4" />
               </Link>
-              <Link href="/notifications" className="grid h-10 w-10 shrink-0 place-items-center rounded-md border border-slate-200 bg-white text-slate-600 shadow-sm">
+              <Link href="/notifications" className="grid h-10 w-10 shrink-0 place-items-center rounded-[6px] border border-slate-300 bg-white text-slate-600">
                 <Bell className="h-4 w-4" />
               </Link>
               {user ? (
                 <form action="/api/auth/sign-out" method="post" className="shrink-0">
-                  <button className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm" aria-label="Logout">
+                  <button className="inline-flex min-h-10 items-center justify-center gap-2 rounded-[6px] border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700" aria-label="Logout">
                     <LogOut className="h-4 w-4" />
                     <span className="hidden sm:inline">Logout</span>
                   </button>
@@ -265,13 +264,13 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
                   </Link>
                 </>
               )}
-              <Link href="/settings" className="grid h-10 w-10 shrink-0 place-items-center rounded-md bg-slate-950 text-white shadow-sm">
+              <Link href="/settings" className="grid h-10 w-10 shrink-0 place-items-center rounded-[6px] bg-slate-950 text-white shadow-sm">
                 <Settings className="h-4 w-4" />
               </Link>
             </div>
           </div>
         </header>
-        <main className="px-4 py-5 sm:px-6 lg:px-8">{children}</main>
+        <main className="px-4 py-4 sm:px-6 lg:px-7">{children}</main>
       </div>
       <nav className="fixed inset-x-0 bottom-0 grid grid-cols-5 border-t border-slate-200 bg-white/95 backdrop-blur lg:hidden">
         {mainNav.slice(0, 5).map((item) => (
