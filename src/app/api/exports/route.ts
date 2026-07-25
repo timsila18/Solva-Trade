@@ -29,6 +29,7 @@ type Report = {
   businessLocation: string;
   kraPin: string;
   generatedBy: string;
+  generatedByRole: string;
   generatedAt: string;
   transaction: Record<string, string>;
   lines: ReportLine[];
@@ -2046,6 +2047,7 @@ async function tenantContext() {
     businessLocation: "Kenya",
     kraPin: "",
     generatedBy: "Solva Trade User",
+    generatedByRole: "user",
   };
 
   try {
@@ -2066,11 +2068,12 @@ async function tenantContext() {
     const metadataLocation = typeof user.app_metadata?.business_location === "string" ? user.app_metadata.business_location : fallback.businessLocation;
     const { data: membership } = await supabase
       .from("business_memberships")
-      .select("business_id")
+      .select("business_id, role")
       .eq("active", true)
       .limit(1)
       .maybeSingle();
     const businessId = membership?.business_id ?? metadataBusinessId;
+    const generatedByRole = String(membership?.role ?? user.app_metadata?.business_role ?? fallback.generatedByRole);
     const metadataTenant = {
       businessName: metadataBusinessName,
       businessLogoPath: null,
@@ -2079,6 +2082,7 @@ async function tenantContext() {
       businessLocation: metadataLocation,
       kraPin: metadataKraPin,
       generatedBy,
+      generatedByRole,
     };
     if (!businessId) return { ...fallback, ...metadataTenant };
 
@@ -2124,6 +2128,7 @@ async function tenantContext() {
       businessLocation: [business.physical_address, business.county, business.country].filter(Boolean).join(", ") || metadataLocation,
       kraPin: business.kra_pin ?? metadataKraPin,
       generatedBy,
+      generatedByRole,
     };
   } catch {
     return fallback;
@@ -2196,6 +2201,7 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
     businessLocation: tenant.businessLocation,
     kraPin: tenant.kraPin,
     generatedBy,
+    generatedByRole: tenant.generatedByRole,
     generatedAt: generatedAt(),
     transaction: {
       "Report owner": partyName,
@@ -2228,12 +2234,7 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
       Total: money(total),
       "Balance due": money(balanceDue),
     },
-    approvals: {
-      Prepared: generatedBy,
-      Reviewed: "Pending manager review",
-      Approved: "Pending owner approval where required",
-      "Audit status": "Tenant scoped and export logged",
-    },
+    approvals: approvalSummary(generatedBy, tenant.generatedByRole),
     auditTrail: [
       "Created from the selected Solva Trade process.",
       "Includes header details, line details, totals, approval state, and audit context.",
@@ -2410,6 +2411,45 @@ function lineCells(report: Report, line: ReportLine, index: number) {
   return lineHeaders(report).map((header) => valueForHeader(report, line, index, header));
 }
 
+function roleLabel(role: string) {
+  if (role === "owner") return "Business Owner";
+  if (role === "manager") return "Manager";
+  if (role === "staff") return "Staff";
+  return "User";
+}
+
+function approvalSummary(generatedBy: string, role: string): Record<string, string> {
+  if (role === "owner") {
+    return {
+      "Issued by": `${generatedBy} - Business Owner`,
+      "Approval status": "Owner-issued document. No additional approval required.",
+      "Authority": "Final business approval",
+      "Audit status": "Tenant scoped and export logged",
+    };
+  }
+  if (role === "manager") {
+    return {
+      Prepared: `${generatedBy} - Manager`,
+      Reviewed: "Manager-issued document",
+      Approved: "Owner approval required only where business policy demands it",
+      "Audit status": "Tenant scoped and export logged",
+    };
+  }
+  return {
+    Prepared: `${generatedBy} - ${roleLabel(role)}`,
+    Reviewed: "Pending manager review",
+    Approved: "Pending owner approval where required",
+    "Audit status": "Tenant scoped and export logged",
+  };
+}
+
+function signatureLabelsFor(report: Report) {
+  if (report.generatedByRole === "owner") {
+    return ["Issued by Business Owner", "Received / acknowledged by", "Date and stamp"];
+  }
+  return blueprintFor(report).signatures.slice(0, 3);
+}
+
 function wrapLineCount(value: string, maxWidth: number, size: number, maxLines = 4) {
   const maxChars = Math.max(8, Math.floor(maxWidth / (size * 0.48)));
   const words = String(value || "-").split(/\s+/).filter(Boolean);
@@ -2555,6 +2595,8 @@ function htmlDocument(report: Report, print = false) {
     .join("");
   const template = templateFor(report);
   const style = blueprintFor(report);
+  const approvalTitle = report.generatedByRole === "owner" ? "Owner Certification and Audit" : "Approval and Audit";
+  const signatureLabels = signatureLabelsFor(report);
 
   return `<!doctype html>
 <html>
@@ -2675,7 +2717,7 @@ function htmlDocument(report: Report, print = false) {
 
     <section class="after-table">
       <article class="panel audit">
-        <h3>Approval and Audit</h3>
+        <h3>${htmlEscape(approvalTitle)}</h3>
         <dl class="details">${approvalRows}</dl>
         <ul>${report.auditTrail.map((item) => `<li>${htmlEscape(item)}</li>`).join("")}</ul>
       </article>
@@ -2685,7 +2727,7 @@ function htmlDocument(report: Report, print = false) {
     </section>
 
     <section class="signatures">
-      ${style.signatures.map((label) => `<div class="signature">${htmlEscape(label)}</div>`).join("")}
+      ${signatureLabels.map((label) => `<div class="signature">${htmlEscape(label)}</div>`).join("")}
     </section>
 
     ${templateOutro(report)}
@@ -2822,16 +2864,19 @@ function pdf(report: Report) {
   const title = titleFor(report);
   const template = templateFor(report);
   const style = blueprintFor(report);
+  const approvalTitle = report.generatedByRole === "owner" ? "OWNER CERTIFICATION AND AUDIT" : "APPROVAL AND AUDIT";
 
   canvas.rect(0, 0, 612, 842, "white");
   canvas.rect(0, 832, 612, 10, "blue");
   canvas.rect(204, 832, 204, 10, "cyan");
   canvas.rect(408, 832, 204, 10, "gold");
-  canvas.text("SOLVA TRADE", 92, 420, 72, "watermark", true);
+  canvas.text("SOLVA TRADE", 88, 430, 68, "watermark", true);
+  canvas.text("Run. Grow. Lead.", 212, 408, 18, "watermark", false);
 
-  canvas.rect(48, 744, 72, 72, "surface");
-  canvas.rect(52, 748, 64, 64, "white");
-  canvas.text(initials(report.businessName), 68, 778, 22, "blue", true);
+  canvas.rect(48, 744, 80, 72, "surface");
+  canvas.rect(52, 748, 72, 64, "white");
+  canvas.rect(56, 752, 64, 56, "surface");
+  canvas.text(initials(report.businessName), 70, 778, 22, "blue", true);
   canvas.text(report.businessName, 134, 794, 20, "navy", true);
   canvas.wrap(report.businessLocation, 134, 774, 240, 8.5, "slate");
   if (report.businessPhone) canvas.text(`Phone: ${report.businessPhone}`, 134, 750, 8.5, "slate");
@@ -2842,6 +2887,10 @@ function pdf(report: Report) {
   canvas.text(style.label, 374, 746, 8, "blue", true);
   canvas.text(`# ${report.transaction["Reference number"]}`, 374, 732, 8.5, "muted");
   canvas.text(`Generated: ${report.generatedAt}`, 374, 718, 7.5, "muted");
+  canvas.rect(432, 678, 132, 28, "navy");
+  canvas.text("SOLVA", 446, 690, 13, "white", true);
+  canvas.text("TRADE", 494, 690, 10, "cyan", true);
+  canvas.text("Run. Grow. Lead.", 446, 681, 6.5, "gold", false);
 
   let tableStart = 572;
   if (template === "salesReceipt") {
@@ -2926,13 +2975,13 @@ function pdf(report: Report) {
     canvas.text(value, 480, y + 2, 8.5, index === all.length - 1 ? "blue" : "navy", true);
   });
 
-  canvas.text("APPROVAL AND AUDIT", 48, totalsY, 11, "blue", true);
+  canvas.text(approvalTitle, 48, totalsY, 11, "blue", true);
   Object.entries(report.approvals).forEach(([label, value], index) => {
     canvas.text(`${label}:`, 48, totalsY - 22 - index * 18, 8, "muted", true);
     canvas.wrap(value, 112, totalsY - 22 - index * 18, 210, 8, "navy");
   });
 
-  const signatureLabels = style.signatures.slice(0, 3);
+  const signatureLabels = signatureLabelsFor(report);
   [48, 242, 436].forEach((x, index) => {
     canvas.line(x, 96, x + 128, 96, "navy");
     canvas.wrap(signatureLabels[index] ?? "Approved by", x + 16, 82, 104, 8, "slate");
