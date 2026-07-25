@@ -6,6 +6,18 @@ import { parseEmail, parsePassword, redirectTo, redirectWithError } from "@/lib/
 
 const fullNameSchema = z.string().trim().min(2);
 
+function isExistingUserError(error: Error) {
+  return /already|registered|exists|duplicate/i.test(error.message);
+}
+
+function accountCreationError(request: NextRequest, error: Error) {
+  if (isExistingUserError(error)) {
+    return redirectWithError(request, "/create-account", "That email already has an account. Sign in instead, or reset the password.");
+  }
+
+  return redirectWithError(request, "/create-account", "We could not create that account right now. Check the password and try again.");
+}
+
 export async function POST(request: NextRequest) {
   const formData = await request.formData();
   const email = parseEmail(formData);
@@ -19,6 +31,7 @@ export async function POST(request: NextRequest) {
 
   const supabase = await createSupabaseServerClient();
   let signupError: Error | null = null;
+  let usedAdminSignup = false;
 
   try {
     const admin = createSupabaseAdminClient();
@@ -29,6 +42,7 @@ export async function POST(request: NextRequest) {
       user_metadata: { full_name: fullName.data },
     });
     signupError = error;
+    usedAdminSignup = true;
   } catch {
     const { error } = await supabase.auth.signUp({
       email: email.data,
@@ -39,9 +53,16 @@ export async function POST(request: NextRequest) {
   }
 
   if (signupError) {
-    return redirectWithError(request, "/create-account", "We could not create that account. Try another email or password.");
+    return accountCreationError(request, signupError);
   }
 
-  await supabase.auth.signInWithPassword({ email: email.data, password: password.data });
+  const { error: signInError } = await supabase.auth.signInWithPassword({ email: email.data, password: password.data });
+  if (signInError) {
+    const message = usedAdminSignup
+      ? "Your account was created, but automatic sign-in failed. Please sign in with the same email and password."
+      : "Check your inbox to confirm your email, then sign in.";
+    return redirectWithError(request, "/sign-in", message);
+  }
+
   return redirectTo(request, "/onboarding");
 }

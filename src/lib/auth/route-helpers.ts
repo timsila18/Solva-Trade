@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
-const emailSchema = z.string().email();
+const emailSchema = z.preprocess(
+  (value) => (typeof value === "string" ? value.trim().toLowerCase() : value),
+  z.string().email(),
+);
 const passwordSchema = z.string().min(8);
 
 export function redirectTo(request: NextRequest, path: string, status = 303) {
