@@ -210,6 +210,46 @@ function reportLineFromFields(fields: Record<string, { label: string; value: str
   ];
 }
 
+function isProfileDocument(moduleName: string, processName: string) {
+  const value = `${moduleName} ${processName}`.toLowerCase();
+  return value.includes("customer profile") || value.includes("supplier profile");
+}
+
+function profileLinesFromFields(fields: Record<string, { label: string; value: string }>, processName: string): ReportLine[] {
+  const entries = Object.entries(fields);
+  if (!entries.length) return [];
+  const today = todayIsoDate();
+  return entries.map(([key, field], index) => {
+    const lower = `${key} ${field.label}`.toLowerCase();
+    const risk = lower.includes("kra") || lower.includes("pin") || lower.includes("vat") || lower.includes("tax") ? "Tax-sensitive" : "Normal";
+    const status = lower.includes("opening balance") || lower.includes("credit") ? "Review" : "Captured";
+    const details = {
+      Field: field.label,
+      Value: field.value,
+      Status: status,
+      "Verified By": "Tenant user",
+      "Updated On": today,
+      Risk: risk,
+      Notes: `${processName} field captured from the submitted business form.`,
+    };
+    return {
+      sku: String(index + 1).padStart(2, "0"),
+      description: field.label,
+      unit: "Profile field",
+      quantity: 1,
+      unitPrice: 0,
+      discount: 0,
+      taxRate: status,
+      taxAmount: 0,
+      lineTotal: 0,
+      warehouse: "Tenant master data",
+      batch: risk,
+      notes: details.Notes,
+      details,
+    };
+  });
+}
+
 function isPurchaseSourceReport(processName: string) {
   const value = processName.toLowerCase();
   return (
@@ -262,6 +302,10 @@ function isProductMasterReport(moduleName: string, processName: string) {
   );
 }
 
+function isProductProfileReport(moduleName: string, processName: string) {
+  return `${moduleName} ${processName}`.toLowerCase().includes("product profile");
+}
+
 function isInventoryOperationalReport(moduleName: string, processName: string) {
   const value = `${moduleName} ${processName}`.toLowerCase();
   return (
@@ -299,19 +343,22 @@ function periodLabel(kind: "week" | "month" | "year") {
   return `Week of ${todayIsoDate()}`;
 }
 
-async function productMasterReportLines(): Promise<ReportLine[]> {
+async function productMasterReportLines(productId?: string | null): Promise<ReportLine[]> {
   const businessId = await activeReportBusinessId();
   if (!businessId) return [];
 
   const supabase = await createSupabaseServerClient();
-  const { data: products } = await supabase
+  let query = supabase
     .from("products")
     .select(
       "id, product_name, short_name, product_code, sku, barcode, description, product_type, category_id, brand_id, manufacturer, base_unit_id, purchase_unit_id, selling_unit_id, track_inventory, track_batches, track_expiry, track_serial_numbers, track_returnable_packaging, tax_category, vat_status, preferred_costing_method, standard_cost, default_selling_price_placeholder, minimum_selling_price, reorder_level, reorder_quantity, maximum_stock_level, lead_time_days, shelf_life_days, weight, volume, active, archived, created_at",
     )
-    .eq("business_id", businessId)
-    .order("product_name", { ascending: true })
-    .limit(1000);
+    .eq("business_id", businessId);
+
+  if (productId) query = query.eq("id", productId).limit(1);
+  else query = query.order("product_name", { ascending: true }).limit(1000);
+
+  const { data: products } = await query;
 
   const rows = products ?? [];
   if (!rows.length) return [];
@@ -1323,6 +1370,21 @@ function titleFor(report: Report) {
 }
 
 const documentBlueprints: Record<string, DocumentBlueprint> = {
+  "Product Profile": {
+    accent: "#1455D9",
+    soft: "#EEF6FF",
+    label: "Single product profile",
+    table: "Product identity, pricing, tax, stock and reorder setup",
+    intro: [
+      ["Product Identity", "Shows the saved item name, SKU, barcode, brand, category and description.", "meta"],
+      ["Pricing", "Shows standard cost, selling price and minimum selling controls saved for this tenant.", "note"],
+      ["Stock Readiness", "Shows unit setup, pack conversion, balance, reorder and tracking settings.", "party"],
+    ],
+    headers: ["Item no.", "Item name", "Brand", "Category", "Base unit", "Cost per item", "Selling price", "Stock quantity", "VAT treatment", "Status"],
+    signatures: ["Prepared by", "Business owner", "Date and stamp"],
+    footerNote: "Use this product profile to verify the exact product setup before selling, purchasing or reporting.",
+    emphasis: "control",
+  },
   "New Product": {
     accent: "#1455D9",
     soft: "#EEF6FF",
@@ -1351,6 +1413,36 @@ const documentBlueprints: Record<string, DocumentBlueprint> = {
     headers: ["Item no.", "Item name", "Brand", "Category", "Base unit", "Selling price", "VAT treatment", "Status"],
     signatures: ["Updated by", "Business owner", "Date and stamp"],
     footerNote: "Use this update confirmation to verify product setup changes before daily selling or purchasing starts.",
+    emphasis: "control",
+  },
+  "Customer Profile": {
+    accent: "#0F766E",
+    soft: "#ECFDF5",
+    label: "Customer master-data profile",
+    table: "Customer identity, contacts, credit, balances and activity",
+    intro: [
+      ["Customer Identity", "Confirms the customer profile and contact details held in the tenant workspace.", "meta"],
+      ["Credit Control", "Summarizes credit terms, balances and follow-up status where available.", "note"],
+      ["Audit Use", "Useful for customer file review, account opening and sales follow-up.", "party"],
+    ],
+    headers: ["Field", "Value", "Status", "Verified By", "Updated On", "Risk", "Notes"],
+    signatures: ["Prepared by", "Customer / representative", "Owner / manager review"],
+    footerNote: "Customer profiles preserve the details needed for sales, credit control, statements and follow-up.",
+    emphasis: "control",
+  },
+  "Supplier Profile": {
+    accent: "#92400E",
+    soft: "#FFFBEB",
+    label: "Supplier master-data profile",
+    table: "Supplier identity, contacts, payment terms and purchasing context",
+    intro: [
+      ["Supplier Identity", "Confirms the supplier profile and contact details held in the tenant workspace.", "meta"],
+      ["Procurement Control", "Summarizes supplier terms, price risk and purchasing context where available.", "note"],
+      ["Audit Use", "Useful for supplier file review, purchase approvals and payment checks.", "party"],
+    ],
+    headers: ["Field", "Value", "Status", "Verified By", "Updated On", "Risk", "Notes"],
+    signatures: ["Prepared by", "Supplier / representative", "Owner / procurement review"],
+    footerNote: "Supplier profiles preserve the details needed for purchasing, GRNs, supplier statements and payments.",
     emphasis: "control",
   },
   "Product Master Report": {
@@ -2238,6 +2330,7 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
   const tenant = await tenantContext();
   const moduleName = searchParams.get("module") ?? "Solva Trade";
   const processName = searchParams.get("process") ?? "Business Process";
+  const productId = searchParams.get("productId");
   const fields = submittedFields(searchParams);
   const partyName =
     searchParams.get("customer") ??
@@ -2246,13 +2339,15 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
     searchParams.get("party") ??
     fieldValue(fields, ["customer", "supplier", "received_from", "paid_to", "payee", "owner", "driver", "employee"], tenant.businessName);
   const generatedBy = searchParams.get("generatedBy") ?? searchParams.get("printer") ?? tenant.generatedBy;
-  const submittedLines = reportLineFromFields(fields);
+  const submittedLines = isProfileDocument(moduleName, processName) ? profileLinesFromFields(fields, processName) : reportLineFromFields(fields);
   const liveSourceLines = isPurchaseSourceReport(processName)
     ? await purchaseSourceReportLines(processName)
     : isSalesSourceReport(processName)
       ? await salesSourceReportLines(processName)
       : isSalesOperationalReport(moduleName, processName)
         ? await salesOperationalReportLines(processName)
+      : isProductProfileReport(moduleName, processName)
+        ? await productMasterReportLines(productId)
       : isProductMasterReport(moduleName, processName)
         ? await productMasterReportLines()
         : isInventoryOperationalReport(moduleName, processName)
@@ -2260,7 +2355,7 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
           : [];
   const workflowLines = !liveSourceLines.length && !submittedLines.length ? await workflowRecordReportLines(moduleName, processName) : [];
   const lines = liveSourceLines.length ? liveSourceLines : submittedLines.length ? submittedLines : workflowLines;
-  const isValuationReport = isProductMasterReport(moduleName, processName) || isInventoryOperationalReport(moduleName, processName);
+  const isValuationReport = isProductMasterReport(moduleName, processName) || isProductProfileReport(moduleName, processName) || isInventoryOperationalReport(moduleName, processName);
   const lineValueTotal = lines.reduce((sum, line) => sum + line.lineTotal, 0);
   const subtotal = isValuationReport
     ? lineValueTotal
@@ -2291,6 +2386,31 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
     ]) || `${moduleName.slice(0, 3).toUpperCase()}-${processName.slice(0, 3).toUpperCase()}-${Date.now().toString().slice(-6)}`;
   const documentDate = fieldValue(fields, ["invoice_date", "receipt_date", "payment_date", "received_date", "date", "delivery_date", "needed_by", "as_of_date"], todayIsoDate());
   const dueDate = fieldValue(fields, ["due_date", "valid_until", "expected_date", "expiry_date", "expected_arrival"], documentDate);
+  let processStatus = "Ready for review";
+  let sourceAuditNote = lines.length ? "Document values come from the submitted workflow fields." : "No posted transaction rows were found for the selected filters.";
+  if (liveSourceLines.length) {
+    if (isProductProfileReport(moduleName, processName)) {
+      processStatus = "Live product profile from saved inventory records";
+      sourceAuditNote = "Product profile values come from the saved product, product setup details, stock balance, pack conversion and latest purchase receipt.";
+    } else if (isProductMasterReport(moduleName, processName)) {
+      processStatus = "Live product master from saved inventory records";
+      sourceAuditNote = "Product master values come from saved products, product setup details, pack conversions, stock balances and latest purchase receipts.";
+    } else if (isInventoryOperationalReport(moduleName, processName)) {
+      processStatus = "Live inventory report from saved products, balances, movement and sales allocation records";
+      sourceAuditNote = "Inventory report values come from saved products, stock balances, reorder controls, latest receipts and posted sales allocations where applicable.";
+    } else if (isSalesOperationalReport(moduleName, processName)) {
+      processStatus = "Live sales report from posted invoices, invoice items, customers and source-cost allocations";
+      sourceAuditNote = "Sales report values come from posted invoices, invoice items, customers, branches and FIFO/source-cost allocations where available.";
+    } else if (isSalesSourceReport(processName)) {
+      processStatus = "Source report from posted receipts";
+      sourceAuditNote = "Source profit values come from FIFO allocation of posted sales against received stock cost layers.";
+    } else {
+      processStatus = "Source report from posted receipts";
+      sourceAuditNote = "Source report values come from posted GRNs and stock receipt movements.";
+    }
+  } else if (workflowLines.length) {
+    sourceAuditNote = "Report rows come from saved tenant workflow records for this module and process.";
+  }
 
   return {
     moduleName,
@@ -2315,15 +2435,7 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
       Branch: fieldValue(fields, ["branch", "dispatch_warehouse", "warehouse", "route"], "Main workspace"),
       Currency: "KES",
       "Payment terms": fieldValue(fields, ["payment_terms", "payment_status", "payment_method", "delivery_terms"], "As entered"),
-      "Process status": liveSourceLines.length
-        ? isProductMasterReport(moduleName, processName)
-          ? "Live product master from saved inventory records"
-          : isInventoryOperationalReport(moduleName, processName)
-            ? "Live inventory report from saved products, balances, movement and sales allocation records"
-            : isSalesOperationalReport(moduleName, processName)
-              ? "Live sales report from posted invoices, invoice items, customers and source-cost allocations"
-          : "Source report from posted receipts"
-        : "Ready for review",
+      "Process status": processStatus,
       "Source workspace": moduleName,
       "Business process": processName,
       ...Object.fromEntries(Object.values(fields).map((field) => [field.label, field.value])),
@@ -2341,21 +2453,8 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
       "Created from the selected Solva Trade process.",
       "Includes header details, line details, totals, approval state, and audit context.",
       "CSV output protects spreadsheet users from formula injection.",
-      liveSourceLines.length
-        ? isProductMasterReport(moduleName, processName)
-          ? "Product master values come from saved products, product setup details, pack conversions, stock balances and latest purchase receipts."
-          : isInventoryOperationalReport(moduleName, processName)
-          ? "Inventory report values come from saved products, stock balances, reorder controls, latest receipts and posted sales allocations where applicable."
-          : isSalesOperationalReport(moduleName, processName)
-          ? "Sales report values come from posted invoices, invoice items, customers, branches and FIFO/source-cost allocations where available."
-          : isSalesSourceReport(processName)
-          ? "Source profit values come from FIFO allocation of posted sales against received stock cost layers."
-          : "Source report values come from posted GRNs and stock receipt movements."
-        : workflowLines.length
-          ? "Report rows come from saved tenant workflow records for this module and process."
-        : lines.length
-          ? "Document values come from the submitted workflow fields."
-          : "No posted transaction rows were found for the selected filters.",
+      `Tenant identity: ${tenant.businessName}${tenant.kraPin ? `, KRA PIN ${tenant.kraPin}` : ""}.`,
+      sourceAuditNote,
       "Company logos are included when the business profile provides one; Solva Trade branding and watermark remain on every report.",
     ],
   };
@@ -2366,6 +2465,11 @@ function csv(report: Report) {
   const detailHeaders = [
     "module",
     "process",
+    "business_name",
+    "business_location",
+    "business_phone",
+    "business_email",
+    "kra_pin",
     "report_owner",
     "generated_by",
     "generated_at",
@@ -2402,6 +2506,11 @@ function csv(report: Report) {
   const rows = report.lines.map((line, index) => [
     report.moduleName,
     report.processName,
+    report.businessName,
+    report.businessLocation,
+    report.businessPhone,
+    report.businessEmail,
+    report.kraPin,
     report.partyName,
     report.generatedBy,
     report.generatedAt,
