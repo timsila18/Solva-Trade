@@ -844,6 +844,31 @@ async function postDistributionWorkflow(formData: FormData, userId: string, fall
   return runNumber;
 }
 
+async function updateBusinessPaymentDetails(formData: FormData, userId: string, fallbackBusinessId?: string | null) {
+  const admin = await createSupabaseServerClient();
+  const { businessId } = await getWorkspaceContextForClient(admin, userId, fallbackBusinessId);
+  const paymentDetails = {
+    payment_display_name: getField(formData, "payment_display_name"),
+    paybill_number: getField(formData, "paybill_number"),
+    paybill_account_number: getField(formData, "paybill_account_number"),
+    till_number: getField(formData, "till_number"),
+    pochi_la_biashara_phone: getField(formData, "pochi_la_biashara_phone"),
+    send_money_phone: getField(formData, "send_money_phone"),
+    contact_phone: getField(formData, "contact_phone"),
+    whatsapp_number: getField(formData, "whatsapp_number"),
+    bank_name: getField(formData, "bank_name"),
+    bank_account_name: getField(formData, "bank_account_name"),
+    updated_by: userId,
+    updated_at: new Date().toISOString(),
+  };
+  const cleaned = Object.fromEntries(Object.entries(paymentDetails).filter(([, value]) => Boolean(value)));
+  const { error } = await admin
+    .from("businesses")
+    .update({ payment_details: cleaned })
+    .eq("id", businessId);
+  if (error) throw new Error(error.message);
+}
+
 async function persistWorkflowRecord(
   formData: FormData,
   userId: string,
@@ -1208,6 +1233,9 @@ export async function completeProcessAction(formData: FormData) {
       }
       if (moduleName === "Distribution") {
         generatedReference = (await postDistributionWorkflow(formData, user.id, businessId)) ?? generatedReference;
+      }
+      if (moduleName === "Settings" && processName === "Payment Methods") {
+        await updateBusinessPaymentDetails(formData, user.id, businessId);
       }
       if (generatedReference) {
         const reference = generatedReferencePrefix(moduleName, processName, documentName);

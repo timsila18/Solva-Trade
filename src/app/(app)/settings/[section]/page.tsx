@@ -146,6 +146,16 @@ export default async function SettingsSectionPage({
             </section>
           ) : null}
 
+          {slug === "payments" ? (
+            <section className="rounded-lg border border-emerald-200 bg-emerald-50 p-5">
+              <h2 className="font-semibold text-emerald-950">Document payment instructions</h2>
+              <p className="mt-2 text-sm leading-6 text-emerald-900">
+                Save Paybill, Till, Pochi, send-money, WhatsApp or bank details here. Solva prints them consistently on invoices,
+                receipts, customer statements, quotations, proformas and payment vouchers.
+              </p>
+            </section>
+          ) : null}
+
           {slug === "tax" ? (
             <section className="rounded-lg border border-amber-200 bg-amber-50 p-5">
               <h2 className="font-semibold text-amber-950">Tax disclaimer</h2>

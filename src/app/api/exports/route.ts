@@ -31,6 +31,7 @@ type Report = {
   businessPhone: string;
   businessEmail: string;
   businessLocation: string;
+  paymentInstructions: string[];
   kraPin: string;
   generatedBy: string;
   generatedByRole: string;
@@ -40,6 +41,19 @@ type Report = {
   totals: Record<string, string>;
   approvals: Record<string, string>;
   auditTrail: string[];
+};
+
+type PaymentDetails = {
+  payment_display_name?: string;
+  paybill_number?: string;
+  paybill_account_number?: string;
+  till_number?: string;
+  pochi_la_biashara_phone?: string;
+  send_money_phone?: string;
+  contact_phone?: string;
+  whatsapp_number?: string;
+  bank_name?: string;
+  bank_account_name?: string;
 };
 
 type PdfImageResource = {
@@ -123,6 +137,36 @@ function htmlEscape(value: string) {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+function paymentDetailsFromJson(value: unknown): PaymentDetails {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const source = value as Record<string, unknown>;
+  return Object.fromEntries(
+    Object.entries(source)
+      .filter(([, item]) => typeof item === "string" && item.trim())
+      .map(([key, item]) => [key, String(item).trim()]),
+  ) as PaymentDetails;
+}
+
+function paymentInstructions(details: PaymentDetails, businessName: string, fallbackPhone: string) {
+  const lines: string[] = [];
+  const displayName = details.payment_display_name || businessName;
+  if (details.paybill_number) {
+    lines.push(`M-Pesa Paybill ${details.paybill_number}${details.paybill_account_number ? `, Account ${details.paybill_account_number}` : ""} - ${displayName}`);
+  }
+  if (details.till_number) lines.push(`M-Pesa Till ${details.till_number} - ${displayName}`);
+  if (details.pochi_la_biashara_phone) lines.push(`Pochi la Biashara: ${details.pochi_la_biashara_phone} - ${displayName}`);
+  if (details.send_money_phone) lines.push(`Send Money: ${details.send_money_phone} - ${displayName}`);
+  if (details.bank_name || details.bank_account_name) {
+    lines.push(`Bank transfer: ${[details.bank_name, details.bank_account_name].filter(Boolean).join(" - ")}`);
+  }
+  const contact = details.contact_phone || fallbackPhone;
+  const whatsapp = details.whatsapp_number;
+  if (contact || whatsapp) {
+    lines.push(`For payment help call${contact ? ` ${contact}` : ""}${whatsapp && whatsapp !== contact ? ` or WhatsApp ${whatsapp}` : whatsapp ? ` / WhatsApp ${whatsapp}` : ""}.`);
+  }
+  return lines;
 }
 
 function pdfText(value: string) {
@@ -2202,6 +2246,28 @@ function templateFor(report: Report): DocumentTemplate {
   return "taxInvoice";
 }
 
+function shouldShowPaymentInstructions(report: Report) {
+  const value = `${report.moduleName} ${report.processName}`.toLowerCase();
+  return Boolean(
+    report.paymentInstructions.length &&
+      (value.includes("invoice") ||
+        value.includes("receipt") ||
+        value.includes("statement") ||
+        value.includes("payment voucher") ||
+        value.includes("quotation") ||
+        value.includes("proforma") ||
+        value.includes("sales order")),
+  );
+}
+
+function paymentInstructionHtml(report: Report) {
+  if (!shouldShowPaymentInstructions(report)) return "";
+  return `<article class="payment-instructions">
+    <h3>How to pay</h3>
+    <ul>${report.paymentInstructions.map((line) => `<li>${htmlEscape(line)}</li>`).join("")}</ul>
+  </article>`;
+}
+
 async function tenantContext() {
   const fallback = {
     businessName: "Your company",
@@ -2209,6 +2275,7 @@ async function tenantContext() {
     businessPhone: "",
     businessEmail: "",
     businessLocation: "Kenya",
+    paymentInstructions: [] as string[],
     kraPin: "",
     generatedBy: "Solva Trade User",
     generatedByRole: "user",
@@ -2271,6 +2338,7 @@ async function tenantContext() {
       businessPhone: metadataPhone,
       businessEmail: metadataEmail,
       businessLocation: metadataLocation,
+      paymentInstructions: [] as string[],
       kraPin: metadataKraPin,
       generatedBy,
       generatedByRole,
@@ -2288,6 +2356,7 @@ async function tenantContext() {
           county: string | null;
           country: string | null;
           kra_pin: string | null;
+          payment_details: unknown;
         }
       | null = null;
 
@@ -2295,14 +2364,14 @@ async function tenantContext() {
       const admin = createSupabaseAdminClient();
       const { data } = await admin
         .from("businesses")
-        .select("trading_name, legal_name, logo_path, phone, email, physical_address, county, country, kra_pin")
+        .select("trading_name, legal_name, logo_path, phone, email, physical_address, county, country, kra_pin, payment_details")
         .eq("id", businessId)
         .maybeSingle();
       business = data;
     } catch {
       const { data } = await supabase
         .from("businesses")
-        .select("trading_name, legal_name, logo_path, phone, email, physical_address, county, country, kra_pin")
+        .select("trading_name, legal_name, logo_path, phone, email, physical_address, county, country, kra_pin, payment_details")
         .eq("id", businessId)
         .maybeSingle();
       business = data;
@@ -2310,13 +2379,16 @@ async function tenantContext() {
 
     if (!business) return { ...fallback, ...metadataTenant };
     const businessLogoPath = await signedBusinessLogoPath(business.logo_path);
+    const businessName = business.trading_name ?? business.legal_name ?? fallback.businessName;
+    const businessPhone = business.phone ?? metadataPhone;
 
     return {
-      businessName: business.trading_name ?? business.legal_name ?? fallback.businessName,
+      businessName,
       businessLogoPath,
-      businessPhone: business.phone ?? metadataPhone,
+      businessPhone,
       businessEmail: business.email ?? metadataEmail,
       businessLocation: [business.physical_address, business.county, business.country].filter(Boolean).join(", ") || metadataLocation,
+      paymentInstructions: paymentInstructions(paymentDetailsFromJson(business.payment_details), businessName, businessPhone),
       kraPin: business.kra_pin ?? metadataKraPin,
       generatedBy,
       generatedByRole,
@@ -2421,6 +2493,7 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
     businessPhone: tenant.businessPhone,
     businessEmail: tenant.businessEmail,
     businessLocation: tenant.businessLocation,
+    paymentInstructions: tenant.paymentInstructions,
     kraPin: tenant.kraPin,
     generatedBy,
     generatedByRole: tenant.generatedByRole,
@@ -2435,6 +2508,7 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
       Branch: fieldValue(fields, ["branch", "dispatch_warehouse", "warehouse", "route"], "Main workspace"),
       Currency: "KES",
       "Payment terms": fieldValue(fields, ["payment_terms", "payment_status", "payment_method", "delivery_terms"], "As entered"),
+      "Payment instructions": tenant.paymentInstructions.join(" | ") || "Not configured",
       "Process status": processStatus,
       "Source workspace": moduleName,
       "Business process": processName,
@@ -2455,6 +2529,7 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
       "CSV output protects spreadsheet users from formula injection.",
       `Tenant identity: ${tenant.businessName}${tenant.kraPin ? `, KRA PIN ${tenant.kraPin}` : ""}.`,
       sourceAuditNote,
+      tenant.paymentInstructions.length ? "Tenant payment instructions are included from the business payment settings." : "Tenant payment instructions are not configured yet.",
       "Company logos are included when the business profile provides one; Solva Trade branding and watermark remain on every report.",
     ],
   };
@@ -2469,6 +2544,7 @@ function csv(report: Report) {
     "business_location",
     "business_phone",
     "business_email",
+    "payment_instructions",
     "kra_pin",
     "report_owner",
     "generated_by",
@@ -2510,6 +2586,7 @@ function csv(report: Report) {
     report.businessLocation,
     report.businessPhone,
     report.businessEmail,
+    report.paymentInstructions.join(" | "),
     report.kraPin,
     report.partyName,
     report.generatedBy,
@@ -2919,9 +2996,12 @@ function htmlDocument(report: Report, print = false) {
     .statement-summary span, .report-kpis span { display: block; color: ${brand.muted}; font-size: 11px; font-weight: 800; text-transform: uppercase; }
     .statement-summary strong, .report-kpis strong { display: block; margin-top: 5px; color: ${brand.blue}; font-size: 17px; }
     .report-kpis small { display: block; margin-top: 4px; color: ${brand.slate}; line-height: 1.4; }
-    .reason-box, .terms, .pod-box, .receipt-slip { margin-top: 18px; border: 1px solid ${brand.border}; border-radius: 8px; background: ${brand.soft}; padding: 14px; }
+    .reason-box, .terms, .pod-box, .receipt-slip, .payment-instructions { margin-top: 18px; border: 1px solid ${brand.border}; border-radius: 8px; background: ${brand.soft}; padding: 14px; }
     .receipt-slip { display: grid; grid-template-columns: 1fr 220px; border-style: dashed; }
     .receipt-slip strong, .receipt-slip span, .pod-box strong, .pod-box span { display: block; }
+    .payment-instructions { border-left: 5px solid ${brand.gold}; background: #fffdf5; }
+    .payment-instructions h3 { margin: 0 0 8px; color: ${brand.navy}; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
+    .payment-instructions ul { margin: 0; padding-left: 18px; color: ${brand.navy}; font-size: 12px; line-height: 1.6; }
     .terms ol { margin: 0; padding-left: 18px; color: ${brand.slate}; font-size: 11px; line-height: 1.6; }
     .table-wrap { position: relative; margin-top: 26px; border: 1px solid ${brand.border}; border-radius: 10px; overflow: hidden; }
     table { width: 100%; border-collapse: collapse; table-layout: fixed; }
@@ -2994,6 +3074,7 @@ function htmlDocument(report: Report, print = false) {
       </article>
       <article class="totals">
         <table>${totalRows}</table>
+        ${paymentInstructionHtml(report)}
       </article>
     </section>
 
@@ -3400,7 +3481,7 @@ async function pdf(report: Report) {
   }
 
   let tableStart = 572;
-  if (template === "salesReceipt") {
+  if (template === "salesReceipt" && !shouldShowPaymentInstructions(report)) {
     canvas.rect(48, 634, 516, 66, "navy");
     canvas.text("AMOUNT RECEIVED", 66, 674, 9, "cyan", true);
     canvas.text(report.totals.Total, 66, 650, 24, "white", true);
@@ -3481,6 +3562,14 @@ async function pdf(report: Report) {
     canvas.text(label, 394, y + 2, 8.5, index === all.length - 1 ? "blue" : "slate", index === all.length - 1);
     canvas.text(value, 480, y + 2, 8.5, index === all.length - 1 ? "blue" : "navy", true);
   });
+  if (shouldShowPaymentInstructions(report)) {
+    const paymentY = Math.max(126, totalsY - 134);
+    canvas.rect(384, paymentY - 6, 174, 76, "soft");
+    canvas.text("HOW TO PAY", 394, paymentY + 50, 8, "blue", true);
+    report.paymentInstructions.slice(0, 4).forEach((line, index) => {
+      canvas.wrap(line, 394, paymentY + 34 - index * 16, 154, 7.2, "navy", false, 8.5);
+    });
+  }
 
   canvas.text(approvalTitle, 48, totalsY, 11, "blue", true);
   Object.entries(report.approvals).forEach(([label, value], index) => {

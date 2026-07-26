@@ -165,10 +165,10 @@ export const settingsSections: SettingsSection[] = [
   {
     slug: "payments",
     title: "Payment Methods",
-    description: "Enable cash, M-Pesa, bank transfer, cheque, card, credit and account foundations.",
+    description: "Enable cash, M-Pesa, bank transfer, cheque, card, credit and customer-facing payment instructions for invoices and receipts.",
     category: "Commercial",
-    fields: ["Cash", "M-Pesa", "Bank Transfer", "Cheque", "Card", "Credit", "Owner Account"],
-    metrics: [{ label: "Default method", value: "Cash" }, { label: "M-Pesa integration", value: "Prepared" }],
+    fields: ["Payment display name", "Paybill number", "Paybill account number", "Till number", "Pochi la Biashara phone", "Send money phone", "Contact phone", "WhatsApp number", "Bank name", "Bank account name"],
+    metrics: [{ label: "Default method", value: "Cash" }, { label: "Document instructions", value: "Tenant controlled" }],
   },
   {
     slug: "documents",
