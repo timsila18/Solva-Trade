@@ -79,6 +79,10 @@ function getBoolean(formData: FormData, key: string) {
   return getField(formData, key).toLowerCase() === "yes";
 }
 
+function normalizedLookup(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
 function fieldsPayload(formData: FormData) {
   const fields: Record<string, { label: string; value: string }> = {};
   for (const [key, value] of formData.entries()) {
@@ -424,8 +428,8 @@ async function postCustomerPayment(
 async function postGoodsReceived(formData: FormData, userId: string, fallbackBusinessId?: string | null) {
   const admin = await createSupabaseServerClient();
   const { businessId, branchId, warehouseId } = await getWorkspaceContextForClient(admin, userId, fallbackBusinessId);
-  const supplierId = getField(formData, "supplier_id");
-  const productId = getField(formData, "product_id");
+  let supplierId = getField(formData, "supplier_id");
+  let productId = getField(formData, "product_id");
   const deliveredQuantity = getNumber(formData, "received_quantity");
   const rejectedQuantity = getNumber(formData, "rejected_quantity");
   const acceptedQuantity = getNumber(formData, "accepted_quantity") || Math.max(0, deliveredQuantity - rejectedQuantity) || deliveredQuantity;
@@ -438,8 +442,44 @@ async function postGoodsReceived(formData: FormData, userId: string, fallbackBus
   const sourceVariance = localCost && directCost ? localCost - directCost : 0;
   const sourceReason = getField(formData, "source_reason") || null;
 
-  if (!supplierId) throw new Error("Select a saved supplier before posting the GRN.");
-  if (!productId) throw new Error("Select a saved product before posting the GRN.");
+  if (!supplierId) {
+    const supplierInput = normalizedLookup(getField(formData, "supplier") || getField(formData, "preferred_supplier"));
+    if (supplierInput) {
+      const { data: suppliers } = await admin
+        .from("suppliers")
+        .select("id, legal_name, trading_name, supplier_code, primary_phone")
+        .eq("business_id", businessId)
+        .limit(200);
+      const match = (suppliers ?? []).find((supplier) =>
+        [supplier.legal_name, supplier.trading_name, supplier.supplier_code, supplier.primary_phone]
+          .filter(Boolean)
+          .some((value) => normalizedLookup(String(value)) === supplierInput),
+      );
+      supplierId = match?.id ?? "";
+    }
+  }
+
+  if (!productId) {
+    const productInput = normalizedLookup(getField(formData, "product"));
+    if (productInput) {
+      const { data: products } = await admin
+        .from("products")
+        .select("id, product_name, product_code, sku")
+        .eq("business_id", businessId)
+        .eq("active", true)
+        .eq("archived", false)
+        .limit(300);
+      const match = (products ?? []).find((product) =>
+        [product.product_name, product.product_code, product.sku]
+          .filter(Boolean)
+          .some((value) => normalizedLookup(String(value)) === productInput),
+      );
+      productId = match?.id ?? "";
+    }
+  }
+
+  if (!supplierId) throw new Error("Choose the supplier from the saved supplier list before receiving stock.");
+  if (!productId) throw new Error("Choose the product from the saved product list before receiving stock.");
   if (acceptedQuantity <= 0) throw new Error("Enter the accepted quantity received.");
   if (unitCost <= 0) throw new Error("Enter the purchase unit cost for this receipt.");
 
