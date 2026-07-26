@@ -1,4 +1,7 @@
 import { NextRequest } from "next/server";
+import fs from "node:fs/promises";
+import path from "node:path";
+import sharp from "sharp";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -36,6 +39,13 @@ type Report = {
   totals: Record<string, string>;
   approvals: Record<string, string>;
   auditTrail: string[];
+};
+
+type PdfImageResource = {
+  name: string;
+  data: Buffer;
+  width: number;
+  height: number;
 };
 
 type DocumentTemplate =
@@ -169,28 +179,32 @@ function fieldValue(fields: Record<string, { label: string; value: string }>, ke
 
 function reportLineFromFields(fields: Record<string, { label: string; value: string }>): ReportLine[] {
   if (Object.keys(fields).length === 0) return [];
-  const quantity = parseAmount(fieldValue(fields, ["quantity", "ordered_quantity", "received_quantity", "accepted_quantity", "return_quantity", "quantity_sold"], "1"));
-  const unitPrice = parseAmount(fieldValue(fields, ["unit_price", "price", "unit_cost", "rate"], "0"));
+  const productName = fieldValue(fields, ["product_name", "product", "item", "sku"], "Entered item");
+  const quantity = parseAmount(fieldValue(fields, ["opening_stock_quantity", "quantity", "ordered_quantity", "received_quantity", "accepted_quantity", "return_quantity", "quantity_sold"], "1"));
+  const unitPrice = parseAmount(fieldValue(fields, ["selling_price_placeholder", "selling_price", "unit_price", "price", "unit_cost", "rate", "standard_cost"], "0"));
   const discount = parseAmount(fieldValue(fields, ["discount"], "0"));
   const taxAmount = parseAmount(fieldValue(fields, ["tax", "withholding_tax"], "0"));
   const taxRate = parseAmount(fieldValue(fields, ["vat_rate", "tax_rate"], "0"));
+  const taxTreatment = fieldValue(fields, ["vat_treatment", "tax_treatment"], taxRate ? `${taxRate.toFixed(2)}%` : "No tax entered");
   const explicitTotal = parseAmount(fieldValue(fields, ["total", "amount", "balance_due", "amount_received", "amount_sent"], "0"));
   const subtotal = parseAmount(fieldValue(fields, ["subtotal"], "0")) || quantity * unitPrice;
   const lineTotal = explicitTotal || Math.max(0, subtotal - discount + taxAmount);
+  const details = Object.fromEntries(Object.values(fields).map((field) => [field.label, field.value]));
   return [
     {
-      sku: fieldValue(fields, ["product", "sku", "item", "vehicle_stock_item", "account", "report"], "Entered item"),
-      description: fieldValue(fields, ["description", "product", "reason", "purpose", "category", "report"], "Submitted transaction line"),
-      unit: fieldValue(fields, ["unit"], "Each"),
+      sku: fieldValue(fields, ["sku", "product_code", "pack_sku", "barcode"], productName),
+      description: fieldValue(fields, ["description", "product_name", "product", "reason", "purpose", "category", "report"], productName),
+      unit: fieldValue(fields, ["base_stock_unit", "selling_unit", "purchase_unit", "unit"], "Each"),
       quantity: quantity || 1,
       unitPrice,
       discount,
-      taxRate: taxRate ? `${taxRate.toFixed(2)}%` : taxAmount ? "Tax entered" : "No tax entered",
+      taxRate: taxTreatment,
       taxAmount,
       lineTotal,
-      warehouse: fieldValue(fields, ["warehouse", "branch", "route", "account"], "Selected workspace"),
+      warehouse: fieldValue(fields, ["warehouse", "branch", "route", "account", "stock_location"], "Selected workspace"),
       batch: fieldValue(fields, ["batch", "reference", "po_number", "invoice", "document_number"], "Not provided"),
-      notes: "Generated from submitted form values.",
+      notes: fieldValue(fields, ["brand", "category", "manufacturer"], "Generated from submitted form values."),
+      details,
     },
   ];
 }
@@ -746,7 +760,9 @@ async function activeReportBusinessId() {
   const { data: membership } = await supabase
     .from("business_memberships")
     .select("business_id")
+    .eq("user_id", user.id)
     .eq("active", true)
+    .order("joined_at", { ascending: true })
     .limit(1)
     .maybeSingle();
 
@@ -1281,6 +1297,36 @@ function titleFor(report: Report) {
 }
 
 const documentBlueprints: Record<string, DocumentBlueprint> = {
+  "New Product": {
+    accent: "#1455D9",
+    soft: "#EEF6FF",
+    label: "Product setup confirmation",
+    table: "Saved product identity, pricing, tax and stock-control fields",
+    intro: [
+      ["Product Identity", "Confirms the product name, brand, category, code and units saved for this tenant.", "meta"],
+      ["Pricing and Tax", "Shows the selling price and VAT treatment that should flow into sales, receipts and reports.", "note"],
+      ["Stock Control", "Captures inventory tracking and reorder settings where they were provided.", "party"],
+    ],
+    headers: ["Item no.", "Item name", "Brand", "Category", "Base unit", "Selling price", "VAT treatment", "Status"],
+    signatures: ["Created by", "Business owner", "Date and stamp"],
+    footerNote: "Use this product setup confirmation to verify that the item is ready for purchasing, selling, stock control and reporting.",
+    emphasis: "control",
+  },
+  "Edit Product": {
+    accent: "#0F766E",
+    soft: "#ECFDF5",
+    label: "Product update confirmation",
+    table: "Updated product identity, pricing, tax and stock-control fields",
+    intro: [
+      ["Product Identity", "Confirms the product record that has been updated for this tenant.", "meta"],
+      ["Pricing and Tax", "Shows the latest selling price and VAT treatment saved for future transactions.", "note"],
+      ["Stock Control", "Captures the latest tracking, reorder and packaging settings where provided.", "party"],
+    ],
+    headers: ["Item no.", "Item name", "Brand", "Category", "Base unit", "Selling price", "VAT treatment", "Status"],
+    signatures: ["Updated by", "Business owner", "Date and stamp"],
+    footerNote: "Use this update confirmation to verify product setup changes before daily selling or purchasing starts.",
+    emphasis: "control",
+  },
   "Product Master Report": {
     accent: "#1455D9",
     soft: "#EEF6FF",
@@ -2069,7 +2115,9 @@ async function tenantContext() {
     const { data: membership } = await supabase
       .from("business_memberships")
       .select("business_id, role")
+      .eq("user_id", user.id)
       .eq("active", true)
+      .order("joined_at", { ascending: true })
       .limit(1)
       .maybeSingle();
     const businessId = membership?.business_id ?? metadataBusinessId;
@@ -2364,6 +2412,51 @@ async function signedBusinessLogoPath(path: string | null) {
   }
 }
 
+async function imageBufferFromPath(imagePath: string | null | undefined) {
+  if (!imagePath) return null;
+  try {
+    if (imagePath.startsWith("http://") || imagePath.startsWith("https://")) {
+      const response = await fetch(imagePath, { cache: "no-store" });
+      if (!response.ok) return null;
+      return Buffer.from(await response.arrayBuffer());
+    }
+    const publicPath = imagePath.startsWith("/") ? imagePath.slice(1) : imagePath;
+    return await fs.readFile(path.join(process.cwd(), "public", publicPath));
+  } catch {
+    return null;
+  }
+}
+
+async function makePdfImage(name: string, source: string | null | undefined, maxWidth: number, maxHeight: number): Promise<PdfImageResource | null> {
+  const input = await imageBufferFromPath(source);
+  if (!input) return null;
+  try {
+    const { data, info } = await sharp(input)
+      .flatten({ background: "#ffffff" })
+      .resize({ width: Math.round(maxWidth * 4), height: Math.round(maxHeight * 4), fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 88, mozjpeg: true })
+      .toBuffer({ resolveWithObject: true });
+    return { name, data, width: info.width, height: info.height };
+  } catch {
+    return null;
+  }
+}
+
+async function pdfAssets(report: Report, layout: "portrait" | "landscape") {
+  const tenant = await makePdfImage("TenantLogo", report.businessLogoPath, layout === "landscape" ? 112 : 92, layout === "landscape" ? 58 : 72);
+  const solva = await makePdfImage("SolvaLogo", "/solva-trade-logo.png", layout === "landscape" ? 120 : 136, layout === "landscape" ? 42 : 42);
+  return [tenant, solva].filter(Boolean) as PdfImageResource[];
+}
+
+function drawFittedImage(canvas: PdfCanvas, image: PdfImageResource | undefined, x: number, y: number, maxWidth: number, maxHeight: number) {
+  if (!image) return false;
+  const ratio = Math.min(maxWidth / image.width, maxHeight / image.height);
+  const width = image.width * ratio;
+  const height = image.height * ratio;
+  canvas.image(image.name, x + (maxWidth - width) / 2, y + (maxHeight - height) / 2, width, height);
+  return true;
+}
+
 function lineHeaders(report: Report) {
   return blueprintFor(report).headers;
 }
@@ -2375,6 +2468,13 @@ function valueForHeader(report: Report, line: ReportLine, index: number, header:
   const matchingDetail = Object.entries(line.details ?? {}).find(([key]) => key.toLowerCase() === h);
   if (matchingDetail) return matchingDetail[1];
   if (h === "#" || h.includes("s/no") || h.includes("line") || h.includes("stop")) return String(index + 1);
+  if (h === "item name" || h === "name" || h === "product name") return detailValue(line, "Product name", detailValue(line, "Item name", line.description));
+  if (h === "item no." || h === "item number") return detailValue(line, "Product code", detailValue(line, "Item no.", line.sku));
+  if (h.includes("brand")) return detailValue(line, "Brand", line.notes);
+  if (h.includes("category")) return detailValue(line, "Category", line.notes);
+  if (h.includes("base unit")) return detailValue(line, "Base stock unit", detailValue(line, "Base unit", line.unit));
+  if (h.includes("selling price")) return detailValue(line, "Selling price", detailValue(line, "Selling price placeholder", money(line.unitPrice)));
+  if (h.includes("vat treatment")) return detailValue(line, "VAT treatment", line.taxRate);
   if (h.includes("timestamp")) return report.generatedAt;
   if (h.includes("date") || h.includes("period") || h.includes("needed by") || h.includes("expiry")) return report.transaction["Document date"];
   if (h.includes("document") || h.includes("reference") || h.includes("ref") || h.includes("invoice") || h.includes("po") || h.includes("voucher") || h.includes("receipt") || h.includes("req")) return report.transaction["Reference number"];
@@ -2766,6 +2866,10 @@ class PdfCanvas {
     this.ops.push(`BT ${pdfColors[color]} rg ${bold ? "/F2" : "/F1"} ${size} Tf ${x} ${y} Td (${pdfText(value)}) Tj ET`);
   }
 
+  image(name: string, x: number, y: number, width: number, height: number) {
+    this.ops.push(`q ${width.toFixed(2)} 0 0 ${height.toFixed(2)} ${x.toFixed(2)} ${y.toFixed(2)} cm /${name} Do Q`);
+  }
+
   wrap(value: string, x: number, y: number, width: number, size = 10, color = "navy", bold = false, leading = size + 4) {
     const maxChars = Math.max(8, Math.floor(width / (size * 0.52)));
     const words = splitForPdfCell(value, maxChars);
@@ -2885,26 +2989,56 @@ function isLandscapePdfReport(report: Report) {
   return ["report", "inventoryReport", "stockMovement", "executiveReport"].includes(template);
 }
 
-function pdfDocument(content: string, width: number, height: number) {
-  const objects = [
+function pdfDocument(content: string, width: number, height: number, images: PdfImageResource[] = []) {
+  const imageStartObject = 6;
+  const contentObject = imageStartObject + images.length;
+  const xobjectResources = images.length
+    ? ` /XObject << ${images.map((image, index) => `/${image.name} ${imageStartObject + index} 0 R`).join(" ")} >>`
+    : "";
+  const contentBuffer = Buffer.from(content, "utf8");
+  const imageObjects = images.map((image) =>
+    Buffer.concat([
+      Buffer.from(
+        `<< /Type /XObject /Subtype /Image /Width ${image.width} /Height ${image.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${image.data.length} >>\nstream\n`,
+        "utf8",
+      ),
+      image.data,
+      Buffer.from("\nendstream", "utf8"),
+    ]),
+  );
+  const objects: Array<string | Buffer> = [
     "<< /Type /Catalog /Pages 2 0 R >>",
     "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${width} ${height}] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>`,
+    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${width} ${height}] /Resources << /Font << /F1 4 0 R /F2 5 0 R >>${xobjectResources} >> /Contents ${contentObject} 0 R >>`,
     "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
     "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>",
-    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+    ...imageObjects,
+    Buffer.concat([Buffer.from(`<< /Length ${contentBuffer.length} >>\nstream\n`, "utf8"), contentBuffer, Buffer.from("\nendstream", "utf8")]),
   ];
-  let document = "%PDF-1.4\n";
+  const chunks: Buffer[] = [Buffer.from("%PDF-1.4\n", "utf8")];
   const offsets = [0];
+  let offset = chunks[0].length;
+
   objects.forEach((object, index) => {
-    offsets.push(document.length);
-    document += `${index + 1} 0 obj\n${object}\nendobj\n`;
+    const header = Buffer.from(`${index + 1} 0 obj\n`, "utf8");
+    const body = typeof object === "string" ? Buffer.from(object, "utf8") : object;
+    const footer = Buffer.from("\nendobj\n", "utf8");
+    offsets.push(offset);
+    chunks.push(header, body, footer);
+    offset += header.length + body.length + footer.length;
   });
-  const xrefOffset = document.length;
-  document += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
-  document += offsets.slice(1).map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("");
-  document += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
-  return document;
+
+  const xrefOffset = offset;
+  const xref = [
+    `xref\n0 ${objects.length + 1}`,
+    "0000000000 65535 f ",
+    ...offsets.slice(1).map((objectOffset) => `${String(objectOffset).padStart(10, "0")} 00000 n `),
+    `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>`,
+    `startxref\n${xrefOffset}`,
+    "%%EOF",
+  ].join("\n");
+  chunks.push(Buffer.from(xref, "utf8"));
+  return Buffer.concat(chunks);
 }
 
 function wideReportHeaders(report: Report) {
@@ -2987,11 +3121,14 @@ function renderLandscapePdfTable(canvas: PdfCanvas, report: Report, startY: numb
   return y - 12;
 }
 
-function landscapePdf(report: Report) {
+async function landscapePdf(report: Report) {
   const canvas = new PdfCanvas();
   const style = blueprintFor(report);
   const title = titleFor(report);
   const recordCount = report.lines.length.toLocaleString("en-KE");
+  const assets = await pdfAssets(report, "landscape");
+  const tenantLogo = assets.find((asset) => asset.name === "TenantLogo");
+  const solvaLogo = assets.find((asset) => asset.name === "SolvaLogo");
 
   canvas.rect(0, 0, 842, 595, "white");
   canvas.rect(0, 586, 842, 9, "navy");
@@ -3002,15 +3139,19 @@ function landscapePdf(report: Report) {
   canvas.text("Run. Grow. Lead.", 332, 280, 15, "watermark");
 
   canvas.rect(48, 500, 54, 50, "surface");
-  canvas.text(initials(report.businessName), 61, 520, 17, "blue", true);
+  if (!drawFittedImage(canvas, tenantLogo, 52, 504, 46, 42)) {
+    canvas.text(initials(report.businessName), 61, 520, 17, "blue", true);
+  }
   canvas.text(report.businessName, 118, 538, 17, "navy", true);
   canvas.wrap(`${report.businessLocation}${report.kraPin ? ` | KRA PIN: ${report.kraPin}` : ""}`, 118, 518, 330, 8, "slate");
   canvas.text(title, 482, 538, 18, "navy", true);
   canvas.text(style.label, 484, 518, 8, "blue", true);
   canvas.text(`Reference: ${report.transaction["Reference number"]}`, 484, 504, 8, "muted");
   canvas.rect(700, 506, 94, 28, "navy");
-  canvas.text("SOLVA", 714, 518, 12, "white", true);
-  canvas.text("TRADE", 760, 518, 9, "cyan", true);
+  if (!drawFittedImage(canvas, solvaLogo, 704, 509, 86, 22)) {
+    canvas.text("SOLVA", 714, 518, 12, "white", true);
+    canvas.text("TRADE", 760, 518, 9, "cyan", true);
+  }
 
   canvas.rect(48, 444, 746, 42, "soft");
   const detailCards = [
@@ -3053,10 +3194,10 @@ function landscapePdf(report: Report) {
   canvas.text(`Generated by Solva Trade on ${report.generatedAt}`, 318, footerY - 16, 7.2, "muted");
   canvas.text("Page 1 of 1", 746, footerY - 16, 7.2, "muted");
 
-  return pdfDocument(canvas.output(), 842, 595);
+  return pdfDocument(canvas.output(), 842, 595, assets);
 }
 
-function pdf(report: Report) {
+async function pdf(report: Report) {
   if (isLandscapePdfReport(report)) return landscapePdf(report);
 
   const canvas = new PdfCanvas();
@@ -3064,6 +3205,9 @@ function pdf(report: Report) {
   const template = templateFor(report);
   const style = blueprintFor(report);
   const approvalTitle = report.generatedByRole === "owner" ? "OWNER CERTIFICATION AND AUDIT" : "APPROVAL AND AUDIT";
+  const assets = await pdfAssets(report, "portrait");
+  const tenantLogo = assets.find((asset) => asset.name === "TenantLogo");
+  const solvaLogo = assets.find((asset) => asset.name === "SolvaLogo");
 
   canvas.rect(0, 0, 612, 842, "white");
   canvas.rect(0, 832, 612, 10, "blue");
@@ -3074,8 +3218,10 @@ function pdf(report: Report) {
 
   canvas.rect(48, 744, 80, 72, "surface");
   canvas.rect(52, 748, 72, 64, "white");
-  canvas.rect(56, 752, 64, 56, "surface");
-  canvas.text(initials(report.businessName), 70, 778, 22, "blue", true);
+  if (!drawFittedImage(canvas, tenantLogo, 56, 752, 64, 56)) {
+    canvas.rect(56, 752, 64, 56, "surface");
+    canvas.text(initials(report.businessName), 70, 778, 22, "blue", true);
+  }
   canvas.text(report.businessName, 134, 794, 20, "navy", true);
   canvas.wrap(report.businessLocation, 134, 774, 240, 8.5, "slate");
   if (report.businessPhone) canvas.text(`Phone: ${report.businessPhone}`, 134, 750, 8.5, "slate");
@@ -3087,9 +3233,11 @@ function pdf(report: Report) {
   canvas.text(`# ${report.transaction["Reference number"]}`, 374, 732, 8.5, "muted");
   canvas.text(`Generated: ${report.generatedAt}`, 374, 718, 7.5, "muted");
   canvas.rect(432, 678, 132, 28, "navy");
-  canvas.text("SOLVA", 446, 690, 13, "white", true);
-  canvas.text("TRADE", 494, 690, 10, "cyan", true);
-  canvas.text("Run. Grow. Lead.", 446, 681, 6.5, "gold", false);
+  if (!drawFittedImage(canvas, solvaLogo, 438, 682, 120, 20)) {
+    canvas.text("SOLVA", 446, 690, 13, "white", true);
+    canvas.text("TRADE", 494, 690, 10, "cyan", true);
+    canvas.text("Run. Grow. Lead.", 446, 681, 6.5, "gold", false);
+  }
 
   let tableStart = 572;
   if (template === "salesReceipt") {
@@ -3193,7 +3341,7 @@ function pdf(report: Report) {
   canvas.line(48, 58, 564, 58, "border");
   canvas.wrap(`${report.businessName} document generated by Solva Trade. ${style.footerNote} Printed by ${report.generatedBy} on ${report.generatedAt}.`, 76, 42, 460, 7.5, "muted");
 
-  return pdfDocument(canvas.output(), 612, 842);
+  return pdfDocument(canvas.output(), 612, 842, assets);
 }
 
 export async function GET(request: NextRequest) {
@@ -3207,7 +3355,7 @@ export async function GET(request: NextRequest) {
   }
 
   if (format === "pdf") {
-    return new Response(pdf(report), {
+    return new Response(await pdf(report), {
       headers: {
         "Content-Type": "application/pdf",
         "Content-Disposition": `attachment; filename="${filename}.pdf"`,
