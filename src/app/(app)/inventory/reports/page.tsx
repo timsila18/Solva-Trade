@@ -1,5 +1,5 @@
 import { inventoryReports } from "@/lib/inventory";
-import { Download, FileSpreadsheet, Printer, Search } from "lucide-react";
+import { FileSpreadsheet, FileText, Printer, Search } from "lucide-react";
 
 const featuredReports = [
   {
@@ -48,6 +48,27 @@ function exportHref(process: string, format: "pdf" | "excel" | "csv" | "print") 
   return `/api/exports?module=Inventory&process=${encodeURIComponent(process)}&format=${format}`;
 }
 
+function ReportActions({ process }: { process: string }) {
+  return (
+    <div className="grid gap-2">
+      <a href={exportHref(process, "pdf")} className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-[6px] bg-[var(--solva-blue-700)] px-3 text-sm font-semibold text-white">
+        <FileText className="h-4 w-4" />
+        Generate
+      </a>
+      <div className="grid grid-cols-2 gap-2">
+        <a href={exportHref(process, "excel")} className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-[6px] border border-cyan-200 bg-cyan-50 px-3 text-xs font-semibold text-[var(--solva-blue-700)]">
+          <FileSpreadsheet className="h-3.5 w-3.5" />
+          Excel
+        </a>
+        <a href={exportHref(process, "print")} className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-[6px] border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700">
+          <Printer className="h-3.5 w-3.5" />
+          Print
+        </a>
+      </div>
+    </div>
+  );
+}
+
 export default function InventoryReportsPage() {
   return (
     <div className="pb-20">
@@ -84,10 +105,8 @@ export default function InventoryReportsPage() {
               <h2 className="mt-1 font-semibold text-slate-950">{report.name}</h2>
             </div>
             <p className="text-sm leading-6 text-slate-600">{report.description}</p>
-            <div className="flex justify-end gap-2">
-              <a href={exportHref(report.process, "print")} className="inline-flex min-h-9 items-center gap-1.5 rounded-[6px] border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700"><Printer className="h-3.5 w-3.5" />Print</a>
-              <a href={exportHref(report.process, "excel")} className="inline-flex min-h-9 items-center gap-1.5 rounded-[6px] border border-cyan-200 bg-cyan-50 px-3 text-xs font-semibold text-[var(--solva-blue-700)]"><FileSpreadsheet className="h-3.5 w-3.5" />Excel</a>
-              <a href={exportHref(report.process, "pdf")} className="inline-flex min-h-9 items-center gap-1.5 rounded-[6px] bg-[var(--solva-blue-700)] px-3 text-xs font-semibold text-white"><Download className="h-3.5 w-3.5" />PDF</a>
+            <div>
+              <ReportActions process={report.process} />
             </div>
           </article>
         ))}
@@ -98,10 +117,8 @@ export default function InventoryReportsPage() {
           <article key={report} className="border border-slate-200 bg-white p-4">
             <h2 className="font-semibold">{report}</h2>
             <p className="mt-2 text-sm text-slate-600">Open this report from Inventory or the central Reports Centre in PDF, Excel and print-ready formats.</p>
-            <div className="mt-4 flex flex-wrap gap-2">
-              <a href={exportHref(report, "pdf")} className="rounded-[6px] bg-[var(--solva-blue-700)] px-3 py-2 text-xs font-semibold text-white">PDF</a>
-              <a href={exportHref(report, "excel")} className="rounded-[6px] border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700">Excel</a>
-              <a href={exportHref(report, "print")} className="rounded-[6px] border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700">Print</a>
+            <div className="mt-4">
+              <ReportActions process={report} />
             </div>
           </article>
         ))}

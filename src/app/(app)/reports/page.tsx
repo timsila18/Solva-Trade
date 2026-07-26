@@ -131,6 +131,28 @@ function exportHref(document: BusinessDocument, format: "pdf" | "excel" | "print
   return `/api/exports?module=${encodeURIComponent(document.category)}&process=${encodeURIComponent(document.name)}&format=${format}`;
 }
 
+function ReportActions({ document, compact = false }: { document: BusinessDocument; compact?: boolean }) {
+  return (
+    <div className={compact ? "mt-3" : "mt-4"}>
+      <a
+        href={exportHref(document, "pdf")}
+        className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md bg-[var(--solva-blue-700)] px-3 text-sm font-semibold text-white shadow-sm"
+      >
+        <FileText className="h-4 w-4" />
+        Generate
+      </a>
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        <a href={exportHref(document, "excel")} className="inline-flex min-h-9 items-center justify-center rounded-md border border-cyan-200 bg-cyan-50 px-3 text-xs font-semibold text-[var(--solva-blue-700)]">
+          Excel
+        </a>
+        <a href={exportHref(document, "print")} className="inline-flex min-h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700">
+          Print
+        </a>
+      </div>
+    </div>
+  );
+}
+
 export default function ReportsPage() {
   return (
     <div className="pb-24">
@@ -173,22 +195,7 @@ export default function ReportsPage() {
                 ) : null}
               </div>
               <p className="mt-3 min-h-12 text-sm leading-6 text-slate-600">{document.description}</p>
-              <div className="mt-4 grid grid-cols-2 gap-2">
-                <a href={exportHref(document, "print")} className="inline-flex min-h-10 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm">
-                  Preview
-                </a>
-                <a href={exportHref(document, "pdf")} className="inline-flex min-h-10 items-center justify-center rounded-md bg-[var(--solva-blue-700)] px-3 text-sm font-semibold text-white shadow-sm">
-                  Download
-                </a>
-              </div>
-              <div className="mt-2 grid grid-cols-2 gap-2">
-                <a href={exportHref(document, "excel")} className="inline-flex min-h-10 items-center justify-center rounded-md border border-cyan-200 bg-cyan-50 px-3 text-sm font-semibold text-[var(--solva-blue-700)]">
-                  Excel
-                </a>
-                <a href={exportHref(document, "print")} className="inline-flex min-h-10 items-center justify-center rounded-md border border-slate-200 px-3 text-sm font-semibold text-slate-700">
-                  Print
-                </a>
-              </div>
+              <ReportActions document={document} />
             </article>
           ))}
         </div>
@@ -222,11 +229,7 @@ export default function ReportsPage() {
                       <p className="text-xs font-semibold uppercase text-slate-500">{document.category}</p>
                       <h4 className="mt-1 font-semibold text-slate-950">{document.name}</h4>
                       <p className="mt-2 min-h-10 text-xs leading-5 text-slate-600">{document.description}</p>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <a href={exportHref(document, "pdf")} className="rounded-md bg-[var(--solva-blue-700)] px-3 py-2 text-xs font-semibold text-white">PDF</a>
-                        <a href={exportHref(document, "excel")} className="rounded-md border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs font-semibold text-[var(--solva-blue-700)]">Excel</a>
-                        <a href={exportHref(document, "print")} className="rounded-md border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700">Print</a>
-                      </div>
+                      <ReportActions document={document} compact />
                     </div>
                   ))}
                 </div>
@@ -290,11 +293,7 @@ export default function ReportsPage() {
               <article key={document.name} className="rounded-lg border border-cyan-100 bg-white p-4 shadow-sm">
                 <h3 className="font-semibold text-slate-950">{document.name}</h3>
                 <p className="mt-2 text-sm leading-6 text-slate-600">{document.description}</p>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <a href={exportHref(document, "pdf")} className="rounded-md bg-[var(--solva-blue-700)] px-3 py-2 text-xs font-semibold text-white">PDF</a>
-                  <a href={exportHref(document, "excel")} className="rounded-md border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700">Excel</a>
-                  <a href={exportHref(document, "print")} className="rounded-md border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700">Print</a>
-                </div>
+                <ReportActions document={document} />
               </article>
             );
           })}
@@ -323,11 +322,7 @@ export default function ReportsPage() {
                         </div>
                         <p className="leading-6 text-slate-600">{document.description}</p>
                         <p className="text-slate-500">{document.strategicPlacement}</p>
-                        <div className="flex flex-wrap justify-start gap-2 lg:justify-end">
-                          <a href={exportHref(document, "pdf")} className="rounded-md bg-[var(--solva-blue-700)] px-3 py-2 text-xs font-semibold text-white">PDF</a>
-                          <a href={exportHref(document, "excel")} className="rounded-md border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700">Excel</a>
-                          <a href={exportHref(document, "print")} className="rounded-md border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700">Print</a>
-                        </div>
+                        <ReportActions document={document} compact />
                       </div>
                     );
                   })}

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ReceiptText, UserPlus } from "lucide-react";
+import { FileText, ReceiptText, UserPlus } from "lucide-react";
 import { EmptyState, MetricCard, PageHero, PlainCard } from "@/components/ui/premium";
 import { salesSummary, salesWorkflows } from "@/lib/sales-data";
 
@@ -118,10 +118,15 @@ export default function SalesPage() {
             <article key={name} className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
               <h3 className="font-semibold text-slate-950">{name}</h3>
               <p className="mt-2 min-h-12 text-sm leading-6 text-slate-600">{description}</p>
-              <div className="mt-4 flex flex-wrap gap-2">
-                <a href={exportHref(name, "pdf")} className="rounded-md bg-[var(--solva-blue-700)] px-3 py-2 text-xs font-semibold text-white">PDF</a>
-                <a href={exportHref(name, "excel")} className="rounded-md border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700">Excel</a>
-                <a href={exportHref(name, "print")} className="rounded-md border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700">Print</a>
+              <div className="mt-4">
+                <a href={exportHref(name, "pdf")} className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md bg-[var(--solva-blue-700)] px-3 text-sm font-semibold text-white">
+                  <FileText className="h-4 w-4" />
+                  Generate
+                </a>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <a href={exportHref(name, "excel")} className="inline-flex min-h-9 items-center justify-center rounded-md border border-cyan-200 bg-cyan-50 px-3 text-xs font-semibold text-[var(--solva-blue-700)]">Excel</a>
+                  <a href={exportHref(name, "print")} className="inline-flex min-h-9 items-center justify-center rounded-md border border-slate-200 px-3 text-xs font-semibold text-slate-700">Print</a>
+                </div>
               </div>
             </article>
           ))}
