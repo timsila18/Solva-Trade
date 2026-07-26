@@ -199,7 +199,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
 
       </aside>
       <div className="lg:pl-[17rem]">
-        <header className="sticky top-0 z-20 border-b border-slate-200 bg-white px-4 py-3">
+        <header className="border-b border-slate-200 bg-white px-4 py-3">
           <div className="grid gap-3 xl:grid-cols-[minmax(260px,390px)_minmax(260px,1fr)_auto] xl:items-center">
             <div className="flex min-w-0 items-center gap-3">
               <Link href="/dashboard" className="relative h-10 w-20 shrink-0 overflow-hidden rounded-md bg-[var(--solva-navy-900)] lg:hidden">

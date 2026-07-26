@@ -1,10 +1,18 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
+import { PwaRegister } from "@/components/pwa-register";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://solva-trade.vercel.app"),
+  metadataBase: new URL("https://www.solvatrade.co.ke"),
+  applicationName: "Solva Trade",
   title: "Solva Trade",
   description: "Run Your Business Smarter.",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Solva Trade",
+  },
   icons: {
     icon: "/solva-trade-icon.png",
     shortcut: "/solva-trade-icon.png",
@@ -17,6 +25,10 @@ export const metadata: Metadata = {
   },
 };
 
+export const viewport: Viewport = {
+  themeColor: "#03111f",
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -24,7 +36,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="h-full antialiased">
-      <body className="min-h-full bg-slate-50">{children}</body>
+      <body className="min-h-full bg-slate-50">
+        {children}
+        <PwaRegister />
+      </body>
     </html>
   );
 }

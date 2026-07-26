@@ -1,0 +1,51 @@
+{
+  "name": "Solva Trade",
+  "short_name": "Solva Trade",
+  "description": "Run sales, stock, money and reports from one clean business workspace.",
+  "id": "/",
+  "start_url": "/dashboard",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "browser"],
+  "background_color": "#03111f",
+  "theme_color": "#03111f",
+  "orientation": "any",
+  "categories": ["business", "productivity", "finance"],
+  "icons": [
+    {
+      "src": "/solva-trade-icon.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/solva-trade-icon.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "New Sale",
+      "short_name": "Sale",
+      "description": "Create a new customer invoice.",
+      "url": "/sales/invoices",
+      "icons": [{ "src": "/solva-trade-icon.png", "sizes": "1024x1024" }]
+    },
+    {
+      "name": "Receive Stock",
+      "short_name": "Stock",
+      "description": "Receive goods and generate a GRN.",
+      "url": "/purchases/goods-received",
+      "icons": [{ "src": "/solva-trade-icon.png", "sizes": "1024x1024" }]
+    },
+    {
+      "name": "Reports",
+      "short_name": "Reports",
+      "description": "Open the Solva Trade reports centre.",
+      "url": "/reports",
+      "icons": [{ "src": "/solva-trade-icon.png", "sizes": "1024x1024" }]
+    }
+  ]
+}
