@@ -68,9 +68,17 @@ export async function POST(request: NextRequest) {
   }
 
   const { data: userData } = await supabase.auth.getUser();
-  const { data: memberships } = await supabase
+  let admin: ReturnType<typeof createSupabaseAdminClient> | null = null;
+  try {
+    admin = createSupabaseAdminClient();
+  } catch {
+    admin = null;
+  }
+  const db = admin ?? supabase;
+
+  const { data: memberships } = await db
     .from("business_memberships")
-    .select("business_id")
+    .select("business_id, role")
     .eq("user_id", userData.user?.id ?? "")
     .eq("active", true)
     .limit(1);
@@ -115,12 +123,23 @@ export async function POST(request: NextRequest) {
   }
 
   await setActiveBusinessCookie(membership.business_id);
-  const { data: business } = await supabase
+  const { data: business } = await db
     .from("businesses")
-    .select("onboarding_status")
+    .select("trading_name, legal_name, onboarding_status")
     .eq("id", membership.business_id)
     .maybeSingle();
   if (business && business.onboarding_status !== "complete") return successResponse(request, payload.wantsJson, "/onboarding");
+
+  if (admin && userData.user) {
+    await admin.auth.admin.updateUserById(userData.user.id, {
+      app_metadata: {
+        ...userData.user.app_metadata,
+        active_business_id: membership.business_id,
+        business_name: business?.trading_name ?? business?.legal_name ?? userData.user.app_metadata?.business_name,
+        business_role: membership.role,
+      },
+    });
+  }
 
   return successResponse(request, payload.wantsJson, "/dashboard");
 }
