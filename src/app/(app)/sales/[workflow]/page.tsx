@@ -17,8 +17,8 @@ const workflows: Record<string, { title: string; description: string; fields: st
   },
   invoices: {
     title: "Invoices",
-    description: "Record a sale quickly. Solva generates the invoice number, tax, total and receipt document.",
-    fields: ["Customer", "Product", "Quantity", "Unit price", "Discount", "Amount paid", "Payment method"],
+    description: "Record the sale and create the customer invoice first. Payment confirmation later generates the receipt.",
+    fields: ["Customer", "Product", "Quantity", "Unit price", "Discount"],
   },
   payments: {
     title: "Customer Payments",
@@ -40,7 +40,7 @@ const workflows: Record<string, { title: string; description: string; fields: st
 const workflowDocuments: Record<string, string[]> = {
   quotations: ["Quotation", "Proforma Invoice"],
   orders: ["Sales Order", "Dispatch Note", "Delivery Note"],
-  invoices: ["Tax Invoice", "Simplified Invoice", "Sales Receipt", "Customer Statement"],
+  invoices: ["Tax Invoice", "Simplified Invoice", "Delivery Note", "Customer Statement"],
   payments: ["Sales Receipt", "Receipt Voucher", "Outstanding Balance Statement"],
   returns: ["Sales Return Note", "Credit Note"],
   "debtor-ageing": ["Customer Aging Report", "Outstanding Balance Statement", "Customer Statement"],
@@ -49,7 +49,7 @@ const workflowDocuments: Record<string, string[]> = {
 const primaryDocument: Record<string, string> = {
   quotations: "Quotation",
   orders: "Sales Order",
-  invoices: "Sales Receipt",
+  invoices: "Tax Invoice",
   payments: "Sales Receipt",
   returns: "Credit Note",
   "debtor-ageing": "Customer Aging Report",
@@ -85,7 +85,9 @@ export default async function SalesWorkflowPage({
         <div className="mt-6 flex flex-wrap gap-3">
           <button name="intent" value="Draft saved" className="rounded-md border border-slate-200 px-4 py-2 text-sm font-semibold">Save draft</button>
           <button name="intent" value="Validation previewed" className="rounded-md border border-slate-200 px-4 py-2 text-sm font-semibold">Preview validation</button>
-          <button name="intent" value="Submitted" className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-semibold text-white">Submit</button>
+          <button name="intent" value="Submitted" className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-semibold text-white">
+            {workflow === "invoices" ? "Create invoice" : "Submit"}
+          </button>
         </div>
       </form>
 

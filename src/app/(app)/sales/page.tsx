@@ -208,9 +208,9 @@ export default async function SalesPage() {
         <div className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
           <div>
             <p className="text-sm font-semibold text-emerald-700">Sales and payments</p>
-            <h2 className="mt-1 text-xl font-semibold text-slate-950">All sales, balances and receipts</h2>
+            <h2 className="mt-1 text-xl font-semibold text-slate-950">All sales, invoices, balances and receipts</h2>
             <p className="mt-2 text-sm leading-6 text-slate-600">
-              Confirm payment from this list. Paid sales produce a receipt immediately; part-paid or unpaid sales stay visible with the balance.
+              Every new sale appears here as an invoice first. Confirm payment from this list to generate the receipt instantly; unpaid or part-paid sales stay visible with the balance.
             </p>
           </div>
           {invoicesNeedingFollowUp.length ? (
