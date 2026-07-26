@@ -21,7 +21,7 @@ const workflows: Record<string, { title: string; description: string; fields: st
   "goods-received": {
     title: "Goods Received Notes",
     description: "Receive stock quickly. Solva generates the GRN number and posts accepted stock into inventory.",
-    fields: ["Supplier", "Product", "Received quantity", "Unit cost", "Source type", "Source reason", "Supplier delivery note number", "Rejected quantity", "Batch", "Expiry date", "Direct reference unit cost"],
+    fields: ["Supplier", "Product", "Received quantity", "Unit cost", "Purchase source", "Supplier delivery note number", "Rejected quantity", "Batch", "Expiry date"],
     controls: "Posted GRNs create purchase receipt stock movements, update inventory balances and preserve rejected or quarantined quantities.",
   },
   "supplier-bills": {
@@ -115,9 +115,11 @@ export default async function PurchasingWorkflowPage({
         <WorkflowFormFields fields={config.fields} products={lookups.products} suppliers={lookups.suppliers} autoFillProductPrice={false} />
         <div className="mt-6 flex flex-wrap gap-3">
           <button name="intent" value="Draft saved" className="rounded-md border border-slate-200 px-4 py-2 text-sm font-semibold">Save as draft</button>
-          <button name="intent" value="Validation previewed" className="rounded-md border border-slate-200 px-4 py-2 text-sm font-semibold">Preview validation</button>
+          {workflow !== "goods-received" ? (
+            <button name="intent" value="Validation previewed" className="rounded-md border border-slate-200 px-4 py-2 text-sm font-semibold">Preview validation</button>
+          ) : null}
           <button name="intent" value={workflow === "goods-received" ? "Posted and received" : "Submitted for approval"} className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-semibold text-white">
-            {workflow === "goods-received" ? "Post GRN and receive stock" : "Submit for approval"}
+            {workflow === "goods-received" ? "Receive stock and generate GRN" : "Submit for approval"}
           </button>
         </div>
       </form>
