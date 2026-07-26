@@ -145,9 +145,11 @@ export function WorkflowFormFields({
           ["tax", "total", "balance_due", "new_quantity"].includes(key) &&
           key in calculated &&
           calculated[key as keyof typeof calculated] !== "";
+        const today = new Date().toISOString().slice(0, 10);
         const defaultCalculatedValue =
           ["vat_rate", "tax_rate"].includes(key) && !values[key] ? calculated[key as keyof typeof calculated] : undefined;
-        const value = isCalculated ? calculated[key as keyof typeof calculated] : defaultCalculatedValue ?? values[key] ?? "";
+        const defaultDateValue = key === "received_date" && !values[key] ? today : undefined;
+        const value = isCalculated ? calculated[key as keyof typeof calculated] : defaultCalculatedValue ?? defaultDateValue ?? values[key] ?? "";
         const maxStock =
           selectedProduct?.trackInventory && /^(quantity|ordered_quantity|quantity_sold)$/.test(key)
             ? String(selectedProduct.available)
