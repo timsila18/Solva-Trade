@@ -1,4 +1,7 @@
 import Image from "next/image";
+import { redirect } from "next/navigation";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 const steps = [
   "Welcome",
@@ -30,6 +33,26 @@ export default async function OnboardingPage({
 }: {
   searchParams: Promise<{ error?: string; message?: string }>;
 }) {
+  const supabase = await createSupabaseServerClient();
+  const { data: userData } = await supabase.auth.getUser();
+  const user = userData.user;
+
+  if (!user) redirect("/sign-in");
+
+  const admin = createSupabaseAdminClient();
+  const { data: membership } = await admin
+    .from("business_memberships")
+    .select("business_id, businesses(onboarding_status)")
+    .eq("user_id", user.id)
+    .eq("active", true)
+    .limit(1)
+    .maybeSingle();
+
+  const business = Array.isArray(membership?.businesses) ? membership.businesses[0] : membership?.businesses;
+  if (membership?.business_id && business?.onboarding_status === "complete") {
+    redirect("/dashboard");
+  }
+
   const params = await searchParams;
 
   return (
