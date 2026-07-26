@@ -7,13 +7,13 @@ import { getSalesWorkflowLookups } from "@/lib/workflow-live-data";
 const workflows: Record<string, { title: string; description: string; fields: string[] }> = {
   quotations: {
     title: "Quotations",
-    description: "Prepare customer quotations and convert accepted offers into sales orders.",
-    fields: ["Quotation number", "Customer", "Date", "Valid until", "Product", "Quantity", "Price", "Discount", "Tax", "Total"],
+    description: "Prepare customer quotations. Solva generates the quotation number automatically.",
+    fields: ["Customer", "Date", "Valid until", "Product", "Quantity", "Price", "Discount", "Tax", "Total"],
   },
   orders: {
     title: "Sales Orders",
-    description: "Approve customer demand and expose ready orders to delivery planning.",
-    fields: ["Sales order number", "Customer", "Route", "Delivery date", "Payment status", "Product", "Ordered quantity", "Delivery priority"],
+    description: "Approve customer demand and expose ready orders to delivery planning. Solva generates the sales order number.",
+    fields: ["Customer", "Route", "Delivery date", "Payment status", "Product", "Ordered quantity", "Delivery priority"],
   },
   invoices: {
     title: "Invoices",
@@ -22,13 +22,13 @@ const workflows: Record<string, { title: string; description: string; fields: st
   },
   payments: {
     title: "Customer Payments",
-    description: "Record customer payments and allocations that delivery collections can reuse.",
-    fields: ["Payment number", "Customer", "Invoice", "Payment method", "Amount", "Reference", "Payer name", "Receipt status"],
+    description: "Record customer payments and allocations that delivery collections can reuse. Solva generates the payment and receipt numbers.",
+    fields: ["Customer", "Invoice", "Payment method", "Amount", "Reference", "Payer name", "Receipt status"],
   },
   returns: {
     title: "Customer Returns",
-    description: "Create return and credit workflows for rejected or returned delivery items.",
-    fields: ["Return number", "Customer", "Invoice", "Product", "Returned quantity", "Reason", "Disposition", "Credit required"],
+    description: "Create return and credit workflows for rejected or returned delivery items. Solva generates the return or credit note number.",
+    fields: ["Customer", "Invoice", "Product", "Returned quantity", "Reason", "Disposition", "Credit required"],
   },
   "debtor-ageing": {
     title: "Debtor Ageing",

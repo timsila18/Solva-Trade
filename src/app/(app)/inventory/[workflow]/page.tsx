@@ -10,18 +10,18 @@ const workflows: Record<string, { title: string; description: string; fields: st
   },
   transfers: {
     title: "Stock Transfers",
-    description: "Create branch, warehouse, shop floor, vehicle, transit, returns and damaged-store transfers using document-number sequences.",
-    fields: ["Transfer number", "From branch", "From warehouse", "To branch", "To warehouse", "Expected arrival", "Status", "Discrepancy reason"],
+    description: "Create branch, warehouse, shop floor, vehicle, transit, returns and damaged-store transfers. Solva generates the transfer number.",
+    fields: ["From branch", "From warehouse", "To branch", "To warehouse", "Expected arrival", "Status", "Discrepancy reason"],
   },
   adjustments: {
     title: "Stock Adjustments",
-    description: "Control damaged, expired, lost, found, internal-use, promotional and data-correction adjustments with approval rules.",
-    fields: ["Adjustment number", "Branch", "Warehouse", "Reason", "Current quantity", "Adjustment quantity", "New quantity", "Value effect"],
+    description: "Control damaged, expired, lost, found, internal-use, promotional and data-correction adjustments with approval rules. Solva generates the adjustment number.",
+    fields: ["Branch", "Warehouse", "Reason", "Current quantity", "Adjustment quantity", "New quantity", "Value effect"],
   },
   counts: {
     title: "Stock Counts",
-    description: "Run full, cycle, category, warehouse, selected product, batch, blind and non-blind stock counts.",
-    fields: ["Count number", "Count type", "Snapshot", "Assigned users", "Expected quantity", "Counted quantity", "Variance", "Variance value"],
+    description: "Run full, cycle, category, warehouse, selected product, batch, blind and non-blind stock counts. Solva generates the count number.",
+    fields: ["Count type", "Snapshot", "Assigned users", "Expected quantity", "Counted quantity", "Variance", "Variance value"],
   },
   reorder: {
     title: "Reorder Centre",

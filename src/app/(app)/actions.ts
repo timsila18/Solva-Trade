@@ -30,6 +30,41 @@ function appendGeneratedDocumentField(params: URLSearchParams, key: string, labe
   params.set(`label_${key}`, label);
 }
 
+function generatedReferencePrefix(moduleName: string, processName: string, documentName: string) {
+  const combined = `${moduleName} ${processName} ${documentName}`.toLowerCase();
+  if (combined.includes("quotation")) return { key: "quotation_number", label: "Quotation number", prefix: "QUO" };
+  if (combined.includes("sales order")) return { key: "sales_order_number", label: "Sales order number", prefix: "SO" };
+  if (combined.includes("invoice")) return { key: "invoice_number", label: "Invoice number", prefix: "INV" };
+  if (combined.includes("receipt")) return { key: "receipt_number", label: "Receipt number", prefix: "RCT" };
+  if (combined.includes("credit note")) return { key: "credit_note_number", label: "Credit note number", prefix: "CRN" };
+  if (combined.includes("debit note")) return { key: "debit_note_number", label: "Debit note number", prefix: "DBN" };
+  if (combined.includes("requisition")) return { key: "requisition_number", label: "Requisition number", prefix: "REQ" };
+  if (combined.includes("purchase order")) return { key: "po_number", label: "PO number", prefix: "PO" };
+  if (combined.includes("goods received") || combined.includes("grn")) return { key: "grn_number", label: "GRN number", prefix: "GRN" };
+  if (combined.includes("supplier bill")) return { key: "bill_number", label: "Bill number", prefix: "BILL" };
+  if (combined.includes("payment")) return { key: "payment_number", label: "Payment number", prefix: "PAY" };
+  if (combined.includes("expense")) return { key: "expense_number", label: "Expense number", prefix: "EXP" };
+  if (combined.includes("claim")) return { key: "claim_number", label: "Claim number", prefix: "CLM" };
+  if (combined.includes("voucher") || combined.includes("petty cash")) return { key: "voucher_number", label: "Voucher number", prefix: "VCH" };
+  if (combined.includes("transfer")) return { key: "transfer_number", label: "Transfer number", prefix: "TRF" };
+  if (combined.includes("adjustment")) return { key: "adjustment_number", label: "Adjustment number", prefix: "ADJ" };
+  if (combined.includes("count")) return { key: "count_number", label: "Count number", prefix: "CNT" };
+  if (combined.includes("delivery run")) return { key: "run_number", label: "Run number", prefix: "RUN" };
+  if (combined.includes("loading sheet")) return { key: "loading_sheet_number", label: "Loading sheet number", prefix: "LOAD" };
+  if (combined.includes("reconciliation")) return { key: "reconciliation_number", label: "Reconciliation number", prefix: "REC" };
+  if (combined.includes("owner transaction")) return { key: "transaction_number", label: "Transaction number", prefix: "OWN" };
+  if (combined.includes("staff advance")) return { key: "advance_number", label: "Advance number", prefix: "ADV" };
+  return { key: "document_number", label: "Document number", prefix: "DOC" };
+}
+
+function generateWorkflowReference(moduleName: string, processName: string, documentName: string) {
+  const config = generatedReferencePrefix(moduleName, processName, documentName);
+  return {
+    ...config,
+    value: `${config.prefix}-${Date.now().toString().slice(-8)}`,
+  };
+}
+
 function getField(formData: FormData, key: string) {
   const value = formData.get(`field_${key}`);
   return typeof value === "string" ? value.trim() : "";
@@ -699,7 +734,7 @@ async function postFinanceWorkflow(formData: FormData, userId: string, fallbackB
       created_by: userId,
     });
     if (error) throw new Error(error.message);
-    return;
+    return null;
   }
 
   if (lower === "expenses") {
@@ -725,7 +760,10 @@ async function postFinanceWorkflow(formData: FormData, userId: string, fallbackB
       created_by: userId,
     });
     if (error) throw new Error(error.message);
+    return expenseNumber;
   }
+
+  return null;
 }
 
 function accountClassValue(value: string) {
@@ -780,7 +818,7 @@ async function postDistributionWorkflow(formData: FormData, userId: string, fall
   const admin = await createSupabaseServerClient();
   const { businessId, branchId, warehouseId } = await getWorkspaceContextForClient(admin, userId, fallbackBusinessId);
   const processName = safeText(formData.get("process"), "Distribution");
-  if (processName.toLowerCase() !== "delivery runs") return;
+  if (processName.toLowerCase() !== "delivery runs") return null;
 
   const runNumber = getField(formData, "run_number") || `RUN-${Date.now().toString().slice(-8)}`;
   const { error } = await admin.from("delivery_runs").insert({
@@ -803,6 +841,7 @@ async function postDistributionWorkflow(formData: FormData, userId: string, fall
     created_by: userId,
   });
   if (error) throw new Error(error.message);
+  return runNumber;
 }
 
 async function persistWorkflowRecord(
@@ -810,6 +849,7 @@ async function persistWorkflowRecord(
   userId: string,
   businessId: string,
   source?: { table: string; id?: string | null },
+  generatedReference?: string,
 ) {
   const admin = await createSupabaseServerClient();
   const { branchId } = await getWorkspaceContextForClient(admin, userId, businessId);
@@ -817,10 +857,14 @@ async function persistWorkflowRecord(
   const processName = safeText(formData.get("process"), "Business process");
   const documentName = safeText(formData.get("document"), processName);
   const intent = safeText(formData.get("intent"), "Completed");
-  const reference = getField(formData, "document_number") ||
+  const reference = generatedReference ||
+    getField(formData, "document_number") ||
     getField(formData, "reference") ||
     getField(formData, "invoice_number") ||
     getField(formData, "receipt_number") ||
+    getField(formData, "grn_number") ||
+    getField(formData, "po_number") ||
+    getField(formData, "payment_number") ||
     getField(formData, "run_number") ||
     `WRK-${Date.now().toString().slice(-8)}`;
 
@@ -1117,6 +1161,7 @@ export async function completeProcessAction(formData: FormData) {
     next,
   });
   documentFieldParams(formData).forEach((value, key) => params.append(key, value));
+  let generatedReference: string | undefined;
 
   try {
     const supabase = await createSupabaseServerClient();
@@ -1129,14 +1174,18 @@ export async function completeProcessAction(formData: FormData) {
     if (user && businessId) {
       if (intent.toLowerCase().includes("submit") && moduleName === "Sales" && processName === "Invoices") {
         const result = await postSalesInvoice(formData, user.id, businessId);
+        generatedReference = result.invoiceNumber;
         appendGeneratedDocumentField(params, "invoice_number", "Invoice number", result.invoiceNumber);
         appendGeneratedDocumentField(params, "receipt_number", "Receipt number", result.paymentNumber ?? result.invoiceNumber);
       }
       if (intent.toLowerCase().includes("submit") && moduleName === "Sales" && processName === "Customer Payments") {
-        await postCustomerPayment(formData, user.id, businessId);
+        generatedReference = await postCustomerPayment(formData, user.id, businessId);
+        appendGeneratedDocumentField(params, "payment_number", "Payment number", generatedReference);
+        appendGeneratedDocumentField(params, "receipt_number", "Receipt number", generatedReference);
       }
       if (moduleName === "Purchasing" && processName === "Goods Received Notes" && intent.toLowerCase().includes("posted")) {
         const result = await postGoodsReceived(formData, user.id, businessId);
+        generatedReference = result.grnNumber;
         appendGeneratedDocumentField(params, "grn_number", "GRN number", result.grnNumber);
       }
       if (moduleName === "Customers" && processName === "New Customer") {
@@ -1152,15 +1201,24 @@ export async function completeProcessAction(formData: FormData) {
         await updateProductRecord(formData, user.id, businessId);
       }
       if (moduleName === "Cash and Bank") {
-        await postFinanceWorkflow(formData, user.id, businessId);
+        generatedReference = (await postFinanceWorkflow(formData, user.id, businessId)) ?? generatedReference;
       }
       if (moduleName === "Accounting") {
         await postAccountingWorkflow(formData, user.id, businessId);
       }
       if (moduleName === "Distribution") {
-        await postDistributionWorkflow(formData, user.id, businessId);
+        generatedReference = (await postDistributionWorkflow(formData, user.id, businessId)) ?? generatedReference;
       }
-      await persistWorkflowRecord(formData, user.id, businessId);
+      if (generatedReference) {
+        const reference = generatedReferencePrefix(moduleName, processName, documentName);
+        appendGeneratedDocumentField(params, reference.key, reference.label, generatedReference);
+      }
+      if (!generatedReference) {
+        const reference = generateWorkflowReference(moduleName, processName, documentName);
+        generatedReference = reference.value;
+        appendGeneratedDocumentField(params, reference.key, reference.label, reference.value);
+      }
+      await persistWorkflowRecord(formData, user.id, businessId, undefined, generatedReference);
 
       try {
         const admin = createSupabaseAdminClient();

@@ -8,14 +8,14 @@ import { getSalesWorkflowLookups } from "@/lib/workflow-live-data";
 const workflows: Record<string, { title: string; description: string; fields: string[]; controls: string }> = {
   requisitions: {
     title: "Purchase Requisitions",
-    description: "Create internal purchase requests from branch demand, reorder alerts or manual product needs.",
-    fields: ["Requisition number", "Branch", "Requested by", "Needed by", "Product", "Quantity", "Preferred supplier", "Reason", "Approval status"],
+    description: "Create internal purchase requests from branch demand, reorder alerts or manual product needs. Solva generates the requisition number.",
+    fields: ["Branch", "Requested by", "Needed by", "Product", "Quantity", "Preferred supplier", "Reason", "Approval status"],
     controls: "Approved requisitions can be converted into purchase orders while preserving source demand and approval history.",
   },
   "purchase-orders": {
     title: "Purchase Orders",
-    description: "Build supplier orders from requisitions, reorder recommendations or direct purchasing.",
-    fields: ["PO number", "Supplier", "Source type", "Source reason", "Branch", "Expected date", "Product", "Order quantity", "Unit price", "Direct reference unit cost", "Local reference unit cost", "Tax code", "Delivery terms"],
+    description: "Build supplier orders from requisitions, reorder recommendations or direct purchasing. Solva generates the PO number.",
+    fields: ["Supplier", "Source type", "Source reason", "Branch", "Expected date", "Product", "Order quantity", "Unit price", "Direct reference unit cost", "Local reference unit cost", "Tax code", "Delivery terms"],
     controls: "Price changes beyond tolerance require reapproval, and sent purchase orders remain immutable except through controlled revisions.",
   },
   "goods-received": {
@@ -26,20 +26,20 @@ const workflows: Record<string, { title: string; description: string; fields: st
   },
   "supplier-bills": {
     title: "Supplier Bills",
-    description: "Capture supplier invoices and run two-way or three-way matching before posting creditor balances.",
-    fields: ["Bill number", "Supplier invoice", "Supplier", "PO number", "GRN number", "Invoice date", "Due date", "Subtotal", "Tax", "Total"],
+    description: "Capture supplier invoices and run two-way or three-way matching before posting creditor balances. Solva generates the internal bill number.",
+    fields: ["Supplier invoice", "Supplier", "Linked PO", "Linked GRN", "Invoice date", "Due date", "Subtotal", "Tax", "Total"],
     controls: "Quantity, price, tax, missing GRN and overbilling exceptions block posting until approved override permissions are used.",
   },
   returns: {
     title: "Supplier Returns",
-    description: "Return rejected, damaged, expired, excess or recalled goods and track supplier credit recovery.",
-    fields: ["Return number", "Supplier", "Source GRN", "Product", "Return quantity", "Reason", "Dispatch date", "Credit note expected"],
+    description: "Return rejected, damaged, expired, excess or recalled goods and track supplier credit recovery. Solva generates the return note number.",
+    fields: ["Supplier", "Source GRN", "Product", "Return quantity", "Reason", "Dispatch date", "Credit note expected"],
     controls: "Approved returns can reverse stock, create debit or credit note tracking and close once acknowledged by the supplier.",
   },
   payments: {
     title: "Supplier Payments",
-    description: "Prepare, approve, post and allocate supplier payments across open bills and advances.",
-    fields: ["Payment number", "Supplier", "Payment date", "Method", "Reference", "Amount", "Currency", "Bill allocation", "Approval status"],
+    description: "Prepare, approve, post and allocate supplier payments across open bills and advances. Solva generates the payment number.",
+    fields: ["Supplier", "Payment date", "Method", "Reference", "Amount", "Currency", "Bill allocation", "Approval status"],
     controls: "Allocations are validated against payment amount, bill outstanding balance and oldest-due allocation rules.",
   },
   "creditor-ageing": {
