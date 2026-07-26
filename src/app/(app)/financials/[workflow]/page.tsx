@@ -169,10 +169,8 @@ export default async function FinancialWorkflowPage({
           <input type="hidden" name="returnTo" value={`/financials/${workflow}`} />
           <input type="hidden" name="next" value={`Continue ${config.title}`} />
           <WorkflowFormFields fields={config.fields} />
-          <div className="mt-6 flex flex-wrap gap-3">
-            <button name="intent" value="Draft saved" className="rounded-md border border-slate-200 px-4 py-2 text-sm font-semibold">Save draft</button>
-            <button name="intent" value="Preview generated" className="rounded-md border border-slate-200 px-4 py-2 text-sm font-semibold">Preview</button>
-            <button name="intent" value="Generated" className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-semibold text-white">Generate</button>
+          <div className="mt-6">
+            <button name="intent" value="Generated" className="inline-flex min-h-11 items-center justify-center rounded-md bg-emerald-700 px-5 py-3 text-sm font-semibold text-white">Generate</button>
           </div>
         </form>
 

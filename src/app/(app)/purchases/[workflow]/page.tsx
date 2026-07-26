@@ -113,12 +113,8 @@ export default async function PurchasingWorkflowPage({
         <input type="hidden" name="returnTo" value={`/purchases/${workflow}`} />
         <input type="hidden" name="next" value={`Continue ${config.title}`} />
         <WorkflowFormFields fields={config.fields} products={lookups.products} suppliers={lookups.suppliers} autoFillProductPrice={false} />
-        <div className="mt-6 flex flex-wrap gap-3">
-          <button name="intent" value="Draft saved" className="rounded-md border border-slate-200 px-4 py-2 text-sm font-semibold">Save as draft</button>
-          {workflow !== "goods-received" ? (
-            <button name="intent" value="Validation previewed" className="rounded-md border border-slate-200 px-4 py-2 text-sm font-semibold">Preview validation</button>
-          ) : null}
-          <button name="intent" value={workflow === "goods-received" ? "Posted and received" : "Submitted for approval"} className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-semibold text-white">
+        <div className="mt-6">
+          <button name="intent" value={workflow === "goods-received" ? "Posted and received" : "Submitted for approval"} className="inline-flex min-h-11 items-center justify-center rounded-md bg-emerald-700 px-5 py-3 text-sm font-semibold text-white">
             {workflow === "goods-received" ? "Receive stock and generate GRN" : "Submit for approval"}
           </button>
         </div>

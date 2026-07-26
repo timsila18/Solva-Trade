@@ -55,10 +55,8 @@ export default async function InventoryWorkflowPage({
         <input type="hidden" name="returnTo" value={`/inventory/${workflow}`} />
         <input type="hidden" name="next" value={`Continue ${config.title}`} />
         <WorkflowFormFields fields={config.fields} />
-        <div className="mt-6 flex flex-wrap gap-3">
-          <button name="intent" value="Draft saved" className="rounded-md border border-slate-200 px-4 py-2 text-sm font-semibold">Save as draft</button>
-          <button name="intent" value="Validation previewed" className="rounded-md border border-slate-200 px-4 py-2 text-sm font-semibold">Preview validation</button>
-          <button name="intent" value="Submitted for posting" className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-semibold text-white">Submit for posting</button>
+        <div className="mt-6">
+          <button name="intent" value="Submitted for posting" className="inline-flex min-h-11 items-center justify-center rounded-md bg-emerald-700 px-5 py-3 text-sm font-semibold text-white">Submit for posting</button>
         </div>
       </form>
 
