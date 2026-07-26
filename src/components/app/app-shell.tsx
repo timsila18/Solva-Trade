@@ -14,6 +14,7 @@ import {
 import { QuickCommand } from "@/components/app/quick-command";
 import { navigationItems } from "@/lib/navigation";
 import { canPerformAction } from "@/lib/permissions";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { CoreRole, Membership } from "@/lib/types";
 
@@ -57,6 +58,7 @@ function roleName(role: CoreRole | string | null | undefined) {
 
 export async function AppShell({ children }: { children: React.ReactNode }) {
   const supabase = await createSupabaseServerClient();
+  const admin = createSupabaseAdminClient();
   const { data: userData } = await supabase.auth.getUser();
   const user = userData.user;
   const activeBusinessId = typeof user?.app_metadata?.active_business_id === "string" ? user.app_metadata.active_business_id : null;
@@ -84,7 +86,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
   };
 
   if (user) {
-    const { data: membershipData } = await supabase
+    const { data: membershipData } = await admin
       .from("business_memberships")
       .select("business_id, role, permission_overrides, branch_access_mode, default_branch_id, branch_ids")
       .eq("user_id", user.id)
@@ -104,7 +106,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
         branchIds: membershipData.branch_ids ?? [],
       };
 
-      const { data: businessData } = await supabase
+      const { data: businessData } = await admin
         .from("businesses")
         .select("id, trading_name, legal_name")
         .eq("id", membershipData.business_id)
@@ -117,7 +119,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
         };
       }
 
-      const { data: branchData } = await supabase
+      const { data: branchData } = await admin
         .from("branches")
         .select("branch_name, branch_code")
         .eq("business_id", membershipData.business_id)

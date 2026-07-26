@@ -10,6 +10,7 @@ import {
   timelineFoundation,
 } from "@/lib/business-intelligence-data";
 import { generateRecommendations, rankAlerts } from "@/lib/business-intelligence";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 const alerts = rankAlerts(alertExamples);
@@ -59,6 +60,7 @@ function workflowAmount(payload: WorkflowPayload | null | undefined) {
 
 export default async function DashboardPage() {
   const supabase = await createSupabaseServerClient();
+  const admin = createSupabaseAdminClient();
   const { data: userData } = await supabase.auth.getUser();
   const user = userData.user;
   const userName =
@@ -74,23 +76,24 @@ export default async function DashboardPage() {
   let businessId = metadataBusinessId;
 
   if (user) {
-    const { data: membership } = await supabase
+    const { data: membership } = await admin
       .from("business_memberships")
       .select("business_id")
+      .eq("user_id", user.id)
       .eq("active", true)
       .limit(1)
       .maybeSingle();
     businessId = membership?.business_id ?? businessId;
 
     if (businessId) {
-      const { data: business } = await supabase
+      const { data: business } = await admin
         .from("businesses")
         .select("trading_name, legal_name")
         .eq("id", businessId)
         .maybeSingle();
       businessName = business?.trading_name ?? business?.legal_name ?? businessName;
 
-      const { data: branch } = await supabase
+      const { data: branch } = await admin
         .from("branches")
         .select("branch_name")
         .eq("business_id", businessId)
@@ -118,6 +121,7 @@ export default async function DashboardPage() {
   let productsInCatalogue = 0;
   let quantityOnHand = 0;
   let stockValue = 0;
+  let taxToday = 0;
   let grnsToday = 0;
   let recentActivity: { time: string; module: string; title: string; quickAction: string }[] = [];
 
@@ -130,27 +134,27 @@ export default async function DashboardPage() {
       balancesResult,
       workflowResult,
     ] = await Promise.all([
-      supabase
+      admin
         .from("sales_invoices")
-        .select("id, invoice_number, invoice_date, total_amount, amount_paid, balance_due, status, created_at")
+        .select("id, invoice_number, invoice_date, subtotal, tax_total, total_amount, amount_paid, balance_due, status, created_at")
         .eq("business_id", businessId),
-      supabase
+      admin
         .from("customer_payments")
         .select("id, payment_number, payment_date, amount_received, status, created_at")
         .eq("business_id", businessId),
-      supabase
+      admin
         .from("customers")
         .select("id, active, status, current_balance, created_at")
         .eq("business_id", businessId),
-      supabase
+      admin
         .from("products")
         .select("id, active, track_inventory, reorder_level, product_name, created_at")
         .eq("business_id", businessId),
-      supabase
+      admin
         .from("stock_balances")
         .select("product_id, quantity_on_hand, available_quantity, total_inventory_value, reorder_status")
         .eq("business_id", businessId),
-      supabase
+      admin
         .from("workflow_records")
         .select("module_name, process_name, document_name, reference_number, record_payload, created_at")
         .eq("business_id", businessId)
@@ -163,6 +167,9 @@ export default async function DashboardPage() {
     todaySales = invoices
       .filter((invoice) => String(invoice.invoice_date) === today)
       .reduce((sum, invoice) => sum + numeric(invoice.total_amount), 0);
+    taxToday = invoices
+      .filter((invoice) => String(invoice.invoice_date) === today)
+      .reduce((sum, invoice) => sum + numeric(invoice.tax_total), 0);
     customersOwing = invoices.reduce((sum, invoice) => sum + Math.max(0, numeric(invoice.balance_due)), 0);
     overdueCustomers = invoices.filter((invoice) => numeric(invoice.balance_due) > 0).length;
 
@@ -431,7 +438,7 @@ export default async function DashboardPage() {
         <MetricCard label="Money collected today" value={money(cashCollected)} story={paymentCount > 0 ? "Updated from posted customer receipts." : "No receipts yet. Record the first payment when money lands."} />
         <MetricCard label="Money customers owe you" value={money(customersOwing)} story={customersOwing > 0 ? "Updated from open invoice balances." : "This stays clean until invoices are posted."} />
         <MetricCard label="Stock value" value={money(stockValue)} story={stockValue > 0 ? "Updated from current stock balances." : "Receive stock to begin tracking value and reorder needs."} />
-        <MetricCard label="Tax status" value="No open filing" story="VAT reminders will appear before due dates." tone="good" />
+        <MetricCard label="Tax status" value={taxToday > 0 ? `${money(taxToday)} VAT today` : "No open filing"} story={taxToday > 0 ? "Updated from tax charged on today's invoices." : "VAT reminders will appear before due dates."} tone="good" />
       </section>
 
       <section className="mt-6 grid gap-4 lg:grid-cols-3">
