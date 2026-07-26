@@ -15,23 +15,10 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 const alerts = rankAlerts(alertExamples);
 const recommendations = generateRecommendations(alertExamples).slice(0, 3);
 
-const ownerSummary = [
-  "No live sales have been posted yet, so today is ready for your first clean transaction.",
-  "Cash, stock, customer balances and tax reminders will explain themselves here as soon as work starts.",
-  "The fastest next step is to record a sale or receive stock so Solva can begin telling the story of the business.",
-];
-
 const topActions = [
   { label: "New Sale", href: "/sales/invoices", icon: ReceiptText },
   { label: "Receive Stock", href: "/purchases/goods-received", icon: PackagePlus },
   { label: "Record Payment", href: "/cash-bank/receipts", icon: Banknote },
-];
-
-const attentionRows = [
-  ["Invoices", "No invoices yet", "Draft", "Create", "/sales/invoices"],
-  ["Stock receipts", "No GRNs posted yet", "Ready", "Receive", "/purchases/goods-received"],
-  ["Customers", "Customer list is empty", "Setup", "Add", "/customers/new"],
-  ["Reports", "Daily report is available", "Download", "Export", "/api/exports?module=Reports&process=Daily%20Report&format=pdf"],
 ];
 
 function greeting() {
@@ -39,6 +26,35 @@ function greeting() {
   if (hour < 12) return "Good morning";
   if (hour < 17) return "Good afternoon";
   return "Good evening";
+}
+
+function todayInNairobi() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    day: "2-digit",
+    month: "2-digit",
+    timeZone: "Africa/Nairobi",
+    year: "numeric",
+  }).formatToParts(new Date());
+  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${value.year}-${value.month}-${value.day}`;
+}
+
+function money(value: number) {
+  return `KES ${Math.round(value).toLocaleString("en-KE")}`;
+}
+
+function numeric(value: unknown) {
+  const number = typeof value === "string" ? Number(value.replace(/,/g, "")) : Number(value ?? 0);
+  return Number.isFinite(number) ? number : 0;
+}
+
+type WorkflowPayload = {
+  fields?: Record<string, { value?: unknown }>;
+};
+
+function workflowAmount(payload: WorkflowPayload | null | undefined) {
+  const fields = payload?.fields ?? {};
+  return numeric(fields.total?.value ?? fields.amount?.value ?? fields.subtotal?.value);
 }
 
 export default async function DashboardPage() {
@@ -86,14 +102,155 @@ export default async function DashboardPage() {
     }
   }
 
+  const today = todayInNairobi();
+  const tomorrow = new Date(`${today}T00:00:00+03:00`);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowIso = tomorrow.toISOString();
+  const todayStartIso = new Date(`${today}T00:00:00+03:00`).toISOString();
+  let todaySales = 0;
+  let todayInvoiceCount = 0;
+  let cashCollected = 0;
+  let paymentCount = 0;
+  let customersOwing = 0;
+  let overdueCustomers = 0;
+  let activeCustomers = 0;
+  let stockAlerts = 0;
+  let productsInCatalogue = 0;
+  let quantityOnHand = 0;
+  let stockValue = 0;
+  let grnsToday = 0;
+  let recentActivity: { time: string; module: string; title: string; quickAction: string }[] = [];
+
+  if (businessId) {
+    const [
+      invoicesResult,
+      paymentsResult,
+      customersResult,
+      productsResult,
+      balancesResult,
+      workflowResult,
+    ] = await Promise.all([
+      supabase
+        .from("sales_invoices")
+        .select("id, invoice_number, invoice_date, total_amount, amount_paid, balance_due, status, created_at")
+        .eq("business_id", businessId),
+      supabase
+        .from("customer_payments")
+        .select("id, payment_number, payment_date, amount_received, status, created_at")
+        .eq("business_id", businessId),
+      supabase
+        .from("customers")
+        .select("id, active, status, current_balance, created_at")
+        .eq("business_id", businessId),
+      supabase
+        .from("products")
+        .select("id, active, track_inventory, reorder_level, product_name, created_at")
+        .eq("business_id", businessId),
+      supabase
+        .from("stock_balances")
+        .select("product_id, quantity_on_hand, available_quantity, total_inventory_value, reorder_status")
+        .eq("business_id", businessId),
+      supabase
+        .from("workflow_records")
+        .select("module_name, process_name, document_name, reference_number, record_payload, created_at")
+        .eq("business_id", businessId)
+        .order("created_at", { ascending: false })
+        .limit(20),
+    ]);
+
+    const invoices = invoicesResult.data ?? [];
+    todayInvoiceCount = invoices.filter((invoice) => String(invoice.invoice_date) === today).length;
+    todaySales = invoices
+      .filter((invoice) => String(invoice.invoice_date) === today)
+      .reduce((sum, invoice) => sum + numeric(invoice.total_amount), 0);
+    customersOwing = invoices.reduce((sum, invoice) => sum + Math.max(0, numeric(invoice.balance_due)), 0);
+    overdueCustomers = invoices.filter((invoice) => numeric(invoice.balance_due) > 0).length;
+
+    const payments = paymentsResult.data ?? [];
+    const todayPayments = payments.filter((payment) => {
+      const value = String(payment.payment_date ?? payment.created_at ?? "");
+      return value >= todayStartIso && value < tomorrowIso;
+    });
+    cashCollected = todayPayments.reduce((sum, payment) => sum + numeric(payment.amount_received), 0);
+    paymentCount = todayPayments.length;
+
+    const customers = customersResult.data ?? [];
+    activeCustomers = customers.filter((customer) => customer.active !== false && customer.status !== "inactive").length;
+
+    const products = productsResult.data ?? [];
+    productsInCatalogue = products.filter((product) => product.active !== false).length;
+
+    const balances = balancesResult.data ?? [];
+    const availableByProduct = new Map<string, number>();
+    for (const balance of balances) {
+      const productId = String(balance.product_id ?? "");
+      availableByProduct.set(productId, (availableByProduct.get(productId) ?? 0) + numeric(balance.available_quantity));
+      quantityOnHand += numeric(balance.quantity_on_hand);
+      stockValue += numeric(balance.total_inventory_value);
+      if (numeric(balance.available_quantity) < 0 || String(balance.reorder_status ?? "").toLowerCase() !== "healthy") {
+        stockAlerts += 1;
+      }
+    }
+    for (const product of products) {
+      if (product.active === false || product.track_inventory === false) continue;
+      const reorderLevel = numeric(product.reorder_level);
+      if (reorderLevel > 0 && (availableByProduct.get(String(product.id)) ?? 0) <= reorderLevel) {
+        stockAlerts += 1;
+      }
+    }
+
+    const workflows = (workflowResult.data ?? []) as {
+      module_name: string;
+      process_name: string;
+      document_name: string | null;
+      reference_number: string;
+      record_payload: WorkflowPayload | null;
+      created_at: string;
+    }[];
+    const todayWorkflowSales = workflows.filter((record) => {
+      const createdDate = String(record.created_at ?? "").slice(0, 10);
+      return record.module_name === "Sales" && createdDate === today;
+    });
+    if (todaySales <= 0 && todayWorkflowSales.length > 0) {
+      todaySales = todayWorkflowSales.reduce((sum, record) => sum + workflowAmount(record.record_payload), 0);
+      todayInvoiceCount = todayWorkflowSales.length;
+    }
+    grnsToday = workflows.filter((record) => record.module_name === "Purchasing" && record.process_name.includes("Goods Received") && String(record.created_at ?? "").slice(0, 10) === today).length;
+    recentActivity = workflows.slice(0, 5).map((record) => ({
+      time: new Intl.DateTimeFormat("en-KE", { dateStyle: "medium", timeStyle: "short", timeZone: "Africa/Nairobi" }).format(new Date(record.created_at)),
+      module: record.module_name,
+      title: `${record.process_name} ${record.reference_number}`,
+      quickAction: record.module_name === "Sales" ? "Open sales" : record.module_name === "Purchasing" ? "Open purchases" : "Open record",
+    }));
+  }
+
+  const attentionRows = [
+    ["Invoices", todayInvoiceCount > 0 ? `${todayInvoiceCount} invoice${todayInvoiceCount === 1 ? "" : "s"} posted today` : "No invoices posted today", todayInvoiceCount > 0 ? "Live" : "Ready", todayInvoiceCount > 0 ? "View" : "Create", "/sales"],
+    ["Stock receipts", grnsToday > 0 ? `${grnsToday} GRN${grnsToday === 1 ? "" : "s"} posted today` : "No GRNs posted today", grnsToday > 0 ? "Live" : "Ready", "Receive", "/purchases/goods-received"],
+    ["Customers", activeCustomers > 0 ? `${activeCustomers} active customer${activeCustomers === 1 ? "" : "s"}` : "Customer list is empty", activeCustomers > 0 ? "Live" : "Setup", activeCustomers > 0 ? "View" : "Add", "/customers"],
+    ["Reports", todayInvoiceCount > 0 || paymentCount > 0 ? "Daily report has live activity" : "Daily report is ready", "Download", "Export", "/api/exports?module=Reports&process=Daily%20Report&format=pdf"],
+  ];
+
+  const ownerSummary = [
+    todayInvoiceCount > 0
+      ? `${todayInvoiceCount} sale${todayInvoiceCount === 1 ? "" : "s"} posted today worth ${money(todaySales)}.`
+      : "No sale has been posted today yet.",
+    paymentCount > 0
+      ? `${money(cashCollected)} has been collected today across ${paymentCount} receipt${paymentCount === 1 ? "" : "s"}.`
+      : "No cash receipt has been posted today yet.",
+    customersOwing > 0
+      ? `${money(customersOwing)} is still owed by customers. Follow up ${overdueCustomers} open invoice${overdueCustomers === 1 ? "" : "s"}.`
+      : "Customer follow-up list is clean.",
+  ];
+
   return (
     <div className="pb-24">
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-        <DashboardTile label="Today sales" value="KES 0" caption="No sale posted yet" icon={ShoppingCart} tone="blue" />
-        <DashboardTile label="Cash collected" value="KES 0" caption="Receipts appear here" icon={Banknote} tone="green" />
-        <DashboardTile label="Customers owing" value="KES 0" caption="Follow-up list is clean" icon={CreditCard} tone="gold" />
-        <DashboardTile label="Active customers" value="0" caption="Create the first customer" icon={Users} tone="cyan" />
-        <DashboardTile label="Stock alerts" value="0" caption="Receive stock to monitor" icon={PackagePlus} tone="rose" />
+        <DashboardTile label="Today sales" value={money(todaySales)} caption={todayInvoiceCount > 0 ? `${todayInvoiceCount} posted today` : "No sale posted today"} icon={ShoppingCart} tone="blue" />
+        <DashboardTile label="Cash collected" value={money(cashCollected)} caption={paymentCount > 0 ? `${paymentCount} receipt${paymentCount === 1 ? "" : "s"} today` : "No receipt posted today"} icon={Banknote} tone="green" />
+        <DashboardTile label="Customers owing" value={money(customersOwing)} caption={customersOwing > 0 ? `${overdueCustomers} invoice${overdueCustomers === 1 ? "" : "s"} to follow up` : "Follow-up list is clean"} icon={CreditCard} tone="gold" />
+        <DashboardTile label="Active customers" value={activeCustomers.toLocaleString("en-KE")} caption={activeCustomers > 0 ? "Customer list is active" : "Create the first customer"} icon={Users} tone="cyan" />
+        <DashboardTile label="Stock alerts" value={stockAlerts.toLocaleString("en-KE")} caption={stockAlerts > 0 ? "Review reorder or negative stock" : "Stock position is clean"} icon={PackagePlus} tone="rose" />
       </section>
 
       <PageHero
@@ -201,9 +358,9 @@ export default async function DashboardPage() {
               </div>
             </div>
             <div className="grid gap-4">
-              <ProgressRow label="Invoices ready" value={0} amount="0" />
-              <ProgressRow label="Payments received" value={0} amount="KES 0" />
-              <ProgressRow label="Orders to deliver" value={0} amount="0" />
+              <ProgressRow label="Invoices posted today" value={todayInvoiceCount} amount={money(todaySales)} />
+              <ProgressRow label="Payments received" value={paymentCount} amount={money(cashCollected)} />
+              <ProgressRow label="Open customer balances" value={overdueCustomers} amount={money(customersOwing)} />
             </div>
           </div>
         </DashboardPanel>
@@ -214,10 +371,10 @@ export default async function DashboardPage() {
         >
           <div className="grid gap-3">
             {[
-              ["Products in catalogue", "0", "Add products before selling or buying."],
-              ["Quantity on hand", "0", "Opening stock and receipts update this."],
-              ["Low-stock items", "0", "Reorder warnings will appear here."],
-              ["Stock value", "KES 0", "Valuation starts after stock is received."],
+              ["Products in catalogue", productsInCatalogue.toLocaleString("en-KE"), productsInCatalogue > 0 ? "Products are ready for purchasing and sales." : "Add products before selling or buying."],
+              ["Quantity on hand", quantityOnHand.toLocaleString("en-KE", { maximumFractionDigits: 2 }), quantityOnHand > 0 ? "Opening stock and receipts are feeding this." : "Opening stock and receipts update this."],
+              ["Low-stock items", stockAlerts.toLocaleString("en-KE"), stockAlerts > 0 ? "Some items need reorder attention." : "Reorder warnings will appear here."],
+              ["Stock value", money(stockValue), stockValue > 0 ? "Based on current stock valuation." : "Valuation starts after stock is received."],
             ].map(([label, value, description]) => (
               <div key={label} className="grid grid-cols-[1fr_auto] gap-4 rounded-md border border-slate-200 px-3 py-3">
                 <span>
@@ -271,9 +428,9 @@ export default async function DashboardPage() {
       </section>
 
       <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Money collected today" value="KES 0.00" story="No receipts yet. Record the first payment when money lands." />
-        <MetricCard label="Money customers owe you" value="KES 0.00" story="This stays clean until invoices are posted." />
-        <MetricCard label="Stock value" value="KES 0.00" story="Receive stock to begin tracking value and reorder needs." />
+        <MetricCard label="Money collected today" value={money(cashCollected)} story={paymentCount > 0 ? "Updated from posted customer receipts." : "No receipts yet. Record the first payment when money lands."} />
+        <MetricCard label="Money customers owe you" value={money(customersOwing)} story={customersOwing > 0 ? "Updated from open invoice balances." : "This stays clean until invoices are posted."} />
+        <MetricCard label="Stock value" value={money(stockValue)} story={stockValue > 0 ? "Updated from current stock balances." : "Receive stock to begin tracking value and reorder needs."} />
         <MetricCard label="Tax status" value="No open filing" story="VAT reminders will appear before due dates." tone="good" />
       </section>
 
@@ -322,7 +479,7 @@ export default async function DashboardPage() {
           <h2 className="font-semibold">Recent Activity</h2>
           <p className="mt-2 text-sm text-slate-600">The latest sales, payments, stock moves and tax events will appear here.</p>
           <div className="mt-4 overflow-hidden rounded-md border border-slate-200">
-            {timelineFoundation.slice(0, 5).map((event) => (
+            {(recentActivity.length > 0 ? recentActivity : timelineFoundation.slice(0, 5)).map((event) => (
               <div key={`${event.module}-${event.title}`} className="grid gap-2 border-b border-slate-200 px-3 py-3 text-sm last:border-b-0 md:grid-cols-[1fr_1fr_1.4fr_1fr]">
                 <span className="font-semibold">{event.time}</span>
                 <span>{event.module}</span>
