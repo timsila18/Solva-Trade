@@ -67,14 +67,15 @@ export async function POST(request: NextRequest) {
     return errorResponse(request, payload.wantsJson, "We could not sign you in. Check your email and password.");
   }
 
+  const { data: userData } = await supabase.auth.getUser();
   const { data: memberships } = await supabase
     .from("business_memberships")
     .select("business_id")
+    .eq("user_id", userData.user?.id ?? "")
     .eq("active", true)
     .limit(1);
   const membership = memberships?.[0];
   if (!membership?.business_id) {
-    const { data: userData } = await supabase.auth.getUser();
     if (userData.user && platformRoles.has(String(userData.user.app_metadata?.platform_role ?? ""))) {
       return successResponse(request, payload.wantsJson, "/dashboard");
     }

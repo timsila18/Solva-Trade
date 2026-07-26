@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import fs from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
+import { getActiveBusinessId } from "@/lib/tenant";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -756,17 +757,42 @@ async function activeReportBusinessId() {
   const { data } = await supabase.auth.getUser();
   const user = data.user;
   if (!user) return null;
+  const preferredBusinessId = await getActiveBusinessId();
+  const metadataBusinessId = typeof user.app_metadata?.active_business_id === "string" ? user.app_metadata.active_business_id : null;
 
-  const { data: membership } = await supabase
-    .from("business_memberships")
-    .select("business_id")
-    .eq("user_id", user.id)
-    .eq("active", true)
-    .order("joined_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
+  const membershipQuery = (db: Awaited<ReturnType<typeof createSupabaseServerClient>> | ReturnType<typeof createSupabaseAdminClient>) => {
+    let query = db
+      .from("business_memberships")
+      .select("business_id")
+      .eq("user_id", user.id)
+      .eq("active", true);
+    if (preferredBusinessId) query = query.eq("business_id", preferredBusinessId);
+    return query.order("joined_at", { ascending: true }).limit(1).maybeSingle();
+  };
 
-  return membership?.business_id ?? (typeof user.app_metadata?.active_business_id === "string" ? user.app_metadata.active_business_id : null);
+  let membership: { business_id: string | null } | null = null;
+  try {
+    const admin = createSupabaseAdminClient();
+    const { data: adminMembership } = await membershipQuery(admin);
+    membership = adminMembership;
+  } catch {
+    const { data: userMembership } = await membershipQuery(supabase);
+    membership = userMembership;
+  }
+
+  if (!membership?.business_id && preferredBusinessId) {
+    const { data: fallbackMembership } = await supabase
+      .from("business_memberships")
+      .select("business_id")
+      .eq("user_id", user.id)
+      .eq("active", true)
+      .order("joined_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    membership = fallbackMembership;
+  }
+
+  return membership?.business_id ?? metadataBusinessId;
 }
 
 async function purchaseSourceReportLines(processName: string): Promise<ReportLine[]> {
@@ -2107,19 +2133,44 @@ async function tenantContext() {
         ? user.user_metadata.full_name
         : user.email?.split("@")[0] ?? fallback.generatedBy;
     const metadataBusinessId = typeof user.app_metadata?.active_business_id === "string" ? user.app_metadata.active_business_id : null;
+    const preferredBusinessId = await getActiveBusinessId();
     const metadataBusinessName = typeof user.app_metadata?.business_name === "string" ? user.app_metadata.business_name : fallback.businessName;
     const metadataKraPin = typeof user.app_metadata?.business_kra_pin === "string" ? user.app_metadata.business_kra_pin : "";
     const metadataPhone = typeof user.app_metadata?.business_phone === "string" ? user.app_metadata.business_phone : "";
     const metadataEmail = typeof user.app_metadata?.business_email === "string" ? user.app_metadata.business_email : "";
     const metadataLocation = typeof user.app_metadata?.business_location === "string" ? user.app_metadata.business_location : fallback.businessLocation;
-    const { data: membership } = await supabase
-      .from("business_memberships")
-      .select("business_id, role")
-      .eq("user_id", user.id)
-      .eq("active", true)
-      .order("joined_at", { ascending: true })
-      .limit(1)
-      .maybeSingle();
+    const membershipQuery = (db: Awaited<ReturnType<typeof createSupabaseServerClient>> | ReturnType<typeof createSupabaseAdminClient>) => {
+      let query = db
+        .from("business_memberships")
+        .select("business_id, role")
+        .eq("user_id", user.id)
+        .eq("active", true);
+      if (preferredBusinessId) query = query.eq("business_id", preferredBusinessId);
+      return query.order("joined_at", { ascending: true }).limit(1).maybeSingle();
+    };
+
+    let membership: { business_id: string | null; role: string | null } | null = null;
+    try {
+      const admin = createSupabaseAdminClient();
+      const { data } = await membershipQuery(admin);
+      membership = data;
+    } catch {
+      const { data } = await membershipQuery(supabase);
+      membership = data;
+    }
+
+    if (!membership?.business_id && preferredBusinessId) {
+      const { data } = await supabase
+        .from("business_memberships")
+        .select("business_id, role")
+        .eq("user_id", user.id)
+        .eq("active", true)
+        .order("joined_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      membership = data;
+    }
+
     const businessId = membership?.business_id ?? metadataBusinessId;
     const generatedByRole = String(membership?.role ?? user.app_metadata?.business_role ?? fallback.generatedByRole);
     const metadataTenant = {

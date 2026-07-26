@@ -87,6 +87,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
     const { data: membershipData } = await supabase
       .from("business_memberships")
       .select("business_id, role, permission_overrides, branch_access_mode, default_branch_id, branch_ids")
+      .eq("user_id", user.id)
       .eq("active", true)
       .limit(1)
       .maybeSingle();
