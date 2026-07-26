@@ -1000,6 +1000,98 @@ async function createProductRecord(formData: FormData, userId: string, fallbackB
   }
 }
 
+async function updateProductRecord(formData: FormData, userId: string, fallbackBusinessId?: string | null) {
+  const productId = safeText(formData.get("recordId"), "");
+  if (!productId) throw new Error("Open a product before editing it.");
+
+  const admin = await createSupabaseServerClient();
+  const { businessId } = await getWorkspaceContextForClient(admin, userId, fallbackBusinessId);
+  const { data: existing } = await admin
+    .from("products")
+    .select("id, product_code")
+    .eq("business_id", businessId)
+    .eq("id", productId)
+    .maybeSingle();
+  if (!existing?.id) throw new Error("That product was not found in this business.");
+
+  const name = getField(formData, "product_name");
+  if (!name) throw new Error("Enter the product name.");
+
+  const productType = productTypeValue(getField(formData, "product_type"));
+  const categoryId = await findOrCreateCategoryId(admin, businessId, userId, getField(formData, "category"));
+  const brandId = await findOrCreateBrandId(admin, businessId, userId, getField(formData, "brand"), getField(formData, "manufacturer"));
+  const baseUnitId = await findUnitId(admin, businessId, getField(formData, "base_stock_unit"));
+  const purchaseUnitId = await findUnitId(admin, businessId, getField(formData, "purchase_unit"));
+  const sellingUnitId = await findUnitId(admin, businessId, getField(formData, "selling_unit"));
+  const tracksStock = !["service", "non_stock_item", "expense_item"].includes(productType) && getBoolean(formData, "track_inventory");
+
+  const { error: productError } = await admin
+    .from("products")
+    .update({
+      product_name: name,
+      short_name: getField(formData, "short_name") || null,
+      product_code: getField(formData, "product_code") || existing.product_code,
+      sku: getField(formData, "sku") || null,
+      barcode: getField(formData, "barcode") || null,
+      description: getField(formData, "description") || null,
+      category_id: categoryId,
+      brand_id: brandId,
+      manufacturer: getField(formData, "manufacturer") || null,
+      base_unit_id: baseUnitId,
+      purchase_unit_id: purchaseUnitId,
+      selling_unit_id: sellingUnitId,
+      product_type: productType,
+      track_inventory: tracksStock,
+      track_batches: getBoolean(formData, "track_batches"),
+      track_expiry: getBoolean(formData, "track_expiry"),
+      track_serial_numbers: getBoolean(formData, "track_serial_numbers"),
+      track_returnable_packaging: getBoolean(formData, "track_returnable_packaging"),
+      vat_status: getField(formData, "vat_treatment") || "VAT_STD",
+      standard_cost: getNumber(formData, "standard_cost") || null,
+      default_selling_price_placeholder: getNumber(formData, "selling_price_placeholder"),
+      minimum_selling_price: getNumber(formData, "minimum_selling_price") || null,
+      reorder_level: getNumber(formData, "reorder_level"),
+      reorder_quantity: getNumber(formData, "reorder_quantity"),
+      maximum_stock_level: getNumber(formData, "maximum_stock_level") || null,
+      lead_time_days: getNumber(formData, "lead_time_days") || null,
+      shelf_life_days: getNumber(formData, "shelf_life_days") || null,
+      weight: getNumber(formData, "weight") || null,
+      volume: getNumber(formData, "volume") || null,
+      image_path: getField(formData, "product_image_url") || null,
+      active: getField(formData, "product_status") !== "Inactive",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("business_id", businessId)
+    .eq("id", productId);
+  if (productError) throw new Error(productError.message);
+
+  await admin
+    .from("product_pack_units")
+    .delete()
+    .eq("business_id", businessId)
+    .eq("product_id", productId)
+    .eq("default_purchase_unit", true);
+
+  const packFactor = getNumber(formData, "units_per_purchase_pack");
+  if (purchaseUnitId && baseUnitId && packFactor > 0 && purchaseUnitId !== baseUnitId) {
+    const { error: packError } = await admin.from("product_pack_units").insert({
+      business_id: businessId,
+      product_id: productId,
+      from_unit_id: purchaseUnitId,
+      to_unit_id: baseUnitId,
+      conversion_factor: packFactor,
+      purchase_enabled: true,
+      sales_enabled: false,
+      barcode: getField(formData, "pack_barcode") || null,
+      sku: getField(formData, "pack_sku") || null,
+      default_purchase_unit: true,
+      default_sales_unit: false,
+      created_by: userId,
+    });
+    if (packError) throw new Error(packError.message);
+  }
+}
+
 export async function completeProcessAction(formData: FormData) {
   const moduleName = safeText(formData.get("module"), "Solva Trade");
   const processName = safeText(formData.get("process"), "Business process");
@@ -1044,6 +1136,9 @@ export async function completeProcessAction(formData: FormData) {
       }
       if (moduleName === "Inventory" && processName === "New Product") {
         await createProductRecord(formData, user.id, businessId);
+      }
+      if (moduleName === "Inventory" && processName === "Edit Product") {
+        await updateProductRecord(formData, user.id, businessId);
       }
       if (moduleName === "Cash and Bank") {
         await postFinanceWorkflow(formData, user.id, businessId);

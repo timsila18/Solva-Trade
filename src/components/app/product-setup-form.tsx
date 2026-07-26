@@ -18,6 +18,7 @@ function TextInput({
   placeholder,
   min,
   step,
+  defaultValue,
 }: {
   label: string;
   type?: "text" | "number" | "date" | "url";
@@ -25,6 +26,7 @@ function TextInput({
   placeholder?: string;
   min?: string;
   step?: string;
+  defaultValue?: string | number | null;
 }) {
   const key = fieldKey(label);
   return (
@@ -39,12 +41,13 @@ function TextInput({
         step={step}
         className="mt-2 min-h-11 w-full rounded-md border border-slate-300 px-3 py-2"
         placeholder={placeholder ?? label}
+        defaultValue={defaultValue ?? undefined}
       />
     </label>
   );
 }
 
-function SelectInput({ label, options, defaultValue }: { label: string; options: string[]; defaultValue?: string }) {
+function SelectInput({ label, options, defaultValue }: { label: string; options: string[]; defaultValue?: string | null }) {
   const key = fieldKey(label);
   return (
     <label className="text-sm font-medium">
@@ -81,42 +84,98 @@ function OptionalSection({ title, children }: { title: string; children: React.R
   );
 }
 
-export function ProductSetupForm() {
+export type ProductSetupDefaults = Partial<Record<
+  | "id"
+  | "product_name"
+  | "brand"
+  | "category"
+  | "product_type"
+  | "base_stock_unit"
+  | "barcode"
+  | "selling_price_placeholder"
+  | "vat_treatment"
+  | "purchase_unit"
+  | "selling_unit"
+  | "units_per_purchase_pack"
+  | "pack_barcode"
+  | "pack_sku"
+  | "standard_cost"
+  | "minimum_selling_price"
+  | "reorder_level"
+  | "reorder_quantity"
+  | "maximum_stock_level"
+  | "lead_time_days"
+  | "track_batches"
+  | "track_expiry"
+  | "track_serial_numbers"
+  | "track_returnable_packaging"
+  | "shelf_life_days"
+  | "manufacturer"
+  | "product_code"
+  | "sku"
+  | "short_name"
+  | "description"
+  | "product_image_url"
+  | "weight"
+  | "volume"
+  | "product_status",
+  string | number | boolean | null
+>>;
+
+function value(defaults: ProductSetupDefaults, key: keyof ProductSetupDefaults) {
+  const item = defaults[key];
+  if (typeof item === "boolean") return item ? "yes" : "";
+  return item ?? "";
+}
+
+function checked(defaults: ProductSetupDefaults, key: keyof ProductSetupDefaults) {
+  return defaults[key] === true || defaults[key] === "yes";
+}
+
+export function ProductSetupForm({
+  mode = "create",
+  defaults = {},
+}: {
+  mode?: "create" | "edit";
+  defaults?: ProductSetupDefaults;
+}) {
+  const isEdit = mode === "edit";
   return (
     <div className="mt-6 grid gap-6 xl:grid-cols-[1fr_320px]">
       <form action={completeProcessAction} className="rounded-lg border border-slate-200 bg-white p-5">
         <input type="hidden" name="module" value="Inventory" />
-        <input type="hidden" name="process" value="New Product" />
-        <input type="hidden" name="intent" value="Product saved" />
-        <input type="hidden" name="returnTo" value="/inventory/products/new" />
-        <input type="hidden" name="next" value="Add another product" />
+        <input type="hidden" name="process" value={isEdit ? "Edit Product" : "New Product"} />
+        <input type="hidden" name="intent" value={isEdit ? "Product updated" : "Product saved"} />
+        <input type="hidden" name="returnTo" value={isEdit ? `/inventory/products/${defaults.id}/edit` : "/inventory/products/new"} />
+        <input type="hidden" name="next" value={isEdit ? "Back to products" : "Add another product"} />
+        {isEdit ? <input type="hidden" name="recordId" value={String(defaults.id ?? "")} /> : null}
         <input type="hidden" name="field_track_inventory" value="yes" />
         <input type="hidden" name="label_track_inventory" value="Track inventory" />
 
         <div className="flex flex-col justify-between gap-3 border-b border-slate-100 pb-4 md:flex-row md:items-start">
           <div>
             <p className="text-sm font-semibold text-emerald-700">Quick product setup</p>
-            <h2 className="mt-1 text-xl font-semibold">Add the product and start selling</h2>
-            <p className="mt-1 text-sm text-slate-600">Fill the essentials. Open advanced details only when the item needs them.</p>
+            <h2 className="mt-1 text-xl font-semibold">{isEdit ? "Edit product details" : "Add the product and start selling"}</h2>
+            <p className="mt-1 text-sm text-slate-600">{isEdit ? "Update the details that affect sales, purchase receipts, stock alerts and reports." : "Fill the essentials. Open advanced details only when the item needs them."}</p>
           </div>
-          <button className="rounded-md bg-emerald-700 px-5 py-3 text-sm font-semibold text-white">Save product</button>
+          <button className="rounded-md bg-emerald-700 px-5 py-3 text-sm font-semibold text-white">{isEdit ? "Update product" : "Save product"}</button>
         </div>
 
         <section className="mt-5">
           <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-500">Essentials</h3>
           <div className="mt-3 grid gap-4 md:grid-cols-2">
-            <TextInput label="Product name" required placeholder="Example: Predator 500ml" />
-            <TextInput label="Brand" placeholder="Example: Coca-Cola, Aquamist, Predator" />
-            <TextInput label="Category" placeholder="Example: Soft drinks, Water, Energy drinks" />
-            <SelectInput label="Product type" options={productTypes} defaultValue="Stock Item" />
-            <SelectInput label="Base stock unit" options={["Piece", "Bottle", "Can", "Crate", "Case", "Carton", "Kilogram", "Litre", "Service", "Other"]} defaultValue="Bottle" />
-            <TextInput label="Barcode" />
-            <TextInput label="Selling price placeholder" type="number" min="0" step="0.01" placeholder="Selling price" />
-            <SelectInput label="VAT treatment" options={["VAT_STD", "VAT_ZERO", "VAT_EXEMPT", "VAT_OUT_OF_SCOPE"]} defaultValue="VAT_STD" />
+            <TextInput label="Product name" required placeholder="Example: Predator 500ml" defaultValue={value(defaults, "product_name")} />
+            <TextInput label="Brand" placeholder="Example: Coca-Cola, Aquamist, Predator" defaultValue={value(defaults, "brand")} />
+            <TextInput label="Category" placeholder="Example: Soft drinks, Water, Energy drinks" defaultValue={value(defaults, "category")} />
+            <SelectInput label="Product type" options={productTypes} defaultValue={String(value(defaults, "product_type") || "Stock Item")} />
+            <SelectInput label="Base stock unit" options={["Piece", "Bottle", "Can", "Crate", "Case", "Carton", "Kilogram", "Litre", "Service", "Other"]} defaultValue={String(value(defaults, "base_stock_unit") || "Bottle")} />
+            <TextInput label="Barcode" defaultValue={value(defaults, "barcode")} />
+            <TextInput label="Selling price placeholder" type="number" min="0" step="0.01" placeholder="Selling price" defaultValue={value(defaults, "selling_price_placeholder")} />
+            <SelectInput label="VAT treatment" options={["VAT_STD", "VAT_ZERO", "VAT_EXEMPT", "VAT_OUT_OF_SCOPE"]} defaultValue={String(value(defaults, "vat_treatment") || "VAT_STD")} />
           </div>
         </section>
 
-        <section className="mt-6 rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+        {!isEdit ? <section className="mt-6 rounded-lg border border-emerald-200 bg-emerald-50 p-4">
           <h3 className="font-semibold text-slate-950">Opening stock, optional</h3>
           <p className="mt-1 text-sm text-slate-600">Use this when the goods are already in the shop or warehouse now.</p>
           <div className="mt-4 grid gap-4 md:grid-cols-3">
@@ -124,46 +183,46 @@ export function ProductSetupForm() {
             <TextInput label="Opening stock quantity" type="number" min="0" step="0.01" />
             <TextInput label="Opening stock unit cost" type="number" min="0" step="0.01" />
           </div>
-        </section>
+        </section> : null}
 
         <div className="mt-6 space-y-3">
           <OptionalSection title="Packaging and units">
-            <SelectInput label="Purchase unit" options={["Piece", "Bottle", "Can", "Crate", "Case", "Carton", "Kilogram", "Litre", "Service", "Other"]} defaultValue="Crate" />
-            <SelectInput label="Selling unit" options={["Piece", "Bottle", "Can", "Crate", "Case", "Carton", "Kilogram", "Litre", "Service", "Other"]} defaultValue="Bottle" />
-            <TextInput label="Units per purchase pack" type="number" min="0" step="0.01" placeholder="Example: 24" />
-            <TextInput label="Pack barcode" />
-            <TextInput label="Pack SKU" />
+            <SelectInput label="Purchase unit" options={["Piece", "Bottle", "Can", "Crate", "Case", "Carton", "Kilogram", "Litre", "Service", "Other"]} defaultValue={String(value(defaults, "purchase_unit") || "Crate")} />
+            <SelectInput label="Selling unit" options={["Piece", "Bottle", "Can", "Crate", "Case", "Carton", "Kilogram", "Litre", "Service", "Other"]} defaultValue={String(value(defaults, "selling_unit") || "Bottle")} />
+            <TextInput label="Units per purchase pack" type="number" min="0" step="0.01" placeholder="Example: 24" defaultValue={value(defaults, "units_per_purchase_pack")} />
+            <TextInput label="Pack barcode" defaultValue={value(defaults, "pack_barcode")} />
+            <TextInput label="Pack SKU" defaultValue={value(defaults, "pack_sku")} />
           </OptionalSection>
 
           <OptionalSection title="Pricing and reorder controls">
-            <TextInput label="Standard cost" type="number" min="0" step="0.01" />
-            <TextInput label="Minimum selling price" type="number" min="0" step="0.01" />
-            <TextInput label="Reorder level" type="number" min="0" step="0.01" />
-            <TextInput label="Reorder quantity" type="number" min="0" step="0.01" />
-            <TextInput label="Maximum stock level" type="number" min="0" step="0.01" />
-            <TextInput label="Lead time days" type="number" min="0" step="1" />
+            <TextInput label="Standard cost" type="number" min="0" step="0.01" defaultValue={value(defaults, "standard_cost")} />
+            <TextInput label="Minimum selling price" type="number" min="0" step="0.01" defaultValue={value(defaults, "minimum_selling_price")} />
+            <TextInput label="Reorder level" type="number" min="0" step="0.01" defaultValue={value(defaults, "reorder_level")} />
+            <TextInput label="Reorder quantity" type="number" min="0" step="0.01" defaultValue={value(defaults, "reorder_quantity")} />
+            <TextInput label="Maximum stock level" type="number" min="0" step="0.01" defaultValue={value(defaults, "maximum_stock_level")} />
+            <TextInput label="Lead time days" type="number" min="0" step="1" defaultValue={value(defaults, "lead_time_days")} />
           </OptionalSection>
 
           <OptionalSection title="Tracking, expiry and advanced details">
-            <CheckboxInput label="Track batches" />
-            <CheckboxInput label="Track expiry" />
-            <CheckboxInput label="Track serial numbers" />
-            <CheckboxInput label="Track returnable packaging" />
-            <TextInput label="Shelf life days" type="number" min="0" step="1" />
-            <TextInput label="Manufacturer" />
-            <TextInput label="Product code" />
-            <TextInput label="SKU" />
-            <TextInput label="Short name" />
-            <TextInput label="Description" />
-            <TextInput label="Product image URL" type="url" placeholder="https://..." />
-            <TextInput label="Weight" type="number" min="0" step="0.001" />
-            <TextInput label="Volume" type="number" min="0" step="0.001" />
-            <SelectInput label="Product status" options={["Active", "Inactive"]} defaultValue="Active" />
+            <CheckboxInput label="Track batches" defaultChecked={checked(defaults, "track_batches")} />
+            <CheckboxInput label="Track expiry" defaultChecked={checked(defaults, "track_expiry")} />
+            <CheckboxInput label="Track serial numbers" defaultChecked={checked(defaults, "track_serial_numbers")} />
+            <CheckboxInput label="Track returnable packaging" defaultChecked={checked(defaults, "track_returnable_packaging")} />
+            <TextInput label="Shelf life days" type="number" min="0" step="1" defaultValue={value(defaults, "shelf_life_days")} />
+            <TextInput label="Manufacturer" defaultValue={value(defaults, "manufacturer")} />
+            <TextInput label="Product code" defaultValue={value(defaults, "product_code")} />
+            <TextInput label="SKU" defaultValue={value(defaults, "sku")} />
+            <TextInput label="Short name" defaultValue={value(defaults, "short_name")} />
+            <TextInput label="Description" defaultValue={value(defaults, "description")} />
+            <TextInput label="Product image URL" type="url" placeholder="https://..." defaultValue={value(defaults, "product_image_url")} />
+            <TextInput label="Weight" type="number" min="0" step="0.001" defaultValue={value(defaults, "weight")} />
+            <TextInput label="Volume" type="number" min="0" step="0.001" defaultValue={value(defaults, "volume")} />
+            <SelectInput label="Product status" options={["Active", "Inactive"]} defaultValue={String(value(defaults, "product_status") || "Active")} />
           </OptionalSection>
         </div>
 
         <div className="mt-6 flex flex-wrap justify-end gap-3 border-t border-slate-100 pt-4">
-          <button className="rounded-md bg-emerald-700 px-5 py-3 text-sm font-semibold text-white">Save product</button>
+          <button className="rounded-md bg-emerald-700 px-5 py-3 text-sm font-semibold text-white">{isEdit ? "Update product" : "Save product"}</button>
         </div>
       </form>
 
