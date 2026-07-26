@@ -336,8 +336,8 @@ async function postSalesInvoice(formData: FormData, userId: string, fallbackBusi
     if (allocationError) throw new Error(allocationError.message);
   }
 
-  const paymentNumber = paid > 0 ? await postCustomerPayment(formData, userId, fallbackBusinessId, invoice.id, paid) : null;
-  return { invoiceNumber, paymentNumber };
+  const payment = paid > 0 ? await postCustomerPayment(formData, userId, fallbackBusinessId, invoice.id, paid) : null;
+  return { invoiceNumber, paymentNumber: payment?.paymentNumber ?? null };
 }
 
 async function postCustomerPayment(
@@ -422,7 +422,14 @@ async function postCustomerPayment(
     })
     .eq("id", invoiceId);
 
-  return paymentNumber;
+  return {
+    paymentNumber,
+    amountReceived: amount,
+    amountPaid: nextPaid,
+    balanceDue: nextBalance,
+    totalAmount: Number(invoice.total_amount ?? 0),
+    paymentDate,
+  };
 }
 
 async function postGoodsReceived(formData: FormData, userId: string, fallbackBusinessId?: string | null) {
@@ -1244,9 +1251,16 @@ export async function completeProcessAction(formData: FormData) {
         appendGeneratedDocumentField(params, "receipt_number", "Receipt number", result.paymentNumber ?? result.invoiceNumber);
       }
       if (intent.toLowerCase().includes("submit") && moduleName === "Sales" && processName === "Customer Payments") {
-        generatedReference = await postCustomerPayment(formData, user.id, businessId);
+        const result = await postCustomerPayment(formData, user.id, businessId);
+        generatedReference = result.paymentNumber;
         appendGeneratedDocumentField(params, "payment_number", "Payment number", generatedReference);
         appendGeneratedDocumentField(params, "receipt_number", "Receipt number", generatedReference);
+        appendGeneratedDocumentField(params, "amount_received", "Amount received", result.amountReceived.toFixed(2));
+        appendGeneratedDocumentField(params, "amount_paid", "Amount paid", result.amountPaid.toFixed(2));
+        appendGeneratedDocumentField(params, "total", "Total", result.totalAmount.toFixed(2));
+        appendGeneratedDocumentField(params, "balance_due", "Balance due", result.balanceDue.toFixed(2));
+        appendGeneratedDocumentField(params, "payment_status", "Payment status", result.balanceDue <= 0 ? "Paid" : "Part paid");
+        appendGeneratedDocumentField(params, "payment_date", "Payment date", result.paymentDate);
       }
       if (moduleName === "Purchasing" && processName === "Goods Received Notes" && intent.toLowerCase().includes("posted")) {
         const result = await postGoodsReceived(formData, user.id, businessId);

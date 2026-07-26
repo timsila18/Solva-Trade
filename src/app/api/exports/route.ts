@@ -222,6 +222,24 @@ function fieldValue(fields: Record<string, { label: string; value: string }>, ke
   return fallback;
 }
 
+function amountFromTotals(totals: Record<string, string>, label: string) {
+  return parseAmount(totals[label] ?? null);
+}
+
+function receiptPaymentStatus(report: Report) {
+  const explicit = String(report.transaction["Payment status"] ?? "").trim();
+  const total = amountFromTotals(report.totals, "Total");
+  const paid = amountFromTotals(report.totals, "Amount paid");
+  const balance = amountFromTotals(report.totals, "Balance due");
+  if (balance <= 0 && (paid > 0 || total > 0 || explicit.toLowerCase() === "paid")) {
+    return { label: "PAID", detail: "Payment confirmed and allocated", tone: "paid" };
+  }
+  if (paid > 0 || explicit.toLowerCase().includes("part")) {
+    return { label: "PART PAID", detail: `Balance remaining ${money(balance)}`, tone: "partial" };
+  }
+  return { label: "UNPAID", detail: `Balance due ${money(balance || total)}`, tone: "unpaid" };
+}
+
 function reportLineFromFields(fields: Record<string, { label: string; value: string }>): ReportLine[] {
   if (Object.keys(fields).length === 0) return [];
   const productName = fieldValue(fields, ["product_name", "product", "item", "sku"], "Entered item");
@@ -2439,7 +2457,8 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
     (isValuationReport ? lineValueTotal : parseAmount(fieldValue(fields, ["total", "amount", "amount_received", "amount_sent"], "0"))) ||
     lineValueTotal ||
     Math.max(0, subtotal - discount + tax);
-  const balanceDue = parseAmount(fieldValue(fields, ["balance_due", "outstanding_amount"], "0")) || total;
+  const balanceDueField = fieldValue(fields, ["balance_due", "outstanding_amount"], "");
+  const balanceDue = balanceDueField ? parseAmount(balanceDueField) : total;
   const reference =
     fieldValue(fields, [
       "invoice_number",
@@ -2520,6 +2539,7 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
       Discount: money(discount),
       Tax: money(tax),
       Total: money(total),
+      "Amount paid": money(parseAmount(fieldValue(fields, ["amount_paid", "amount_received", "paid"], "0"))),
       "Balance due": money(balanceDue),
     },
     approvals: approvalSummary(generatedBy, tenant.generatedByRole),
@@ -2854,17 +2874,22 @@ function templateIntro(report: Report) {
   const blueprint = blueprintFor(report);
   const template = templateFor(report);
   if (blueprint.emphasis === "receipt") {
+    const status = receiptPaymentStatus(report);
     return `
       <section class="receipt-confirmation">
         <div>
           <p class="overline">Amount received</p>
-          <strong>${htmlEscape(report.totals.Total)}</strong>
+          <strong>${htmlEscape(report.totals["Amount paid"] ?? report.totals.Total)}</strong>
           <span>${htmlEscape(blueprint.footerNote)}</span>
         </div>
         <div class="receipt-number">
           <span>Receipt No.</span>
           <strong>${htmlEscape(report.transaction["Reference number"])}</strong>
         </div>
+      </section>
+      <section class="receipt-status ${status.tone}">
+        <strong>${htmlEscape(status.label)}</strong>
+        <span>${htmlEscape(status.detail)}</span>
       </section>
       ${introCards(report, "two-column")}
     `;
@@ -2912,7 +2937,8 @@ function templateOutro(report: Report) {
   const blueprint = blueprintFor(report);
   const template = templateFor(report);
   if (blueprint.emphasis === "receipt") {
-    return `<section class="receipt-slip"><div><strong>Sales Receipt Slip</strong><span>${htmlEscape(report.partyName)}</span></div><div><strong>Amount Received</strong><span>${htmlEscape(report.totals.Total)}</span></div></section>`;
+    const status = receiptPaymentStatus(report);
+    return `<section class="receipt-slip"><div><strong>Sales Receipt Slip</strong><span>${htmlEscape(report.partyName)}</span></div><div><strong>${htmlEscape(status.label)}</strong><span>${htmlEscape(report.totals["Amount paid"] ?? report.totals.Total)}</span></div></section>`;
   }
   if (template === "purchaseOrder") {
     return `<section class="terms"><h3>Terms and Conditions</h3><ol><li>Quote this purchase order number on delivery notes and invoices.</li><li>Deliver only approved quantities and product specifications.</li><li>Price, tax and delivery variances require written approval.</li></ol></section>`;
@@ -2990,6 +3016,15 @@ function htmlDocument(report: Report, print = false) {
     .receipt-confirmation strong { display: block; margin-top: 4px; color: white; font-size: 28px; }
     .receipt-confirmation span, .overline { color: #dbeafe; font-size: 12px; }
     .receipt-number { border-left: 1px solid rgba(255,255,255,.25); padding-left: 18px; }
+    .receipt-status { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin: -6px 0 18px; border: 2px solid ${brand.border}; border-radius: 10px; background: white; padding: 14px 18px; }
+    .receipt-status strong { color: ${brand.navy}; font-size: 30px; font-weight: 900; letter-spacing: .08em; }
+    .receipt-status span { color: ${brand.slate}; font-size: 12px; font-weight: 700; }
+    .receipt-status.paid { border-color: #10b981; background: #ecfdf5; }
+    .receipt-status.paid strong { color: #047857; }
+    .receipt-status.partial { border-color: #f59e0b; background: #fffbeb; }
+    .receipt-status.partial strong { color: #b45309; }
+    .receipt-status.unpaid { border-color: #fb7185; background: #fff1f2; }
+    .receipt-status.unpaid strong { color: #be123c; }
     .statement-summary, .report-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 18px; }
     .report-kpis { grid-template-columns: repeat(3, 1fr); }
     .statement-summary div, .report-kpis div { border-radius: 8px; background: var(--doc-soft); padding: 13px; }
@@ -3481,14 +3516,18 @@ async function pdf(report: Report) {
   }
 
   let tableStart = 572;
-  if (template === "salesReceipt" && !shouldShowPaymentInstructions(report)) {
+  if (template === "salesReceipt") {
+    const status = receiptPaymentStatus(report);
     canvas.rect(48, 634, 516, 66, "navy");
     canvas.text("AMOUNT RECEIVED", 66, 674, 9, "cyan", true);
-    canvas.text(report.totals.Total, 66, 650, 24, "white", true);
+    canvas.text(report.totals["Amount paid"] ?? report.totals.Total, 66, 650, 24, "white", true);
     canvas.text(`Receipt No. ${report.transaction["Reference number"]}`, 374, 666, 10, "white", true);
     canvas.text(`Received from ${report.partyName}`, 374, 648, 8.5, "white");
-    canvas.text("PAYMENT LINE ITEMS", 48, 604, 11, "blue", true);
-    tableStart = 582;
+    canvas.rect(48, 594, 516, 28, status.tone === "paid" ? "soft" : "surface");
+    canvas.text(status.label, 66, 604, 17, status.tone === "paid" ? "blue" : "navy", true);
+    canvas.wrap(status.detail, 202, 606, 330, 8, "slate", true);
+    canvas.text("PAYMENT LINE ITEMS", 48, 572, 11, "blue", true);
+    tableStart = 550;
   } else if (template === "grn") {
     canvas.rect(48, 628, 250, 72, "soft");
     canvas.rect(314, 628, 250, 72, "soft");
@@ -3583,9 +3622,11 @@ async function pdf(report: Report) {
     canvas.wrap(signatureLabels[index] ?? "Approved by", x + 16, 82, 104, 8, "slate");
   });
   if (template === "salesReceipt") {
+    const status = receiptPaymentStatus(report);
     canvas.rect(48, 116, 516, 30, "soft");
     canvas.text("SALES RECEIPT SLIP", 62, 130, 8, "blue", true);
-    canvas.text(`Amount received: ${report.totals.Total}`, 394, 130, 8, "navy", true);
+    canvas.text(status.label, 258, 130, 11, "blue", true);
+    canvas.text(`Amount received: ${report.totals["Amount paid"] ?? report.totals.Total}`, 394, 130, 8, "navy", true);
   }
   canvas.line(48, 58, 564, 58, "border");
   canvas.wrap(`${report.businessName} document generated by Solva Trade. ${style.footerNote} Printed by ${report.generatedBy} on ${report.generatedAt}.`, 76, 42, 460, 7.5, "muted");
