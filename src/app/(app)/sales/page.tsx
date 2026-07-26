@@ -116,7 +116,7 @@ function receiptHref(invoice: SalesInvoiceRow) {
   return salesDocumentHref(invoice, "Sales Receipt");
 }
 
-function salesDocumentHref(invoice: SalesInvoiceRow, process: "Sales Receipt" | "Tax Invoice") {
+function salesDocumentHref(invoice: SalesInvoiceRow, process: "Sales Receipt" | "Invoice") {
   const total = asNumber(invoice.total_amount);
   const paid = asNumber(invoice.amount_paid);
   const balance = asNumber(invoice.balance_due);
@@ -325,7 +325,7 @@ export default async function SalesPage() {
                         <p className="text-xs leading-5 text-slate-500">Use the full balance for paid, or a smaller amount for part payment.</p>
                       </form>
                     )}
-                    <a href={salesDocumentHref(invoice, "Tax Invoice")} className="inline-flex min-h-9 items-center justify-center rounded-md border border-slate-200 px-3 text-xs font-semibold text-slate-700">
+                    <a href={salesDocumentHref(invoice, "Invoice")} className="inline-flex min-h-9 items-center justify-center rounded-md border border-slate-200 px-3 text-xs font-semibold text-slate-700">
                       Download invoice
                     </a>
                   </div>

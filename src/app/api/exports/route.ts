@@ -1708,6 +1708,21 @@ const documentBlueprints: Record<string, DocumentBlueprint> = {
     footerNote: "A proforma invoice is a request for payment and not a tax document until converted.",
     emphasis: "invoice",
   },
+  Invoice: {
+    accent: "#1455D9",
+    soft: "#EEF6FF",
+    label: "Customer invoice",
+    table: "Invoice line items and amount due",
+    intro: [
+      ["Bill To", "Customer name, address, PIN and account terms where available.", "party"],
+      ["Invoice Details", "Invoice number, invoice date, due date and payment terms.", "meta"],
+      ["Amount Due", "Shows what the customer should pay and the current outstanding balance.", "note"],
+    ],
+    headers: ["Code", "Description", "Qty", "Unit Price", "Discount", "Tax", "Amount"],
+    signatures: ["Prepared by", "Customer / recipient", "Owner"],
+    footerNote: "This invoice states the amount due from the customer. Tax details are shown where applicable.",
+    emphasis: "invoice",
+  },
   "Tax Invoice": {
     accent: "#1455D9",
     soft: "#EEF6FF",
@@ -2246,6 +2261,7 @@ function templateFor(report: Report): DocumentTemplate {
   if (value.includes("tax invoice") || value.includes("etims")) return "taxInvoice";
   if (value.includes("simplified invoice")) return "simplifiedInvoice";
   if (value.includes("proforma")) return "proformaInvoice";
+  if (report.processName.toLowerCase() === "invoice") return "taxInvoice";
   if (value.includes("quotation") && !value.includes("request for quotation")) return "quotation";
   if (value.includes("goods received") || value.includes("grn")) return "grn";
   if (value.includes("purchase order") || value.includes("purchase requisition") || value.includes("request for quotation") || value.includes("rfq")) return "purchaseOrder";
@@ -2539,6 +2555,7 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
       Discount: money(discount),
       Tax: money(tax),
       Total: money(total),
+      ...(processName.toLowerCase().includes("invoice") ? { "Amount due": money(balanceDue) } : {}),
       "Amount paid": money(parseAmount(fieldValue(fields, ["amount_paid", "amount_received", "paid"], "0"))),
       "Balance due": money(balanceDue),
     },

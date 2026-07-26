@@ -22,7 +22,7 @@ const fastDownloadPairs = [
   ["Inventory", "Product Inventory Usage Report"],
   ["Inventory", "Inventory Aging Report"],
   ["Sales", "Sales Receipt"],
-  ["Sales", "Tax Invoice"],
+  ["Sales", "Invoice"],
   ["Sales", "Basic Daily Sales Report"],
   ["Sales", "Daily Sales KPI Report"],
   ["Sales", "Sales Tracking Report"],

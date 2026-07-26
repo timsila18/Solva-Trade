@@ -27,6 +27,7 @@ export const documentCatalog: BusinessDocument[] = [
   ...[
     "Quotation",
     "Proforma Invoice",
+    "Invoice",
     "Tax Invoice",
     "Simplified Invoice",
     "Credit Note",
