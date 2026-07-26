@@ -17,8 +17,8 @@ const workflows: Record<string, { title: string; description: string; fields: st
   },
   invoices: {
     title: "Invoices",
-    description: "Issue invoices and track payment and delivery status.",
-    fields: ["Invoice number", "Customer", "Sales order", "Invoice date", "Due date", "Product", "Quantity", "Unit price", "Discount", "Subtotal", "Tax", "Amount paid", "Total", "Balance due"],
+    description: "Record a sale quickly. Solva generates the invoice number, tax, total and receipt document.",
+    fields: ["Customer", "Product", "Quantity", "Unit price", "Discount", "Amount paid", "Payment method"],
   },
   payments: {
     title: "Customer Payments",

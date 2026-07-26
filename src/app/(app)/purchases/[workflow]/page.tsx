@@ -20,8 +20,8 @@ const workflows: Record<string, { title: string; description: string; fields: st
   },
   "goods-received": {
     title: "Goods Received Notes",
-    description: "Receive goods against purchase orders with quantity, batch, expiry and quality inspection details.",
-    fields: ["GRN number", "PO number", "Supplier", "Source type", "Source reason", "Received date", "Product", "Received quantity", "Accepted quantity", "Rejected quantity", "Unit cost", "Direct reference unit cost", "Local reference unit cost", "Batch", "Expiry date"],
+    description: "Receive stock quickly. Solva generates the GRN number and posts accepted stock into inventory.",
+    fields: ["Supplier", "Product", "Received quantity", "Unit cost", "Source type", "Source reason", "Supplier delivery note number", "Rejected quantity", "Batch", "Expiry date", "Direct reference unit cost"],
     controls: "Posted GRNs create purchase receipt stock movements, update inventory balances and preserve rejected or quarantined quantities.",
   },
   "supplier-bills": {

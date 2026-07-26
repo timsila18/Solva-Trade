@@ -24,6 +24,12 @@ function documentFieldParams(formData: FormData) {
   return params;
 }
 
+function appendGeneratedDocumentField(params: URLSearchParams, key: string, label: string, value: string | null | undefined) {
+  if (!value) return;
+  params.set(`field_${key}`, value);
+  params.set(`label_${key}`, label);
+}
+
 function getField(formData: FormData, key: string) {
   const value = formData.get(`field_${key}`);
   return typeof value === "string" ? value.trim() : "";
@@ -291,9 +297,8 @@ async function postSalesInvoice(formData: FormData, userId: string, fallbackBusi
     if (allocationError) throw new Error(allocationError.message);
   }
 
-  if (paid > 0) {
-    await postCustomerPayment(formData, userId, fallbackBusinessId, invoice.id, paid);
-  }
+  const paymentNumber = paid > 0 ? await postCustomerPayment(formData, userId, fallbackBusinessId, invoice.id, paid) : null;
+  return { invoiceNumber, paymentNumber };
 }
 
 async function postCustomerPayment(
@@ -377,6 +382,8 @@ async function postCustomerPayment(
       updated_at: new Date().toISOString(),
     })
     .eq("id", invoiceId);
+
+  return paymentNumber;
 }
 
 async function postGoodsReceived(formData: FormData, userId: string, fallbackBusinessId?: string | null) {
@@ -385,14 +392,14 @@ async function postGoodsReceived(formData: FormData, userId: string, fallbackBus
   const supplierId = getField(formData, "supplier_id");
   const productId = getField(formData, "product_id");
   const deliveredQuantity = getNumber(formData, "received_quantity");
-  const acceptedQuantity = getNumber(formData, "accepted_quantity") || deliveredQuantity;
   const rejectedQuantity = getNumber(formData, "rejected_quantity");
+  const acceptedQuantity = getNumber(formData, "accepted_quantity") || Math.max(0, deliveredQuantity - rejectedQuantity) || deliveredQuantity;
   const unitCost = getNumber(formData, "unit_cost");
   const grnNumber = getField(formData, "grn_number") || `GRN-${Date.now().toString().slice(-8)}`;
   const receiptDate = getField(formData, "received_date") || new Date().toISOString().slice(0, 10);
   const sourceType = sourceTypeValue(getField(formData, "source_type"));
   const directCost = getNumber(formData, "direct_reference_unit_cost");
-  const localCost = getNumber(formData, "local_reference_unit_cost");
+  const localCost = getNumber(formData, "local_reference_unit_cost") || (sourceType !== "direct_supplier" ? unitCost : 0);
   const sourceVariance = localCost && directCost ? localCost - directCost : 0;
   const sourceReason = getField(formData, "source_reason") || null;
 
@@ -497,6 +504,7 @@ async function postGoodsReceived(formData: FormData, userId: string, fallbackBus
     created_by: userId,
   });
   if (movementError) throw new Error(movementError.message);
+  return { grnNumber };
 }
 
 async function createCustomerRecord(formData: FormData, userId: string, fallbackBusinessId?: string | null) {
@@ -1120,13 +1128,16 @@ export async function completeProcessAction(formData: FormData) {
 
     if (user && businessId) {
       if (intent.toLowerCase().includes("submit") && moduleName === "Sales" && processName === "Invoices") {
-        await postSalesInvoice(formData, user.id, businessId);
+        const result = await postSalesInvoice(formData, user.id, businessId);
+        appendGeneratedDocumentField(params, "invoice_number", "Invoice number", result.invoiceNumber);
+        appendGeneratedDocumentField(params, "receipt_number", "Receipt number", result.paymentNumber ?? result.invoiceNumber);
       }
       if (intent.toLowerCase().includes("submit") && moduleName === "Sales" && processName === "Customer Payments") {
         await postCustomerPayment(formData, user.id, businessId);
       }
       if (moduleName === "Purchasing" && processName === "Goods Received Notes" && intent.toLowerCase().includes("posted")) {
-        await postGoodsReceived(formData, user.id, businessId);
+        const result = await postGoodsReceived(formData, user.id, businessId);
+        appendGeneratedDocumentField(params, "grn_number", "GRN number", result.grnNumber);
       }
       if (moduleName === "Customers" && processName === "New Customer") {
         await createCustomerRecord(formData, user.id, businessId);

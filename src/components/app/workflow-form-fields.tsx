@@ -99,6 +99,7 @@ export function WorkflowFormFields({
     const tax = shouldAutoTax ? Math.max(0, (base - discount) * (taxRate / 100)) : manualTax;
     const total = Math.max(0, base - discount + tax);
     return {
+      subtotal: base ? String(base.toFixed(2)) : values.subtotal ?? "",
       tax_rate: taxRate ? String(taxRate.toFixed(2)) : values.tax_rate ?? "",
       vat_rate: taxRate ? String(taxRate.toFixed(2)) : values.vat_rate ?? "",
       tax: tax ? String(tax.toFixed(2)) : values.tax ?? "",
@@ -111,8 +112,23 @@ export function WorkflowFormFields({
     };
   }, [values]);
 
+  const visibleKeys = useMemo(() => new Set(keys.map((field) => field.key)), [keys]);
+  const hiddenCalculatedFields = [
+    ["subtotal", "Subtotal"],
+    ["vat_rate", "VAT rate"],
+    ["tax", "Tax"],
+    ["total", "Total"],
+    ["balance_due", "Balance due"],
+  ].filter(([key]) => !visibleKeys.has(key) && calculated[key as keyof typeof calculated]);
+
   return (
     <div className="grid gap-4 md:grid-cols-2">
+      {hiddenCalculatedFields.map(([key, label]) => (
+        <span key={key} className="hidden">
+          <input type="hidden" name={`label_${key}`} value={label} />
+          <input type="hidden" name={`field_${key}`} value={calculated[key as keyof typeof calculated]} />
+        </span>
+      ))}
       {keys.map(({ label, key, type }) => {
         const selectedProduct = products.find((product) => product.name === values.product || product.id === values.product_id);
         const selectedCustomer = customers.find((customer) => customer.name === values.customer || customer.id === values.customer_id);
@@ -317,6 +333,15 @@ export function WorkflowFormFields({
           );
         }
 
+        const optionalOperationalField =
+          /^(discount|amount paid|payment method|source reason|supplier delivery note number|rejected quantity|batch|expiry date|direct reference unit cost|local reference unit cost|pack barcode|pack sku|barcode)$/i.test(
+            label,
+          );
+        const requiredOperationalField =
+          !optionalOperationalField &&
+          (/(customer|supplier|product|total|amount|quantity|unit price|unit cost|received quantity)/i.test(label) ||
+            (/(date)/i.test(label) && !/(expiry|due|valid until|expected)/i.test(label)));
+
         return (
           <label key={label} className="text-sm font-medium">
             {label}
@@ -328,7 +353,7 @@ export function WorkflowFormFields({
               min={resolvedType === "number" && !/variance|adjustment/i.test(label) ? "0" : undefined}
               max={maxStock}
               step={resolvedType === "number" ? "0.01" : undefined}
-              required={/(customer|supplier|product|date|number|total|amount)/i.test(label)}
+              required={requiredOperationalField}
               readOnly={isCalculated}
               value={value}
               onChange={(event) => setValues((current) => ({ ...current, [key]: event.target.value }))}
