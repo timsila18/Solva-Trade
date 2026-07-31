@@ -105,7 +105,14 @@ export default async function PurchasingWorkflowPage({
   return (
     <div className="pb-20">
       <p className="text-sm font-semibold text-emerald-700">Purchasing workflow</p>
-      <h1 className="mt-1 text-3xl font-semibold">{config.title}</h1>
+      <div className="mt-1 flex flex-col justify-between gap-3 md:flex-row md:items-start">
+        <h1 className="text-3xl font-semibold">{config.title}</h1>
+        {workflow === "goods-received" ? (
+          <a href="/purchases#grn-history" className="inline-flex min-h-10 items-center justify-center rounded-md border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm">
+            GRN History
+          </a>
+        ) : null}
+      </div>
       <p className="mt-2 max-w-3xl text-slate-600">{config.description}</p>
 
       <form action={completeProcessAction} className="mt-6 rounded-lg border border-slate-200 bg-white p-5">

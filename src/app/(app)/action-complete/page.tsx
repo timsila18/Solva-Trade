@@ -19,7 +19,7 @@ export default async function ActionCompletePage({
     process: documentName,
   });
   Object.entries(params).forEach(([key, value]) => {
-    if (!key.startsWith("field_") && !key.startsWith("label_") && !["customerId", "productId", "supplierId"].includes(key)) return;
+    if (!key.startsWith("field_") && !key.startsWith("label_") && !["customerId", "productId", "supplierId", "invoiceId", "grnId"].includes(key)) return;
     const resolvedValue = Array.isArray(value) ? value[0] : value;
     if (typeof resolvedValue === "string" && resolvedValue.trim()) exportParams.append(key, resolvedValue);
   });
@@ -28,6 +28,8 @@ export default async function ActionCompletePage({
   const excelHref = `${exportBase}&format=excel`;
   const pdfHref = `${exportBase}&format=pdf`;
   const printHref = `${exportBase}&format=print`;
+  const historyHref = moduleName === "Sales" ? "/sales#invoice-history" : moduleName === "Purchasing" ? "/purchases#grn-history" : "/reports";
+  const historyLabel = moduleName === "Sales" ? "Invoice History" : moduleName === "Purchasing" ? "GRN History" : "Report Centre";
 
   return (
     <div className="mx-auto max-w-3xl pb-24">
@@ -75,6 +77,12 @@ export default async function ActionCompletePage({
               <Download className="h-4 w-4" />
               Export CSV
             </a>
+          ) : null}
+          {!error ? (
+            <Link href={historyHref} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700">
+              <Download className="h-4 w-4" />
+              {historyLabel}
+            </Link>
           ) : null}
           <Link href="/dashboard" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700">
             <Home className="h-4 w-4" />

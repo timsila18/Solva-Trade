@@ -497,7 +497,7 @@ async function postSalesInvoice(formData: FormData, userId: string, fallbackBusi
   }
 
   const payment = paid > 0 ? await postCustomerPayment(formData, userId, fallbackBusinessId, invoice.id, paid) : null;
-  return { invoiceNumber, paymentNumber: payment?.paymentNumber ?? null };
+  return { invoiceId: String(invoice.id), invoiceNumber, paymentNumber: payment?.paymentNumber ?? null };
 }
 
 async function postCustomerPayment(
@@ -731,7 +731,7 @@ async function postGoodsReceived(formData: FormData, userId: string, fallbackBus
   }));
   const { error: movementError } = await admin.from("stock_movements").insert(movements);
   if (movementError) throw new Error(movementError.message);
-  return { grnNumber };
+  return { grnId: String(grn.id), grnNumber };
 }
 
 async function createCustomerRecord(formData: FormData, userId: string, fallbackBusinessId?: string | null) {
@@ -1521,6 +1521,7 @@ export async function completeProcessAction(formData: FormData) {
       if (intent.toLowerCase().includes("submit") && moduleName === "Sales" && processName === "Invoices") {
         const result = await postSalesInvoice(formData, user.id, businessId);
         generatedReference = result.invoiceNumber;
+        params.set("invoiceId", result.invoiceId);
         appendGeneratedDocumentField(params, "invoice_number", "Invoice number", result.invoiceNumber);
         appendGeneratedDocumentField(params, "receipt_number", "Receipt number", result.paymentNumber ?? result.invoiceNumber);
       }
@@ -1539,6 +1540,7 @@ export async function completeProcessAction(formData: FormData) {
       if (moduleName === "Purchasing" && processName === "Goods Received Notes" && intent.toLowerCase().includes("posted")) {
         const result = await postGoodsReceived(formData, user.id, businessId);
         generatedReference = result.grnNumber;
+        params.set("grnId", result.grnId);
         appendGeneratedDocumentField(params, "grn_number", "GRN number", result.grnNumber);
       }
       if (moduleName === "Customers" && processName === "New Customer") {

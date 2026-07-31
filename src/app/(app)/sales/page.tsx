@@ -124,6 +124,7 @@ function salesDocumentHref(invoice: SalesInvoiceRow, process: "Sales Receipt" | 
     module: "Sales",
     process,
     format: "pdf",
+    invoiceId: invoice.id,
     label_invoice_number: "Invoice number",
     field_invoice_number: invoice.invoice_number || invoice.id,
     label_receipt_number: "Receipt number",
@@ -204,7 +205,7 @@ export default async function SalesPage() {
         ))}
       </section>
 
-      <section className="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+      <section id="invoice-history" className="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
           <div>
             <p className="text-sm font-semibold text-emerald-700">Sales and payments</p>

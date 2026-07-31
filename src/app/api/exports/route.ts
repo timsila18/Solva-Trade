@@ -228,6 +228,66 @@ function amountFromTotals(totals: Record<string, string>, label: string) {
   return parseAmount(totals[label] ?? null);
 }
 
+function lineFieldValue(fields: Record<string, { label: string; value: string }>, index: number, key: string, fallback = "") {
+  return fields[`line_${index}_${key}`]?.value ?? fallback;
+}
+
+function selectedSubmittedLineIndexes(fields: Record<string, { label: string; value: string }>) {
+  const count = parseAmount(fields.line_count?.value ?? "0");
+  if (!count) return [];
+  return Array.from({ length: count }, (_, index) => index).filter((index) => {
+    const selected = lineFieldValue(fields, index, "selected").toLowerCase();
+    const productId = lineFieldValue(fields, index, "product_id");
+    const quantity = parseAmount(lineFieldValue(fields, index, "quantity", "0"));
+    return Boolean(productId && quantity > 0 && (selected === "yes" || selected === "on"));
+  });
+}
+
+function reportLinesFromSubmittedGrid(fields: Record<string, { label: string; value: string }>, processName: string): ReportLine[] {
+  const indexes = selectedSubmittedLineIndexes(fields);
+  if (!indexes.length) return [];
+  const receiving = `${processName}`.toLowerCase().includes("goods received") || `${processName}`.toLowerCase().includes("grn");
+  return indexes.map((index) => {
+    const productName = lineFieldValue(fields, index, "product_name", "Selected product");
+    const productCode = lineFieldValue(fields, index, "product_code", productName);
+    const quantity = parseAmount(lineFieldValue(fields, index, "quantity", "0"));
+    const rejected = parseAmount(lineFieldValue(fields, index, "rejected_quantity", "0"));
+    const acceptedQuantity = receiving ? Math.max(0, quantity - rejected) : quantity;
+    const unitPrice = parseAmount(lineFieldValue(fields, index, receiving ? "unit_cost" : "unit_price", "0"));
+    const taxRate = parseAmount(lineFieldValue(fields, index, "tax_rate", "0"));
+    const taxAmount = parseAmount(lineFieldValue(fields, index, "tax_amount", "0"));
+    const lineTotal = parseAmount(lineFieldValue(fields, index, "line_total", "0")) || acceptedQuantity * unitPrice + taxAmount;
+    const batch = lineFieldValue(fields, index, "batch", receiving ? "Not provided" : "");
+    const expiryDate = lineFieldValue(fields, index, "expiry_date", "");
+    return {
+      sku: productCode,
+      description: productName,
+      unit: "Each",
+      quantity: acceptedQuantity,
+      unitPrice,
+      discount: parseAmount(lineFieldValue(fields, index, "discount", "0")),
+      taxRate: taxRate ? `${taxRate.toFixed(2)}%` : "No tax entered",
+      taxAmount,
+      lineTotal,
+      warehouse: fieldValue(fields, ["warehouse", "branch"], "Main workspace"),
+      batch,
+      notes: receiving
+        ? `Delivered ${quantity}; rejected ${rejected}${expiryDate ? `; expiry ${expiryDate}` : ""}.`
+        : "Posted from multi-item sale.",
+      details: {
+        Product: productName,
+        Code: productCode,
+        Delivered: String(quantity),
+        Accepted: String(acceptedQuantity),
+        Rejected: String(rejected),
+        Batch: batch,
+        Expiry: expiryDate,
+        "Line total": money(lineTotal),
+      },
+    };
+  });
+}
+
 function receiptPaymentStatus(report: Report) {
   const explicit = String(report.transaction["Payment status"] ?? "").trim();
   const total = amountFromTotals(report.totals, "Total");
@@ -242,7 +302,9 @@ function receiptPaymentStatus(report: Report) {
   return { label: "UNPAID", detail: `Balance due ${money(balance || total)}`, tone: "unpaid" };
 }
 
-function reportLineFromFields(fields: Record<string, { label: string; value: string }>): ReportLine[] {
+function reportLineFromFields(fields: Record<string, { label: string; value: string }>, processName = ""): ReportLine[] {
+  const gridLines = reportLinesFromSubmittedGrid(fields, processName);
+  if (gridLines.length) return gridLines;
   if (Object.keys(fields).length === 0) return [];
   const productName = fieldValue(fields, ["product_name", "product", "item", "sku"], "Entered item");
   const quantity = parseAmount(fieldValue(fields, ["opening_stock_quantity", "quantity", "ordered_quantity", "received_quantity", "accepted_quantity", "return_quantity", "quantity_sold"], "1"));
@@ -1122,6 +1184,19 @@ type SalesItemRow = {
   products?: { product_name?: string | null; product_code?: string | null; sku?: string | null; standard_cost?: number | string | null } | { product_name?: string | null; product_code?: string | null; sku?: string | null; standard_cost?: number | string | null }[] | null;
 };
 
+type GoodsReceivedItemRow = {
+  grn_id?: string | null;
+  supplier_batch?: string | null;
+  expiry_date?: string | null;
+  delivered_quantity?: number | string | null;
+  accepted_quantity?: number | string | null;
+  rejected_quantity?: number | string | null;
+  unit_cost?: number | string | null;
+  source_type?: string | null;
+  source_reason?: string | null;
+  products?: { product_name?: string | null; product_code?: string | null; sku?: string | null } | { product_name?: string | null; product_code?: string | null; sku?: string | null }[] | null;
+};
+
 function dateKey(value: string | null | undefined) {
   return value ? String(value).slice(0, 10) : todayIsoDate();
 }
@@ -1249,6 +1324,81 @@ function itemBaseLine(item: SalesItemRow, invoice: SalesInvoiceRow | undefined, 
       Customer: String(relatedOne(invoice?.customers)?.customer_name ?? "Walk-in customer"),
     },
   };
+}
+
+async function salesInvoiceDocumentLines(invoiceId: string | null): Promise<ReportLine[]> {
+  const businessId = await activeReportBusinessId();
+  if (!businessId || !invoiceId) return [];
+
+  const supabase = await createSupabaseServerClient();
+  const [{ data: invoices }, { data: items }] = await Promise.all([
+    supabase
+      .from("sales_invoices")
+      .select("id, invoice_number, invoice_date, subtotal, tax_total, total_amount, amount_paid, balance_due, status, delivery_status, created_at, customers(customer_name, customer_code), branches(branch_name, branch_code)")
+      .eq("business_id", businessId)
+      .eq("id", invoiceId)
+      .limit(1),
+    supabase
+      .from("sales_invoice_items")
+      .select("invoice_id, product_id, invoice_quantity, unit_price, tax_amount, line_total, products(product_name, product_code, sku, standard_cost)")
+      .eq("business_id", businessId)
+      .eq("invoice_id", invoiceId)
+      .order("created_at", { ascending: true })
+      .limit(200),
+  ]);
+  const invoice = ((invoices ?? [])[0] ?? undefined) as SalesInvoiceRow | undefined;
+  return ((items ?? []) as SalesItemRow[]).map((item, index) => itemBaseLine(item, invoice, index));
+}
+
+async function goodsReceivedDocumentLines(grnId: string | null): Promise<ReportLine[]> {
+  const businessId = await activeReportBusinessId();
+  if (!businessId || !grnId) return [];
+
+  const supabase = await createSupabaseServerClient();
+  const { data: items } = await supabase
+    .from("goods_received_note_items")
+    .select("grn_id, supplier_batch, expiry_date, delivered_quantity, accepted_quantity, rejected_quantity, unit_cost, source_type, source_reason, products(product_name, product_code, sku)")
+    .eq("business_id", businessId)
+    .eq("grn_id", grnId)
+    .order("created_at", { ascending: true })
+    .limit(300);
+
+  return ((items ?? []) as GoodsReceivedItemRow[]).map((item, index) => {
+    const product = relatedOne(item.products);
+    const accepted = numberValue(item.accepted_quantity);
+    const delivered = numberValue(item.delivered_quantity);
+    const rejected = numberValue(item.rejected_quantity);
+    const unitCost = numberValue(item.unit_cost);
+    const total = accepted * unitCost;
+    return {
+      sku: String(product?.sku ?? product?.product_code ?? `GRN-${index + 1}`),
+      description: String(product?.product_name ?? "Received product"),
+      unit: "Unit",
+      quantity: accepted,
+      unitPrice: unitCost,
+      discount: 0,
+      taxRate: "Receipt",
+      taxAmount: 0,
+      lineTotal: total,
+      warehouse: sourceLabel(item.source_type),
+      batch: String(item.supplier_batch ?? "No batch"),
+      notes: `Delivered ${delivered.toLocaleString("en-KE", { maximumFractionDigits: 2 })}; accepted ${accepted.toLocaleString("en-KE", { maximumFractionDigits: 2 })}; rejected ${rejected.toLocaleString("en-KE", { maximumFractionDigits: 2 })}.${item.expiry_date ? ` Expiry ${item.expiry_date}.` : ""}`,
+      details: {
+        "#": String(index + 1),
+        "Item code": String(product?.product_code ?? product?.sku ?? ""),
+        Description: String(product?.product_name ?? "Received product"),
+        "Qty delivered": delivered.toLocaleString("en-KE", { maximumFractionDigits: 2 }),
+        "Qty accepted": accepted.toLocaleString("en-KE", { maximumFractionDigits: 2 }),
+        "Qty rejected": rejected.toLocaleString("en-KE", { maximumFractionDigits: 2 }),
+        "Unit cost": money(unitCost),
+        "Line value": money(total),
+        Batch: String(item.supplier_batch ?? "Not provided"),
+        Expiry: String(item.expiry_date ?? "Not applicable"),
+        Source: sourceLabel(item.source_type),
+        Notes: String(item.source_reason ?? "Received into stock"),
+      },
+    };
+  });
 }
 
 function groupedSalesLines(invoices: SalesInvoiceRow[], groupBy: "day" | "hour" | "month" | "quarter" | "annual"): ReportLine[] {
@@ -2526,6 +2676,8 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
   const processName = searchParams.get("process") ?? "Business Process";
   const productId = searchParams.get("productId");
   const customerId = searchParams.get("customerId");
+  const invoiceId = searchParams.get("invoiceId");
+  const grnId = searchParams.get("grnId");
   const fields = submittedFields(searchParams);
   const partyName =
     searchParams.get("customer") ??
@@ -2534,22 +2686,26 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
     searchParams.get("party") ??
     fieldValue(fields, ["customer", "supplier", "received_from", "paid_to", "payee", "owner", "driver", "employee"], tenant.businessName);
   const generatedBy = searchParams.get("generatedBy") ?? searchParams.get("printer") ?? tenant.generatedBy;
-  const submittedLines = isProfileDocument(moduleName, processName) ? profileLinesFromFields(fields, processName) : reportLineFromFields(fields);
-  const liveSourceLines = isPurchaseSourceReport(processName)
-    ? await purchaseSourceReportLines(processName)
-    : isSalesSourceReport(processName)
-      ? await salesSourceReportLines(processName)
-      : isSalesOperationalReport(moduleName, processName)
-        ? await salesOperationalReportLines(processName)
-      : isProductProfileReport(moduleName, processName)
-        ? await productMasterReportLines(productId)
-        : isCustomerProfileReport(moduleName, processName)
-          ? await customerProfileReportLines(customerId)
-      : isProductMasterReport(moduleName, processName)
-        ? await productMasterReportLines()
-        : isInventoryOperationalReport(moduleName, processName)
-          ? await inventoryOperationalReportLines(processName)
-          : [];
+  const submittedLines = isProfileDocument(moduleName, processName) ? profileLinesFromFields(fields, processName) : reportLineFromFields(fields, processName);
+  const liveSourceLines = invoiceId
+    ? await salesInvoiceDocumentLines(invoiceId)
+    : grnId
+      ? await goodsReceivedDocumentLines(grnId)
+      : isPurchaseSourceReport(processName)
+        ? await purchaseSourceReportLines(processName)
+        : isSalesSourceReport(processName)
+          ? await salesSourceReportLines(processName)
+          : isSalesOperationalReport(moduleName, processName)
+            ? await salesOperationalReportLines(processName)
+        : isProductProfileReport(moduleName, processName)
+          ? await productMasterReportLines(productId)
+          : isCustomerProfileReport(moduleName, processName)
+            ? await customerProfileReportLines(customerId)
+        : isProductMasterReport(moduleName, processName)
+          ? await productMasterReportLines()
+          : isInventoryOperationalReport(moduleName, processName)
+            ? await inventoryOperationalReportLines(processName)
+            : [];
   const workflowLines = !liveSourceLines.length && !submittedLines.length ? await workflowRecordReportLines(moduleName, processName) : [];
   const lines = liveSourceLines.length ? liveSourceLines : submittedLines.length ? submittedLines : workflowLines;
   const isValuationReport = isProductMasterReport(moduleName, processName) || isProductProfileReport(moduleName, processName) || isInventoryOperationalReport(moduleName, processName);
@@ -3745,6 +3901,59 @@ async function pdf(report: Report) {
   return pdfDocument(canvas.output(), 612, 842, assets);
 }
 
+async function recordDocumentGeneration(report: Report, format: string) {
+  const businessId = await activeReportBusinessId();
+  if (!businessId) return;
+
+  try {
+    const supabase = await createSupabaseServerClient();
+    const { data: userData } = await supabase.auth.getUser();
+    const userId = userData.user?.id;
+    if (!userId) return;
+
+    const { data: branch } = await supabase
+      .from("branches")
+      .select("id")
+      .eq("business_id", businessId)
+      .eq("active", true)
+      .order("is_default", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const sourceReference =
+      report.transaction["Reference number"] ||
+      report.transaction["Invoice number"] ||
+      report.transaction["GRN number"] ||
+      report.transaction["Receipt number"] ||
+      `${report.moduleName.slice(0, 3).toUpperCase()}-${Date.now().toString().slice(-6)}`;
+
+    await supabase.from("workflow_records").insert({
+      business_id: businessId,
+      branch_id: branch?.id ?? null,
+      module_name: report.moduleName,
+      process_name: report.processName,
+      document_name: report.processName,
+      intent: `Generated ${format.toUpperCase()}`,
+      status: "generated",
+      reference_number: `DOC-${Date.now().toString().slice(-10)}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
+      record_payload: {
+        generated_document: {
+          format,
+          source_reference: sourceReference,
+          party_name: report.partyName,
+          total: report.totals.Total,
+          line_count: report.lines.length,
+          generated_at: report.generatedAt,
+          generated_by: report.generatedBy,
+        },
+      },
+      created_by: userId,
+    });
+  } catch (error) {
+    console.warn("Document generation audit log skipped", error);
+  }
+}
+
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const report = await buildReport(searchParams);
@@ -3754,6 +3963,8 @@ export async function GET(request: NextRequest) {
   if (format === "json") {
     return Response.json(report);
   }
+
+  await recordDocumentGeneration(report, format);
 
   if (format === "pdf") {
     return new Response(await pdf(report), {

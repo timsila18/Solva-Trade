@@ -1,5 +1,6 @@
 "use client";
 
+import { Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { CustomerLookup, ProductLookup, SupplierLookup } from "@/lib/workflow-live-data";
 
@@ -17,12 +18,13 @@ function money(value: number) {
   return value.toLocaleString("en-KE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-function numberValue(value: FormDataEntryValue | null) {
-  const number = Number(typeof value === "string" ? value : "");
+function numberValue(value: unknown) {
+  const number = Number(typeof value === "string" || typeof value === "number" ? value : "");
   return Number.isFinite(number) ? number : 0;
 }
 
 export function MultiLineTransactionForm({ mode, customers = [], suppliers = [], products, today }: Props) {
+  const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Record<number, boolean>>({});
   const [quantities, setQuantities] = useState<Record<number, number>>({});
   const [prices, setPrices] = useState<Record<number, number>>(() =>
@@ -57,6 +59,15 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
   const partyLabel = mode === "sale" ? "Customer" : "Supplier";
   const partyName = mode === "sale" ? "field_customer_id" : "field_supplier_id";
   const partyOptions = mode === "sale" ? customers : suppliers;
+  const searchableProducts = useMemo(() => {
+    const query = search.toLowerCase().trim();
+    return products
+      .map((product, index) => ({ product, index }))
+      .filter(({ product }) => {
+        if (!query) return true;
+        return [product.name, product.code, product.vatCode].filter(Boolean).some((value) => String(value).toLowerCase().includes(query));
+      });
+  }, [products, search]);
 
   return (
     <div className="space-y-5">
@@ -117,6 +128,28 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
         ) : null}
       </section>
 
+      <section className="rounded-md border border-slate-200 bg-white p-4">
+        <label className="grid gap-2 text-sm font-semibold">
+          Search products
+          <div className="flex flex-col gap-2 md:flex-row">
+            <div className="relative flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                type="search"
+                value={search}
+                onChange={(event) => setSearch(event.currentTarget.value)}
+                placeholder={mode === "sale" ? "Search product to sell" : "Search delivered product"}
+                className="min-h-11 w-full rounded-md border border-slate-300 bg-white pl-9 pr-3 py-2 text-sm font-normal"
+              />
+            </div>
+            <button type="button" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-[var(--solva-blue-700)] px-4 text-sm font-semibold text-white">
+              <Search className="h-4 w-4" />
+              Search
+            </button>
+          </div>
+        </label>
+      </section>
+
       <section className="overflow-x-auto rounded-md border border-slate-200">
         <table className="min-w-[980px] w-full border-collapse text-sm">
           <thead className="bg-slate-950 text-left text-xs uppercase tracking-wide text-white">
@@ -132,7 +165,7 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
             </tr>
           </thead>
           <tbody>
-            {products.map((product, index) => {
+            {searchableProducts.map(({ product, index }) => {
               const quantity = quantities[index] ?? 0;
               const unitValue = prices[index] ?? 0;
               const discount = discounts[index] ?? 0;
@@ -152,6 +185,8 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
                       className="h-4 w-4"
                     />
                     <input type="hidden" name={`field_line_${index}_product_id`} value={product.id} />
+                    <input type="hidden" name={`field_line_${index}_product_name`} value={product.name} />
+                    <input type="hidden" name={`field_line_${index}_product_code`} value={product.code} />
                     <input type="hidden" name={`field_line_${index}_tax_rate`} value={product.vatRate ?? 0} />
                     <input type="hidden" name={`field_line_${index}_tax_amount`} value={mode === "sale" ? tax.toFixed(2) : "0"} />
                     <input type="hidden" name={`field_line_${index}_line_total`} value={(mode === "sale" ? saleTotal : receiptTotal).toFixed(2)} />
@@ -233,6 +268,13 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
                 </tr>
               );
             })}
+            {!searchableProducts.length ? (
+              <tr>
+                <td colSpan={8} className="bg-white px-4 py-8 text-center text-sm text-slate-600">
+                  No products match that search. Clear the search or add the product first.
+                </td>
+              </tr>
+            ) : null}
           </tbody>
         </table>
       </section>
