@@ -26,21 +26,21 @@ function numberValue(value: unknown) {
 export function MultiLineTransactionForm({ mode, customers = [], suppliers = [], products, today }: Props) {
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Record<number, boolean>>({});
-  const [quantities, setQuantities] = useState<Record<number, number>>({});
-  const [prices, setPrices] = useState<Record<number, number>>(() =>
-    Object.fromEntries(products.map((product, index) => [index, mode === "sale" ? product.price : 0])),
+  const [quantities, setQuantities] = useState<Record<number, string>>({});
+  const [prices, setPrices] = useState<Record<number, string>>(() =>
+    Object.fromEntries(products.map((product, index) => [index, mode === "sale" && product.price > 0 ? String(product.price) : ""])),
   );
-  const [discounts, setDiscounts] = useState<Record<number, number>>({});
-  const [rejected, setRejected] = useState<Record<number, number>>({});
+  const [discounts, setDiscounts] = useState<Record<number, string>>({});
+  const [rejected, setRejected] = useState<Record<number, string>>({});
 
   const totals = useMemo(() => {
     return products.reduce(
       (summary, product, index) => {
         if (!selected[index]) return summary;
-        const quantity = quantities[index] ?? 0;
-        const unitValue = prices[index] ?? 0;
-        const discount = discounts[index] ?? 0;
-        const rejectedQuantity = rejected[index] ?? 0;
+        const quantity = numberValue(quantities[index]);
+        const unitValue = numberValue(prices[index]);
+        const discount = numberValue(discounts[index]);
+        const rejectedQuantity = numberValue(rejected[index]);
         const acceptedQuantity = Math.max(0, quantity - rejectedQuantity);
         if (mode === "sale") {
           const subtotal = Math.max(0, quantity * unitValue - discount);
@@ -166,12 +166,12 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
           </thead>
           <tbody>
             {searchableProducts.map(({ product, index }) => {
-              const quantity = quantities[index] ?? 0;
-              const unitValue = prices[index] ?? 0;
-              const discount = discounts[index] ?? 0;
+              const quantity = numberValue(quantities[index]);
+              const unitValue = numberValue(prices[index]);
+              const discount = numberValue(discounts[index]);
               const tax = Math.max(0, quantity * unitValue - discount) * ((product.vatRate ?? 0) / 100);
               const saleTotal = Math.max(0, quantity * unitValue - discount + tax);
-              const accepted = Math.max(0, quantity - (rejected[index] ?? 0));
+              const accepted = Math.max(0, quantity - numberValue(rejected[index]));
               const receiptTotal = accepted * unitValue;
               return (
                 <tr key={product.id} className="border-b border-slate-100 odd:bg-white even:bg-slate-50">
@@ -205,9 +205,9 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
                       inputMode="decimal"
                       value={quantities[index] ?? ""}
                       onChange={(event) => {
-                        const value = numberValue(event.currentTarget.value);
+                        const value = event.currentTarget.value;
                         setQuantities((current) => ({ ...current, [index]: value }));
-                        if (value > 0) setSelected((current) => ({ ...current, [index]: true }));
+                        if (numberValue(value) > 0) setSelected((current) => ({ ...current, [index]: true }));
                       }}
                       className="w-28 rounded-md border border-slate-300 px-2 py-2"
                     />
@@ -220,7 +220,7 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
                       step="0.01"
                       inputMode="decimal"
                       value={prices[index] ?? ""}
-                      onChange={(event) => setPrices((current) => ({ ...current, [index]: numberValue(event.currentTarget.value) }))}
+                      onChange={(event) => setPrices((current) => ({ ...current, [index]: event.currentTarget.value }))}
                       className="w-32 rounded-md border border-slate-300 px-2 py-2"
                     />
                   </td>
@@ -233,7 +233,7 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
                         step="0.01"
                         inputMode="decimal"
                         value={discounts[index] ?? ""}
-                        onChange={(event) => setDiscounts((current) => ({ ...current, [index]: numberValue(event.currentTarget.value) }))}
+                        onChange={(event) => setDiscounts((current) => ({ ...current, [index]: event.currentTarget.value }))}
                         className="w-28 rounded-md border border-slate-300 px-2 py-2"
                       />
                     </td>
@@ -246,7 +246,7 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
                         step="0.01"
                         inputMode="decimal"
                         value={rejected[index] ?? ""}
-                        onChange={(event) => setRejected((current) => ({ ...current, [index]: numberValue(event.currentTarget.value) }))}
+                        onChange={(event) => setRejected((current) => ({ ...current, [index]: event.currentTarget.value }))}
                         className="w-28 rounded-md border border-slate-300 px-2 py-2"
                       />
                     </td>
