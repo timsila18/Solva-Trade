@@ -418,6 +418,16 @@ function isSalesOperationalReport(moduleName: string, processName: string) {
   );
 }
 
+function isFinancialStatementReport(moduleName: string, processName: string) {
+  const value = `${moduleName} ${processName}`.toLowerCase();
+  return (
+    value.includes("profit and loss") ||
+    value.includes("income statement") ||
+    value.includes("trial balance") ||
+    value.includes("balance sheet")
+  );
+}
+
 function isProductMasterReport(moduleName: string, processName: string) {
   const value = `${moduleName} ${processName}`.toLowerCase();
   return (
@@ -1156,6 +1166,207 @@ async function salesSourceReportLines(processName: string): Promise<ReportLine[]
         : "Loss-making source allocation; review buying price, selling price or urgency.",
     };
   });
+}
+
+type FinancialActivityRow = {
+  account_code?: string | null;
+  account_name?: string | null;
+  account_class?: string | null;
+  financial_statement_section?: string | null;
+  debit_amount?: number | string | null;
+  credit_amount?: number | string | null;
+  natural_amount?: number | string | null;
+};
+
+function financialEmptyLine(message: string): ReportLine {
+  return {
+    sku: "LEDGER",
+    description: message,
+    unit: "Statement",
+    quantity: 1,
+    unitPrice: 0,
+    discount: 0,
+    taxRate: "No posted ledger activity",
+    taxAmount: 0,
+    lineTotal: 0,
+    warehouse: "Finance",
+    batch: "No activity",
+    notes: "Post journals, sales, purchases, receipts or payments to populate this statement.",
+    details: {
+      Section: "No activity",
+      "Account Code": "LEDGER",
+      "Account Name": message,
+      Debit: money(0),
+      Credit: money(0),
+      Amount: money(0),
+      "Statement line": "No posted ledger activity",
+      Class: "No activity",
+      Closing: money(0),
+      "Closing Debit": money(0),
+      "Closing Credit": money(0),
+      Classification: "No activity",
+    },
+  };
+}
+
+function titleCase(value: string) {
+  return value
+    .replace(/_/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (letter) => letter.toUpperCase()) || "Unclassified";
+}
+
+function financialSection(row: { accountClass: string; statementSection: string }) {
+  return titleCase(row.statementSection || row.accountClass || "Unclassified");
+}
+
+function financialLine(row: {
+  accountCode: string;
+  accountName: string;
+  accountClass: string;
+  statementSection: string;
+  debit: number;
+  credit: number;
+  natural: number;
+}): ReportLine {
+  const closingDebit = row.natural >= 0 ? row.natural : 0;
+  const closingCredit = row.natural < 0 ? Math.abs(row.natural) : 0;
+  const section = financialSection(row);
+  return {
+    sku: row.accountCode,
+    description: row.accountName,
+    unit: "Account",
+    quantity: 1,
+    unitPrice: row.debit,
+    discount: row.credit,
+    taxRate: row.accountClass || "ledger",
+    taxAmount: row.credit,
+    lineTotal: row.natural,
+    warehouse: "Finance",
+    batch: section,
+    notes: `${section} account from posted journal activity.`,
+    details: {
+      Section: section,
+      "Account Code": row.accountCode,
+      "Account Name": row.accountName,
+      Class: row.accountClass || "ledger",
+      Debit: money(row.debit),
+      Credit: money(row.credit),
+      Amount: money(row.natural),
+      Closing: money(row.natural),
+      "Closing Debit": money(closingDebit),
+      "Closing Credit": money(closingCredit),
+      Classification: row.statementSection || row.accountClass || "ledger",
+      "Statement line": row.natural < 0 ? "Deduct" : "Add",
+    },
+  };
+}
+
+function financialSummaryLine(label: string, amount: number, section: string, note: string): ReportLine {
+  return {
+    sku: "TOTAL",
+    description: label,
+    unit: "Summary",
+    quantity: 1,
+    unitPrice: amount > 0 ? amount : 0,
+    discount: amount < 0 ? Math.abs(amount) : 0,
+    taxRate: amount < 0 ? "Loss / deduction" : "Positive balance",
+    taxAmount: amount < 0 ? Math.abs(amount) : 0,
+    lineTotal: amount,
+    warehouse: "Finance",
+    batch: section,
+    notes: note,
+    details: {
+      Section: section,
+      "Account Code": "",
+      "Account Name": label,
+      Class: "summary",
+      Debit: money(amount > 0 ? amount : 0),
+      Credit: money(amount < 0 ? Math.abs(amount) : 0),
+      Amount: money(amount),
+      Closing: money(amount),
+      "Closing Debit": money(amount > 0 ? amount : 0),
+      "Closing Credit": money(amount < 0 ? Math.abs(amount) : 0),
+      Classification: section,
+      "Statement line": note,
+    },
+  };
+}
+
+async function financialStatementReportLines(processName: string): Promise<ReportLine[]> {
+  const businessId = await activeReportBusinessId();
+  if (!businessId) return [];
+
+  const supabase = await createSupabaseServerClient();
+  const { data } = await supabase
+    .from("financial_statement_account_activity")
+    .select("account_code, account_name, account_class, financial_statement_section, debit_amount, credit_amount, natural_amount")
+    .eq("business_id", businessId)
+    .limit(2000);
+
+  const rows = ((data ?? []) as FinancialActivityRow[])
+    .map((row) => ({
+      accountCode: String(row.account_code ?? "0000"),
+      accountName: String(row.account_name ?? "Unnamed account"),
+      accountClass: String(row.account_class ?? "").toLowerCase(),
+      statementSection: String(row.financial_statement_section ?? "").toLowerCase(),
+      debit: numberValue(row.debit_amount),
+      credit: numberValue(row.credit_amount),
+      natural: numberValue(row.natural_amount),
+    }))
+    .sort((a, b) => `${a.statementSection}-${a.accountCode}-${a.accountName}`.localeCompare(`${b.statementSection}-${b.accountCode}-${b.accountName}`));
+
+  if (!rows.length) return [financialEmptyLine("No posted ledger activity has been found for this business yet.")];
+
+  const lower = processName.toLowerCase();
+  const revenueRows = rows.filter((row) => row.accountClass.includes("revenue") || row.accountClass.includes("income") || row.statementSection.includes("revenue") || row.statementSection.includes("income"));
+  const costRows = rows.filter((row) => row.accountClass.includes("cost") || row.statementSection.includes("cost"));
+  const expenseRows = rows.filter((row) => row.accountClass.includes("expense") || row.statementSection.includes("expense"));
+
+  if (lower.includes("profit and loss") || lower.includes("income statement")) {
+    const revenue = revenueRows.reduce((sum, row) => sum + row.natural, 0);
+    const costOfSales = costRows.reduce((sum, row) => sum + Math.abs(row.natural), 0);
+    const expenses = expenseRows.reduce((sum, row) => sum + Math.abs(row.natural), 0);
+    const grossProfit = revenue - costOfSales;
+    const netProfit = grossProfit - expenses;
+    return [
+      ...[...revenueRows, ...costRows, ...expenseRows].map(financialLine),
+      financialSummaryLine("Total Revenue", revenue, "Revenue", "Total income earned in the selected period."),
+      financialSummaryLine("Cost of Sales", -costOfSales, "Cost of Sales", "Direct costs deducted from revenue."),
+      financialSummaryLine("Gross Profit", grossProfit, "Gross Profit", "Revenue less direct cost of sales."),
+      financialSummaryLine("Operating Expenses", -expenses, "Expenses", "Operating expenses deducted from gross profit."),
+      financialSummaryLine(netProfit < 0 ? "Net Loss" : "Net Profit", netProfit, "Net Result", "Final profit or loss for the period."),
+    ];
+  }
+
+  if (lower.includes("trial balance")) return rows.map(financialLine);
+
+  if (lower.includes("balance sheet")) {
+    const assetRows = rows.filter((row) => row.accountClass.includes("asset") || row.statementSection.includes("asset"));
+    const liabilityRows = rows.filter((row) => row.accountClass.includes("liabil") || row.statementSection.includes("liabil"));
+    const equityRows = rows.filter((row) => row.accountClass.includes("equity") || row.statementSection.includes("equity"));
+    const assets = assetRows.reduce((sum, row) => sum + row.natural, 0);
+    const liabilities = liabilityRows.reduce((sum, row) => sum + Math.abs(row.natural), 0);
+    const equity = equityRows.reduce((sum, row) => sum + Math.abs(row.natural), 0);
+    const profit =
+      revenueRows.reduce((sum, row) => sum + row.natural, 0) -
+      costRows.reduce((sum, row) => sum + Math.abs(row.natural), 0) -
+      expenseRows.reduce((sum, row) => sum + Math.abs(row.natural), 0);
+    const balanceCheck = assets - liabilities - equity - profit;
+    return [
+      ...assetRows.map(financialLine),
+      financialSummaryLine("Total Assets", assets, "Assets", "Resources controlled by the business."),
+      ...liabilityRows.map(financialLine),
+      financialSummaryLine("Total Liabilities", -liabilities, "Liabilities", "Obligations owed by the business."),
+      ...equityRows.map(financialLine),
+      financialSummaryLine("Owner Equity", -equity, "Equity", "Owner capital and retained equity balances."),
+      financialSummaryLine("Current Year Profit / Loss", profit, "Equity", "Profit or loss carried into equity for statement balance."),
+      financialSummaryLine("Balance Check", balanceCheck, "Control", "Should be zero when posted accounts are fully balanced."),
+    ];
+  }
+
+  return rows.map(financialLine);
 }
 
 type SalesInvoiceRow = {
@@ -2467,6 +2678,15 @@ function blueprintFromTerms(report: Report): DocumentBlueprint {
   if (value.includes("reconciliation")) {
     return { ...base, accent: "#334155", soft: "#F8FAFC", label: "Reconciliation worksheet", table: "Matched and unmatched differences", headers: ["Date", "Reference", "Book Amount", "Statement Amount", "Difference", "Status", "Action"], signatures: ["Prepared by", "Reviewed by", "Approved by"], footerNote: "Reconciliation reports explain every difference before balances are accepted.", emphasis: "ledger" };
   }
+  if (value.includes("profit and loss") || value.includes("income statement")) {
+    return { ...base, accent: "#071A2B", soft: "#F8FAFC", label: "Profit and loss account", table: "Revenue, cost of sales, expenses and net result", headers: ["Section", "Account Code", "Account Name", "Debit", "Credit", "Amount", "Statement line"], signatures: ["Prepared by", "Accountant", "Owner / Director"], footerNote: "Profit and loss reports show income less direct costs and operating expenses from posted ledger activity.", emphasis: "ledger" };
+  }
+  if (value.includes("trial balance")) {
+    return { ...base, accent: "#1455D9", soft: "#EEF6FF", label: "Trial balance", table: "Debit and credit account balances", headers: ["Account Code", "Account Name", "Class", "Debit", "Credit", "Closing Debit", "Closing Credit"], signatures: ["Prepared by", "Accountant", "Owner / Director"], footerNote: "Trial balance reports should balance total debits and credits before statements are finalized.", emphasis: "ledger" };
+  }
+  if (value.includes("balance sheet")) {
+    return { ...base, accent: "#0F766E", soft: "#ECFDF5", label: "Statement of financial position", table: "Assets, liabilities, equity and balance check", headers: ["Section", "Account Code", "Account Name", "Debit", "Credit", "Closing", "Classification"], signatures: ["Prepared by", "Accountant", "Owner / Director"], footerNote: "Balance sheets present assets, liabilities and equity from posted ledger balances.", emphasis: "ledger" };
+  }
   if (value.includes("cash flow") || value.includes("income statement") || value.includes("profit") || value.includes("balance sheet") || value.includes("trial balance") || value.includes("ledger") || value.includes("budget") || value.includes("expense analysis")) {
     return { ...base, accent: "#071A2B", soft: "#F8FAFC", label: "Financial statement", table: "Financial statement lines", headers: ["Account Code", "Account Name", "Opening", "Debit", "Credit", "Closing", "Variance"], signatures: ["Prepared by", "Accountant", "Owner / Director"], footerNote: "Financial statements should reconcile to posted ledger entries and approved periods.", emphasis: "ledger" };
   }
@@ -2519,7 +2739,7 @@ function templateFor(report: Report): DocumentTemplate {
   if (value.includes("stock movement") || value.includes("stock card") || value.includes("bin card")) return "stockMovement";
   if (value.includes("stock") || value.includes("inventory") || value.includes("valuation") || value.includes("reorder")) return "inventoryReport";
   if (value.includes("executive") || value.includes("business health") || value.includes("morning business brief") || value.includes("action plan") || value.includes("kpi")) return "executiveReport";
-  if (value.includes("ledger") || value.includes("trial balance") || value.includes("balance sheet") || value.includes("income statement")) return "finance";
+  if (value.includes("ledger") || value.includes("trial balance") || value.includes("balance sheet") || value.includes("income statement") || value.includes("profit and loss")) return "finance";
   if (value.includes("report") || value.includes("brief") || value.includes("dashboard")) return "report";
   return "taxInvoice";
 }
@@ -2701,6 +2921,8 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
         ? await purchaseSourceReportLines(processName)
         : isSalesSourceReport(processName)
           ? await salesSourceReportLines(processName)
+          : isFinancialStatementReport(moduleName, processName)
+            ? await financialStatementReportLines(processName)
           : isSalesOperationalReport(moduleName, processName)
             ? await salesOperationalReportLines(processName)
         : isProductProfileReport(moduleName, processName)
@@ -2788,6 +3010,9 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
     } else if (isSalesOperationalReport(moduleName, processName)) {
       processStatus = "Live sales report from posted invoices, invoice items, customers and source-cost allocations";
       sourceAuditNote = "Sales report values come from posted invoices, invoice items, customers, branches and FIFO/source-cost allocations where available.";
+    } else if (isFinancialStatementReport(moduleName, processName)) {
+      processStatus = "Live financial statement from posted journal account activity";
+      sourceAuditNote = "Financial statement values come from posted journal account activity and statement classification mappings.";
     } else if (isSalesSourceReport(processName)) {
       processStatus = "Source report from posted receipts";
       sourceAuditNote = "Source profit values come from FIFO allocation of posted sales against received stock cost layers.";
@@ -3552,14 +3777,14 @@ function renderPdfTable(canvas: PdfCanvas, report: Report, startY: number) {
 
   let renderedRows = 0;
   for (const [rowIndex, row] of rows.entries()) {
-    const cellLines = row.map((cell, index) => wrapLineCount(cell, (widths[index] ?? 70) - 10, 7, 2));
-    const height = Math.max(28, Math.max(...cellLines) * 9 + 14);
+    const cellLines = row.map((cell, index) => wrapLineCount(cell, (widths[index] ?? 70) - 10, 7, 4));
+    const height = Math.max(32, Math.max(...cellLines) * 10 + 16);
     if (y - height < 260) break;
     canvas.rect(x, y - height + 6, 530, height, rowIndex % 2 === 0 ? "white" : "soft");
     canvas.line(x, y + 6, x + 530, y + 6);
     cursor = x;
     row.forEach((cell, index) => {
-      canvas.wrap(cell || "-", cursor + 5, y - 8, (widths[index] ?? 70) - 10, 7, "navy", false, 9, 2);
+      canvas.wrap(cell || "-", cursor + 5, y - 8, (widths[index] ?? 70) - 10, 7, "navy", false, 10, 4);
       cursor += widths[index] ?? 70;
     });
     y -= height;
@@ -3689,14 +3914,14 @@ function renderLandscapePdfTable(canvas: PdfCanvas, report: Report, startY: numb
 
   let renderedRows = 0;
   for (const [rowIndex, row] of rows.entries()) {
-    const cellLines = row.map((cell, index) => wrapLineCount(cell, widths[index] - 10, 6.6, 2));
-    const height = Math.max(26, Math.max(...cellLines) * 8 + 13);
+    const cellLines = row.map((cell, index) => wrapLineCount(cell, widths[index] - 10, 6.6, 4));
+    const height = Math.max(30, Math.max(...cellLines) * 9 + 15);
     if (y - height < 118) break;
     canvas.rect(x, y - height + 5, 746, height, rowIndex % 2 === 0 ? "white" : "soft");
     canvas.line(x, y + 5, x + 746, y + 5, "border", 0.5);
     cursor = x;
     row.forEach((cell, index) => {
-      canvas.wrap(cell || "-", cursor + 5, y - 7, widths[index] - 10, 6.6, "navy", false, 8, 2);
+      canvas.wrap(cell || "-", cursor + 5, y - 7, widths[index] - 10, 6.6, "navy", false, 9, 4);
       cursor += widths[index];
     });
     y -= height;

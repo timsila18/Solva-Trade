@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ArrowRight, Banknote, CreditCard, Download, Eye, PackagePlus, ReceiptText, Search, ShieldCheck, ShoppingCart, SlidersHorizontal, Users } from "lucide-react";
+import { ProfitPrivacyCard } from "@/components/app/profit-privacy-card";
 import { DashboardPanel, DashboardTile, EmptyState, MetricCard, MiniBars, PageHero, PlainCard, ProgressRow } from "@/components/ui/premium";
 import {
   alertExamples,
@@ -53,9 +54,48 @@ type WorkflowPayload = {
   fields?: Record<string, { value?: unknown }>;
 };
 
+type ProfitAllocationRow = {
+  allocated_at: string | null;
+  sale_value: number | string | null;
+  total_cost: number | string | null;
+  gross_profit: number | string | null;
+};
+
 function workflowAmount(payload: WorkflowPayload | null | undefined) {
   const fields = payload?.fields ?? {};
   return numeric(fields.total?.value ?? fields.amount?.value ?? fields.subtotal?.value);
+}
+
+function startOfWeekIso(today: string) {
+  const date = new Date(`${today}T00:00:00+03:00`);
+  const day = date.getUTCDay();
+  const daysFromMonday = day === 0 ? 6 : day - 1;
+  date.setUTCDate(date.getUTCDate() - daysFromMonday);
+  return date.toISOString();
+}
+
+function startOfYearIso(today: string) {
+  const year = today.slice(0, 4);
+  return new Date(`${year}-01-01T00:00:00+03:00`).toISOString();
+}
+
+function profitForPeriod(rows: ProfitAllocationRow[], startIso: string, endIso: string) {
+  return rows
+    .filter((row) => {
+      const value = String(row.allocated_at ?? "");
+      return value >= startIso && value < endIso;
+    })
+    .reduce((sum, row) => {
+      const explicitProfit = numeric(row.gross_profit);
+      if (explicitProfit !== 0) return sum + explicitProfit;
+      return sum + numeric(row.sale_value) - numeric(row.total_cost);
+    }, 0);
+}
+
+function profitCaption(amount: number, period: string) {
+  if (amount > 0) return `${period} is profitable from posted sales cost allocations.`;
+  if (amount < 0) return `${period} is showing a loss. Review cost, pricing and discounts.`;
+  return `No posted profit movement for ${period.toLowerCase()} yet.`;
 }
 
 export default async function DashboardPage() {
@@ -110,6 +150,8 @@ export default async function DashboardPage() {
   tomorrow.setDate(tomorrow.getDate() + 1);
   const tomorrowIso = tomorrow.toISOString();
   const todayStartIso = new Date(`${today}T00:00:00+03:00`).toISOString();
+  const weekStartIso = startOfWeekIso(today);
+  const yearStartIso = startOfYearIso(today);
   let todaySales = 0;
   let todayInvoiceCount = 0;
   let cashCollected = 0;
@@ -123,6 +165,9 @@ export default async function DashboardPage() {
   let stockValue = 0;
   let taxToday = 0;
   let grnsToday = 0;
+  let todayProfit = 0;
+  let weekProfit = 0;
+  let annualProfit = 0;
   let recentActivity: { time: string; module: string; title: string; quickAction: string }[] = [];
 
   if (businessId) {
@@ -132,6 +177,7 @@ export default async function DashboardPage() {
       customersResult,
       productsResult,
       balancesResult,
+      profitAllocationsResult,
       workflowResult,
     ] = await Promise.all([
       admin
@@ -154,6 +200,13 @@ export default async function DashboardPage() {
         .from("stock_balances")
         .select("product_id, quantity_on_hand, available_quantity, total_inventory_value, reorder_status")
         .eq("business_id", businessId),
+      admin
+        .from("sales_source_allocations")
+        .select("allocated_at, sale_value, total_cost, gross_profit")
+        .eq("business_id", businessId)
+        .gte("allocated_at", yearStartIso)
+        .lt("allocated_at", tomorrowIso)
+        .limit(5000),
       admin
         .from("workflow_records")
         .select("module_name, process_name, document_name, reference_number, record_payload, created_at")
@@ -229,7 +282,19 @@ export default async function DashboardPage() {
       title: `${record.process_name} ${record.reference_number}`,
       quickAction: record.module_name === "Sales" ? "Open sales" : record.module_name === "Purchasing" ? "Open purchases" : "Open record",
     }));
+
+    const profitRows = (profitAllocationsResult.data ?? []) as ProfitAllocationRow[];
+    todayProfit = profitForPeriod(profitRows, todayStartIso, tomorrowIso);
+    weekProfit = profitForPeriod(profitRows, weekStartIso, tomorrowIso);
+    annualProfit = profitForPeriod(profitRows, yearStartIso, tomorrowIso);
   }
+
+  const profitPin = businessName.toLowerCase().includes("cymereg") ? "2027" : "2027";
+  const profitPeriods = [
+    { label: "Today", value: "today", amount: todayProfit, caption: profitCaption(todayProfit, "Today") },
+    { label: "This week", value: "week", amount: weekProfit, caption: profitCaption(weekProfit, "This week") },
+    { label: "This year", value: "year", amount: annualProfit, caption: profitCaption(annualProfit, "This year") },
+  ];
 
   const attentionRows = [
     ["Invoices", todayInvoiceCount > 0 ? `${todayInvoiceCount} invoice${todayInvoiceCount === 1 ? "" : "s"} posted today` : "No invoices posted today", todayInvoiceCount > 0 ? "Live" : "Ready", todayInvoiceCount > 0 ? "View" : "Create", "/sales"],
@@ -259,6 +324,8 @@ export default async function DashboardPage() {
         <DashboardTile label="Active customers" value={activeCustomers.toLocaleString("en-KE")} caption={activeCustomers > 0 ? "Customer list is active" : "Create the first customer"} icon={Users} tone="cyan" />
         <DashboardTile label="Stock alerts" value={stockAlerts.toLocaleString("en-KE")} caption={stockAlerts > 0 ? "Review reorder or negative stock" : "Stock position is clean"} icon={PackagePlus} tone="rose" />
       </section>
+
+      <ProfitPrivacyCard businessName={businessName} pin={profitPin} periods={profitPeriods} />
 
       <PageHero
         eyebrow={`${greeting()} ${userName}`}
