@@ -1,7 +1,7 @@
 "use client";
 
 import { Search } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { CustomerLookup, ProductLookup, SupplierLookup } from "@/lib/workflow-live-data";
 
 type Mode = "sale" | "goods-received";
@@ -25,34 +25,63 @@ function numberValue(value: unknown) {
 
 export function MultiLineTransactionForm({ mode, customers = [], suppliers = [], products, today }: Props) {
   const [search, setSearch] = useState("");
-  const [selected, setSelected] = useState<Record<number, boolean>>({});
-  const [quantities, setQuantities] = useState<Record<number, string>>({});
-  const [prices, setPrices] = useState<Record<number, string>>(() =>
-    Object.fromEntries(products.map((product, index) => [index, mode === "sale" && product.price > 0 ? String(product.price) : ""])),
-  );
-  const [discounts, setDiscounts] = useState<Record<number, string>>({});
-  const [rejected, setRejected] = useState<Record<number, string>>({});
+  const summaryRefs = {
+    quantity: useRef<HTMLParagraphElement>(null),
+    subtotal: useRef<HTMLParagraphElement>(null),
+    tax: useRef<HTMLParagraphElement>(null),
+    total: useRef<HTMLParagraphElement>(null),
+  };
 
-  const totals = useMemo(() => {
-    return products.reduce(
-      (summary, product, index) => {
-        if (!selected[index]) return summary;
-        const quantity = numberValue(quantities[index]);
-        const unitValue = numberValue(prices[index]);
-        const discount = numberValue(discounts[index]);
-        const rejectedQuantity = numberValue(rejected[index]);
+  function setField(form: HTMLFormElement, name: string, value: string) {
+    const field = form.elements.namedItem(name);
+    if (field instanceof HTMLInputElement) field.value = value;
+  }
+
+  function fieldNumber(form: HTMLFormElement, name: string) {
+    const field = form.elements.namedItem(name);
+    return field instanceof HTMLInputElement ? numberValue(field.value) : 0;
+  }
+
+  function recalculate(target: EventTarget | null) {
+    const element = target instanceof HTMLElement ? target : null;
+    const form = element?.closest("form");
+    if (!(form instanceof HTMLFormElement)) return;
+
+    const summary = products.reduce(
+      (current, product, index) => {
+        const checkbox = form.elements.namedItem(`field_line_${index}_selected`);
+        const isSelected = checkbox instanceof HTMLInputElement && checkbox.checked;
+        const quantity = fieldNumber(form, `field_line_${index}_quantity`);
+        const unitValue = fieldNumber(form, `field_line_${index}_${mode === "sale" ? "unit_price" : "unit_cost"}`);
+        const discount = fieldNumber(form, `field_line_${index}_discount`);
+        const rejectedQuantity = fieldNumber(form, `field_line_${index}_rejected_quantity`);
         const acceptedQuantity = Math.max(0, quantity - rejectedQuantity);
-        if (mode === "sale") {
-          const subtotal = Math.max(0, quantity * unitValue - discount);
-          const tax = subtotal * ((product.vatRate ?? 0) / 100);
-          return { quantity: summary.quantity + quantity, subtotal: summary.subtotal + subtotal, tax: summary.tax + tax, total: summary.total + subtotal + tax };
-        }
-        const total = acceptedQuantity * unitValue;
-        return { quantity: summary.quantity + acceptedQuantity, subtotal: summary.subtotal + total, tax: summary.tax, total: summary.total + total };
+        const lineSubtotal = mode === "sale" ? Math.max(0, quantity * unitValue - discount) : acceptedQuantity * unitValue;
+        const lineTax = mode === "sale" ? lineSubtotal * ((product.vatRate ?? 0) / 100) : 0;
+        const lineTotal = lineSubtotal + lineTax;
+        setField(form, `field_line_${index}_tax_amount`, lineTax.toFixed(2));
+        setField(form, `field_line_${index}_line_total`, lineTotal.toFixed(2));
+        const display = form.querySelector(`[data-line-total="${index}"]`);
+        if (display) display.textContent = money(lineTotal);
+        if (!isSelected) return current;
+        return {
+          quantity: current.quantity + (mode === "sale" ? quantity : acceptedQuantity),
+          subtotal: current.subtotal + lineSubtotal,
+          tax: current.tax + lineTax,
+          total: current.total + lineTotal,
+        };
       },
       { quantity: 0, subtotal: 0, tax: 0, total: 0 },
     );
-  }, [discounts, mode, prices, products, quantities, rejected, selected]);
+
+    setField(form, "field_subtotal", summary.subtotal.toFixed(2));
+    setField(form, "field_tax", summary.tax.toFixed(2));
+    setField(form, "field_total", summary.total.toFixed(2));
+    if (summaryRefs.quantity.current) summaryRefs.quantity.current.textContent = money(summary.quantity);
+    if (summaryRefs.subtotal.current) summaryRefs.subtotal.current.textContent = `KES ${money(summary.subtotal)}`;
+    if (summaryRefs.tax.current) summaryRefs.tax.current.textContent = `KES ${money(summary.tax)}`;
+    if (summaryRefs.total.current) summaryRefs.total.current.textContent = `KES ${money(summary.total)}`;
+  }
 
   const sharedDateName = mode === "sale" ? "field_invoice_date" : "field_received_date";
   const sharedDateLabel = mode === "sale" ? "Invoice date" : "Received date";
@@ -74,9 +103,9 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
       <input type="hidden" name="field_line_count" value={products.length} />
       <input type="hidden" name={`label_${mode === "sale" ? "customer_id" : "supplier_id"}`} value={partyLabel} />
       <input type="hidden" name={`label_${mode === "sale" ? "invoice_date" : "received_date"}`} value={sharedDateLabel} />
-      <input type="hidden" name="field_subtotal" value={totals.subtotal.toFixed(2)} />
-      <input type="hidden" name="field_tax" value={totals.tax.toFixed(2)} />
-      <input type="hidden" name="field_total" value={totals.total.toFixed(2)} />
+      <input type="hidden" name="field_subtotal" defaultValue="0.00" />
+      <input type="hidden" name="field_tax" defaultValue="0.00" />
+      <input type="hidden" name="field_total" defaultValue="0.00" />
 
       <section className="grid gap-4 rounded-md border border-slate-200 bg-slate-50 p-4 lg:grid-cols-4">
         <label className="grid gap-2 text-sm font-semibold lg:col-span-2">
@@ -168,12 +197,13 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
             {searchableProducts.map(({ product, index }) => {
               const productName = product.name || "Unnamed product";
               const productCode = product.code || "";
-              const quantity = numberValue(quantities[index]);
-              const unitValue = numberValue(prices[index]);
-              const discount = numberValue(discounts[index]);
+              const defaultUnitValue = mode === "sale" && product.price > 0 ? product.price : 0;
+              const quantity = 0;
+              const unitValue = defaultUnitValue;
+              const discount = 0;
               const tax = Math.max(0, quantity * unitValue - discount) * ((product.vatRate ?? 0) / 100);
               const saleTotal = Math.max(0, quantity * unitValue - discount + tax);
-              const accepted = Math.max(0, quantity - numberValue(rejected[index]));
+              const accepted = quantity;
               const receiptTotal = accepted * unitValue;
               return (
                 <tr key={product.id || index} className="border-b border-slate-100 odd:bg-white even:bg-slate-50">
@@ -182,16 +212,15 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
                       type="checkbox"
                       name={`field_line_${index}_selected`}
                       value="yes"
-                      checked={Boolean(selected[index])}
-                      onChange={(event) => setSelected((current) => ({ ...current, [index]: event.target.checked }))}
+                      onChange={(event) => recalculate(event.currentTarget)}
                       className="h-4 w-4"
                     />
                     <input type="hidden" name={`field_line_${index}_product_id`} value={product.id || ""} />
                     <input type="hidden" name={`field_line_${index}_product_name`} value={productName} />
                     <input type="hidden" name={`field_line_${index}_product_code`} value={productCode} />
                     <input type="hidden" name={`field_line_${index}_tax_rate`} value={product.vatRate ?? 0} />
-                    <input type="hidden" name={`field_line_${index}_tax_amount`} value={mode === "sale" ? tax.toFixed(2) : "0"} />
-                    <input type="hidden" name={`field_line_${index}_line_total`} value={(mode === "sale" ? saleTotal : receiptTotal).toFixed(2)} />
+                    <input type="hidden" name={`field_line_${index}_tax_amount`} defaultValue={mode === "sale" ? tax.toFixed(2) : "0"} />
+                    <input type="hidden" name={`field_line_${index}_line_total`} defaultValue={(mode === "sale" ? saleTotal : receiptTotal).toFixed(2)} />
                   </td>
                   <td className="px-3 py-2 align-middle">
                     <p className="font-semibold text-slate-950">{productName}</p>
@@ -205,11 +234,13 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
                       min="0"
                       step="0.01"
                       inputMode="decimal"
-                      value={quantities[index] ?? ""}
+                      defaultValue=""
                       onChange={(event) => {
                         const value = event.currentTarget.value;
-                        setQuantities((current) => ({ ...current, [index]: value }));
-                        if (numberValue(value) > 0) setSelected((current) => ({ ...current, [index]: true }));
+                        const form = event.currentTarget.form;
+                        const checkbox = form?.elements.namedItem(`field_line_${index}_selected`);
+                        if (numberValue(value) > 0 && checkbox instanceof HTMLInputElement) checkbox.checked = true;
+                        recalculate(event.currentTarget);
                       }}
                       className="w-28 rounded-md border border-slate-300 px-2 py-2"
                     />
@@ -221,8 +252,8 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
                       min="0"
                       step="0.01"
                       inputMode="decimal"
-                      value={prices[index] ?? ""}
-                      onChange={(event) => setPrices((current) => ({ ...current, [index]: event.currentTarget.value }))}
+                      defaultValue={defaultUnitValue ? String(defaultUnitValue) : ""}
+                      onChange={(event) => recalculate(event.currentTarget)}
                       className="w-32 rounded-md border border-slate-300 px-2 py-2"
                     />
                   </td>
@@ -234,8 +265,8 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
                         min="0"
                         step="0.01"
                         inputMode="decimal"
-                        value={discounts[index] ?? ""}
-                        onChange={(event) => setDiscounts((current) => ({ ...current, [index]: event.currentTarget.value }))}
+                        defaultValue=""
+                        onChange={(event) => recalculate(event.currentTarget)}
                         className="w-28 rounded-md border border-slate-300 px-2 py-2"
                       />
                     </td>
@@ -247,8 +278,8 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
                         min="0"
                         step="0.01"
                         inputMode="decimal"
-                        value={rejected[index] ?? ""}
-                        onChange={(event) => setRejected((current) => ({ ...current, [index]: event.currentTarget.value }))}
+                        defaultValue=""
+                        onChange={(event) => recalculate(event.currentTarget)}
                         className="w-28 rounded-md border border-slate-300 px-2 py-2"
                       />
                     </td>
@@ -261,7 +292,7 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
                     </td>
                   )}
                   {mode === "sale" ? (
-                    <td className="px-3 py-2 align-middle font-semibold">{money(saleTotal)}</td>
+                    <td className="px-3 py-2 align-middle font-semibold"><span data-line-total={index}>{money(saleTotal)}</span></td>
                   ) : (
                     <td className="px-3 py-2 align-middle">
                       <input name={`field_line_${index}_expiry_date`} type="date" className="w-36 rounded-md border border-slate-300 px-2 py-2" />
@@ -284,19 +315,19 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
       <section className="grid gap-3 rounded-md border border-cyan-100 bg-cyan-50 p-4 text-sm md:grid-cols-4">
         <div>
           <p className="text-xs font-semibold uppercase text-slate-500">Selected qty</p>
-          <p className="mt-1 text-xl font-semibold">{money(totals.quantity)}</p>
+          <p ref={summaryRefs.quantity} className="mt-1 text-xl font-semibold">0.00</p>
         </div>
         <div>
           <p className="text-xs font-semibold uppercase text-slate-500">{mode === "sale" ? "Subtotal" : "Stock value"}</p>
-          <p className="mt-1 text-xl font-semibold">KES {money(totals.subtotal)}</p>
+          <p ref={summaryRefs.subtotal} className="mt-1 text-xl font-semibold">KES 0.00</p>
         </div>
         <div>
           <p className="text-xs font-semibold uppercase text-slate-500">Tax</p>
-          <p className="mt-1 text-xl font-semibold">KES {money(totals.tax)}</p>
+          <p ref={summaryRefs.tax} className="mt-1 text-xl font-semibold">KES 0.00</p>
         </div>
         <div>
           <p className="text-xs font-semibold uppercase text-slate-500">Document total</p>
-          <p className="mt-1 text-xl font-semibold">KES {money(totals.total)}</p>
+          <p ref={summaryRefs.total} className="mt-1 text-xl font-semibold">KES 0.00</p>
         </div>
       </section>
     </div>
