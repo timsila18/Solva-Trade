@@ -2745,8 +2745,12 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
     lineValueTotal ||
     Math.max(0, subtotal - discount + tax);
   const balanceDueField = fieldValue(fields, ["balance_due", "outstanding_amount"], "");
-  const balanceDue = liveInvoiceTotals ? liveInvoiceTotals.balance : balanceDueField ? parseAmount(balanceDueField) : total;
   const amountPaid = liveInvoiceTotals ? liveInvoiceTotals.paid : parseAmount(fieldValue(fields, ["amount_paid", "amount_received", "paid"], "0"));
+  const balanceDue = liveInvoiceTotals
+    ? liveInvoiceTotals.balance
+    : balanceDueField
+      ? parseAmount(balanceDueField)
+      : Math.max(0, total - amountPaid);
   const reference =
     liveInvoiceDetails["Invoice no."] ||
     fieldValue(fields, [
