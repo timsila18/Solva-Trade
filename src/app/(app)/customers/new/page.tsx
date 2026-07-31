@@ -26,6 +26,7 @@ export default function NewCustomerPage() {
         <form action={completeProcessAction} className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
           <input type="hidden" name="module" value="Customers" />
           <input type="hidden" name="process" value="New Customer" />
+          <input type="hidden" name="document" value="Customer Profile" />
           <input type="hidden" name="intent" value="Customer saved" />
           <input type="hidden" name="returnTo" value="/customers/new" />
           <input type="hidden" name="next" value="Add another customer" />
@@ -82,7 +83,8 @@ export default function NewCustomerPage() {
               </label>
               <label className="text-sm font-medium">
                 Price group
-                <select className="mt-2 min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 py-2" defaultValue="Standard">
+                <input type="hidden" name="label_price_group" value="Price group" />
+                <select name="field_price_group" className="mt-2 min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 py-2" defaultValue="Standard">
                   {["Standard", "Wholesale", "Retail", "Special customer"].map((term) => (
                     <option key={term}>{term}</option>
                   ))}

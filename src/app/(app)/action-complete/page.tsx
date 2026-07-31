@@ -19,7 +19,7 @@ export default async function ActionCompletePage({
     process: documentName,
   });
   Object.entries(params).forEach(([key, value]) => {
-    if (!key.startsWith("field_") && !key.startsWith("label_")) return;
+    if (!key.startsWith("field_") && !key.startsWith("label_") && !["customerId", "productId", "supplierId"].includes(key)) return;
     const resolvedValue = Array.isArray(value) ? value[0] : value;
     if (typeof resolvedValue === "string" && resolvedValue.trim()) exportParams.append(key, resolvedValue);
   });

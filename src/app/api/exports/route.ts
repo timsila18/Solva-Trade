@@ -368,6 +368,11 @@ function isProductProfileReport(moduleName: string, processName: string) {
   return `${moduleName} ${processName}`.toLowerCase().includes("product profile");
 }
 
+function isCustomerProfileReport(moduleName: string, processName: string) {
+  const value = `${moduleName} ${processName}`.toLowerCase();
+  return value.includes("customer profile") || (moduleName.toLowerCase() === "customers" && processName.toLowerCase().includes("customer"));
+}
+
 function isInventoryOperationalReport(moduleName: string, processName: string) {
   const value = `${moduleName} ${processName}`.toLowerCase();
   return (
@@ -568,6 +573,87 @@ async function productMasterReportLines(productId?: string | null): Promise<Repo
       batch: details["Reorder status"],
       notes: `${details.Brand || "No brand"} - ${details.Category || "No category"} - ${details["Pack conversion"]}`,
       details,
+    };
+  });
+}
+
+async function customerProfileReportLines(customerId?: string | null): Promise<ReportLine[]> {
+  const businessId = await activeReportBusinessId();
+  if (!businessId || !customerId) return [];
+
+  const supabase = await createSupabaseServerClient();
+  const { data: customer } = await supabase
+    .from("customers")
+    .select("id, customer_code, customer_name, customer_type, kra_pin, phone, email, default_payment_terms, credit_limit, current_balance, status, active, created_at, updated_at, branches(branch_name, branch_code)")
+    .eq("business_id", businessId)
+    .eq("id", customerId)
+    .maybeSingle();
+
+  if (!customer) return [];
+
+  const { data: addresses } = await supabase
+    .from("customer_addresses")
+    .select("address_label, physical_address, town, county, contact_person, contact_phone, delivery_instructions, is_default, active")
+    .eq("business_id", businessId)
+    .eq("customer_id", customerId)
+    .eq("active", true)
+    .order("is_default", { ascending: false })
+    .limit(3);
+
+  const branch = relatedOne(customer.branches as { branch_name?: string | null; branch_code?: string | null } | { branch_name?: string | null; branch_code?: string | null }[] | null);
+  const defaultAddress = addresses?.[0];
+  const location = [defaultAddress?.physical_address, defaultAddress?.town, defaultAddress?.county].filter(Boolean).join(", ") || "Not provided";
+  const terms = String(customer.default_payment_terms ?? "due_immediately").replaceAll("_", " ");
+  const status = customer.active === false ? "Inactive" : String(customer.status ?? "active");
+  const balance = numberValue(customer.current_balance);
+  const creditLimit = numberValue(customer.credit_limit);
+  const details = {
+    "Customer code": String(customer.customer_code ?? ""),
+    "Customer name": String(customer.customer_name ?? ""),
+    "Customer type": String(customer.customer_type ?? "business"),
+    Phone: String(customer.phone ?? "Not provided"),
+    Email: String(customer.email ?? "Not provided"),
+    "KRA PIN": String(customer.kra_pin ?? "Not provided"),
+    "Town or area": String(defaultAddress?.town ?? "Not provided"),
+    "Delivery route": String(defaultAddress?.delivery_instructions ?? "Not provided").replace(/^Preferred route:\s*/i, ""),
+    "Default address": location,
+    "Contact person": String(defaultAddress?.contact_person ?? customer.customer_name ?? ""),
+    "Contact phone": String(defaultAddress?.contact_phone ?? customer.phone ?? "Not provided"),
+    Branch: [branch?.branch_name, branch?.branch_code].filter(Boolean).join(" - ") || "Main workspace",
+    "Payment terms": terms,
+    "Credit limit": money(creditLimit),
+    "Current balance": money(balance),
+    Status: status,
+    "Created on": String(customer.created_at ?? "").slice(0, 10),
+    "Updated on": String(customer.updated_at ?? "").slice(0, 10),
+    "Follow-up status": balance > 0 ? "Has outstanding balance" : "No balance due",
+    "Credit risk": balance > creditLimit && creditLimit > 0 ? "Above credit limit" : balance > 0 ? "Monitor" : "Normal",
+  };
+
+  return Object.entries(details).map(([label, value], index) => {
+    const risk = /kra|pin|credit|balance|terms/i.test(label) ? "Review" : "Normal";
+    return {
+      sku: String(index + 1).padStart(2, "0"),
+      description: label,
+      unit: "Profile field",
+      quantity: 1,
+      unitPrice: 0,
+      discount: 0,
+      taxRate: String(details.Status),
+      taxAmount: 0,
+      lineTotal: 0,
+      warehouse: details.Branch,
+      batch: risk,
+      notes: `${label}: ${value}`,
+      details: {
+        Field: label,
+        Value: value,
+        Status: value && value !== "Not provided" ? "Captured" : "Missing",
+        "Verified By": "Tenant user",
+        "Updated On": details["Updated on"] || todayIsoDate(),
+        Risk: risk,
+        Notes: label === "Current balance" ? details["Follow-up status"] : "Saved customer master-data field.",
+      },
     };
   });
 }
@@ -2437,6 +2523,7 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
   const moduleName = searchParams.get("module") ?? "Solva Trade";
   const processName = searchParams.get("process") ?? "Business Process";
   const productId = searchParams.get("productId");
+  const customerId = searchParams.get("customerId");
   const fields = submittedFields(searchParams);
   const partyName =
     searchParams.get("customer") ??
@@ -2454,6 +2541,8 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
         ? await salesOperationalReportLines(processName)
       : isProductProfileReport(moduleName, processName)
         ? await productMasterReportLines(productId)
+        : isCustomerProfileReport(moduleName, processName)
+          ? await customerProfileReportLines(customerId)
       : isProductMasterReport(moduleName, processName)
         ? await productMasterReportLines()
         : isInventoryOperationalReport(moduleName, processName)
@@ -2502,6 +2591,9 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
     } else if (isProductMasterReport(moduleName, processName)) {
       processStatus = "Live product master from saved inventory records";
       sourceAuditNote = "Product master values come from saved products, product setup details, pack conversions, stock balances and latest purchase receipts.";
+    } else if (isCustomerProfileReport(moduleName, processName)) {
+      processStatus = "Live customer profile from saved customer records";
+      sourceAuditNote = "Customer profile values come from the saved customer record, default address, branch, credit limit, balance, contact details and payment terms.";
     } else if (isInventoryOperationalReport(moduleName, processName)) {
       processStatus = "Live inventory report from saved products, balances, movement and sales allocation records";
       sourceAuditNote = "Inventory report values come from saved products, stock balances, reorder controls, latest receipts and posted sales allocations where applicable.";

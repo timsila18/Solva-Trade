@@ -595,7 +595,7 @@ async function createCustomerRecord(formData: FormData, userId: string, fallback
   const name = getField(formData, "customer_name");
   if (!name) throw new Error("Enter the customer name.");
   const code = `CUS-${Date.now().toString().slice(-6)}`;
-  await admin.from("customers").insert({
+  const { data: customer, error } = await admin.from("customers").insert({
     business_id: businessId,
     branch_id: branchId,
     customer_code: code,
@@ -607,7 +607,31 @@ async function createCustomerRecord(formData: FormData, userId: string, fallback
     current_balance: getNumber(formData, "opening_balance"),
     default_payment_terms: getField(formData, "payment_agreement") || "due_immediately",
     created_by: userId,
-  });
+  }).select("id, customer_code, customer_name").single();
+  if (error || !customer) throw new Error(error?.message ?? "Could not save customer.");
+
+  const townOrArea = getField(formData, "town_or_area");
+  const deliveryRoute = getField(formData, "delivery_route");
+  if (townOrArea || deliveryRoute) {
+    const { error: addressError } = await admin.from("customer_addresses").insert({
+      business_id: businessId,
+      customer_id: customer.id,
+      address_label: "Main",
+      town: townOrArea || null,
+      delivery_instructions: deliveryRoute ? `Preferred route: ${deliveryRoute}` : null,
+      contact_person: name,
+      contact_phone: getField(formData, "phone_number") || null,
+      is_default: true,
+      active: true,
+    });
+    if (addressError) throw new Error(addressError.message);
+  }
+
+  return {
+    customerId: customer.id as string,
+    customerCode: String(customer.customer_code ?? code),
+    customerName: String(customer.customer_name ?? name),
+  };
 }
 
 async function createSupplierRecord(formData: FormData, userId: string, fallbackBusinessId?: string | null) {
@@ -1268,7 +1292,11 @@ export async function completeProcessAction(formData: FormData) {
         appendGeneratedDocumentField(params, "grn_number", "GRN number", result.grnNumber);
       }
       if (moduleName === "Customers" && processName === "New Customer") {
-        await createCustomerRecord(formData, user.id, businessId);
+        const result = await createCustomerRecord(formData, user.id, businessId);
+        generatedReference = result.customerCode;
+        params.set("customerId", result.customerId);
+        appendGeneratedDocumentField(params, "customer_code", "Customer code", result.customerCode);
+        appendGeneratedDocumentField(params, "customer", "Customer", result.customerName);
       }
       if (moduleName === "Suppliers" && processName === "New Supplier") {
         await createSupplierRecord(formData, user.id, businessId);
