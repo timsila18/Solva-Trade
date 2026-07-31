@@ -1,7 +1,24 @@
 import Link from "next/link";
-import { Phone, Search, UserPlus } from "lucide-react";
+import { Eye, Pencil, Phone, Search, UserPlus } from "lucide-react";
 import { EmptyState, MetricCard, PageHero } from "@/components/ui/premium";
 import { customerSetupSections, salesSummary } from "@/lib/sales-data";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getActiveBusinessId } from "@/lib/tenant";
+
+type CustomerRow = {
+  id: string;
+  customer_code: string | null;
+  customer_name: string;
+  phone: string | null;
+  email: string | null;
+  kra_pin: string | null;
+  current_balance: number | string | null;
+  credit_limit: number | string | null;
+  default_payment_terms: string | null;
+  active: boolean | null;
+  status: string | null;
+  customer_addresses?: { town: string | null; delivery_instructions: string | null; is_default: boolean | null }[] | null;
+};
 
 const setupLabels: Record<string, string> = {
   Identity: "Name and business type",
@@ -14,7 +31,38 @@ const setupLabels: Record<string, string> = {
   "Packaging Account": "Crates and returns",
 };
 
-export default function CustomersPage() {
+function money(value: unknown) {
+  const amount = Number(value ?? 0);
+  return new Intl.NumberFormat("en-KE", { style: "currency", currency: "KES", maximumFractionDigits: 2 }).format(Number.isFinite(amount) ? amount : 0);
+}
+
+function cleanTerm(value: string | null) {
+  return (value || "Due immediately").replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+async function loadCustomers() {
+  const supabase = await createSupabaseServerClient();
+  const { data: userData } = await supabase.auth.getUser();
+  const businessId =
+    (await getActiveBusinessId()) ||
+    (typeof userData.user?.app_metadata?.active_business_id === "string" ? userData.user.app_metadata.active_business_id : null);
+  if (!businessId) return [] as CustomerRow[];
+
+  const { data } = await supabase
+    .from("customers")
+    .select("id, customer_code, customer_name, phone, email, kra_pin, current_balance, credit_limit, default_payment_terms, active, status, customer_addresses(town, delivery_instructions, is_default)")
+    .eq("business_id", businessId)
+    .order("updated_at", { ascending: false })
+    .limit(200);
+
+  return (data ?? []) as unknown as CustomerRow[];
+}
+
+export default async function CustomersPage() {
+  const customers = await loadCustomers();
+  const activeCount = customers.filter((customer) => customer.active !== false && customer.status !== "inactive").length;
+  const customerBalance = customers.reduce((sum, customer) => sum + Math.max(0, Number(customer.current_balance ?? 0) || 0), 0);
+
   return (
     <div className="pb-24">
       <PageHero
@@ -29,7 +77,7 @@ export default function CustomersPage() {
       <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard
           label="Customers saved"
-          value={salesSummary.activeCustomers.toString()}
+          value={activeCount.toString()}
           story="Add customers once; use them everywhere."
         />
         <MetricCard
@@ -39,7 +87,7 @@ export default function CustomersPage() {
         />
         <MetricCard
           label="Money customers owe you"
-          value={salesSummary.customerBalance}
+          value={money(customerBalance)}
           story="A plain balance you can follow up on."
         />
         <MetricCard
@@ -100,13 +148,58 @@ export default function CustomersPage() {
               Add by Phone
             </Link>
           </div>
-          <div className="mt-5">
-            <EmptyState
-              title="You haven't added any customers yet."
-              description="Customers help you track sales, balances, payments and delivery places without repeating details."
-              action={{ label: "Add First Customer", href: "/customers/new" }}
-            />
-          </div>
+          {customers.length > 0 ? (
+            <div className="mt-5 overflow-x-auto">
+              <div className="min-w-[920px]">
+                <div className="grid grid-cols-[1.4fr_0.8fr_1fr_0.9fr_0.85fr_0.85fr_1fr] gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">
+                  <span>Customer</span>
+                  <span>Phone</span>
+                  <span>Town / Route</span>
+                  <span>Terms</span>
+                  <span>Balance</span>
+                  <span>Status</span>
+                  <span className="text-right">Actions</span>
+                </div>
+                {customers.map((customer) => {
+                  const address = customer.customer_addresses?.find((item) => item.is_default) ?? customer.customer_addresses?.[0];
+                  const route = address?.delivery_instructions?.replace(/^Preferred route:\s*/i, "") || "-";
+                  return (
+                    <div key={customer.id} className="grid grid-cols-[1.4fr_0.8fr_1fr_0.9fr_0.85fr_0.85fr_1fr] items-center gap-3 border-b border-slate-100 px-4 py-3 text-sm last:border-b-0">
+                      <div>
+                        <p className="font-semibold text-slate-950">{customer.customer_name}</p>
+                        <p className="mt-0.5 text-xs text-slate-500">{customer.customer_code ?? "No code"}{customer.kra_pin ? ` · ${customer.kra_pin}` : ""}</p>
+                      </div>
+                      <span className="text-slate-700">{customer.phone || "-"}</span>
+                      <span className="text-slate-700">{[address?.town, route].filter((value) => value && value !== "-").join(" / ") || "-"}</span>
+                      <span>{cleanTerm(customer.default_payment_terms)}</span>
+                      <span className="font-semibold">{money(customer.current_balance)}</span>
+                      <span className={`w-fit rounded-[4px] px-2 py-1 text-xs font-semibold ${customer.active !== false && customer.status !== "inactive" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                        {customer.active !== false && customer.status !== "inactive" ? "Active" : "Inactive"}
+                      </span>
+                      <div className="flex justify-end gap-2">
+                        <Link href={`/customers/${customer.id}/edit`} className="inline-flex min-h-9 items-center gap-1.5 rounded-[6px] border border-slate-300 px-3 text-xs font-semibold text-slate-700">
+                          <Pencil className="h-3.5 w-3.5" />
+                          Edit
+                        </Link>
+                        <Link href={`/api/exports?module=Customers&process=Customer%20Profile&format=pdf&customerId=${customer.id}`} className="inline-flex min-h-9 items-center gap-1.5 rounded-[6px] bg-slate-950 px-3 text-xs font-semibold text-white">
+                          <Eye className="h-3.5 w-3.5" />
+                          PDF
+                        </Link>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            <div className="mt-5">
+              <EmptyState
+                title="You haven't added any customers yet."
+                description="Customers help you track sales, balances, payments and delivery places without repeating details."
+                action={{ label: "Add First Customer", href: "/customers/new" }}
+              />
+            </div>
+          )}
         </div>
       </section>
     </div>

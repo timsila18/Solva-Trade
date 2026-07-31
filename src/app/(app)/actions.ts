@@ -634,6 +634,76 @@ async function createCustomerRecord(formData: FormData, userId: string, fallback
   };
 }
 
+async function updateCustomerRecord(formData: FormData, userId: string, fallbackBusinessId?: string | null) {
+  const admin = await createSupabaseServerClient();
+  const { businessId, branchId } = await getWorkspaceContextForClient(admin, userId, fallbackBusinessId);
+  const customerId = getField(formData, "customer_id");
+  const name = getField(formData, "customer_name");
+  if (!customerId) throw new Error("Select a saved customer before editing.");
+  if (!name) throw new Error("Enter the customer name.");
+
+  const { data: existing, error: existingError } = await admin
+    .from("customers")
+    .select("id, customer_code")
+    .eq("business_id", businessId)
+    .eq("id", customerId)
+    .maybeSingle();
+  if (existingError || !existing) throw new Error(existingError?.message ?? "Customer not found in this business.");
+
+  const { data: customer, error } = await admin
+    .from("customers")
+    .update({
+      branch_id: branchId,
+      customer_name: name,
+      phone: getField(formData, "phone_number") || null,
+      email: getField(formData, "email") || null,
+      kra_pin: getField(formData, "kra_pin") || null,
+      credit_limit: getNumber(formData, "credit_limit"),
+      current_balance: getNumber(formData, "opening_balance"),
+      default_payment_terms: getField(formData, "payment_agreement") || "due_immediately",
+      active: getField(formData, "customer_status") !== "Inactive",
+      status: getField(formData, "customer_status") === "Inactive" ? "inactive" : "active",
+    })
+    .eq("business_id", businessId)
+    .eq("id", customerId)
+    .select("id, customer_code, customer_name")
+    .single();
+  if (error || !customer) throw new Error(error?.message ?? "Could not update customer.");
+
+  const townOrArea = getField(formData, "town_or_area");
+  const deliveryRoute = getField(formData, "delivery_route");
+  const addressPayload = {
+    business_id: businessId,
+    customer_id: customer.id,
+    address_label: "Main",
+    town: townOrArea || null,
+    delivery_instructions: deliveryRoute ? `Preferred route: ${deliveryRoute}` : null,
+    contact_person: name,
+    contact_phone: getField(formData, "phone_number") || null,
+    is_default: true,
+    active: true,
+  };
+
+  const { data: address } = await admin
+    .from("customer_addresses")
+    .select("id")
+    .eq("business_id", businessId)
+    .eq("customer_id", customer.id)
+    .eq("is_default", true)
+    .maybeSingle();
+
+  const { error: addressError } = address?.id
+    ? await admin.from("customer_addresses").update(addressPayload).eq("business_id", businessId).eq("id", address.id)
+    : await admin.from("customer_addresses").insert(addressPayload);
+  if (addressError) throw new Error(addressError.message);
+
+  return {
+    customerId: customer.id as string,
+    customerCode: String(customer.customer_code ?? existing.customer_code),
+    customerName: String(customer.customer_name ?? name),
+  };
+}
+
 async function createSupplierRecord(formData: FormData, userId: string, fallbackBusinessId?: string | null) {
   const admin = await createSupabaseServerClient();
   const { businessId, branchId, warehouseId } = await getWorkspaceContextForClient(admin, userId, fallbackBusinessId);
@@ -1293,6 +1363,13 @@ export async function completeProcessAction(formData: FormData) {
       }
       if (moduleName === "Customers" && processName === "New Customer") {
         const result = await createCustomerRecord(formData, user.id, businessId);
+        generatedReference = result.customerCode;
+        params.set("customerId", result.customerId);
+        appendGeneratedDocumentField(params, "customer_code", "Customer code", result.customerCode);
+        appendGeneratedDocumentField(params, "customer", "Customer", result.customerName);
+      }
+      if (moduleName === "Customers" && processName === "Edit Customer") {
+        const result = await updateCustomerRecord(formData, user.id, businessId);
         generatedReference = result.customerCode;
         params.set("customerId", result.customerId);
         appendGeneratedDocumentField(params, "customer_code", "Customer code", result.customerCode);
