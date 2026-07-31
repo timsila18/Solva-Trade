@@ -8,9 +8,172 @@ import {
   industryProfiles,
   settingsSections,
 } from "@/lib/configuration";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getActiveBusinessId } from "@/lib/tenant";
+
+type BusinessSettings = {
+  legal_name: string | null;
+  trading_name: string | null;
+  kra_pin: string | null;
+  phone: string | null;
+  alternative_phone: string | null;
+  email: string | null;
+  website: string | null;
+  physical_address: string | null;
+  postal_address: string | null;
+  town: string | null;
+  county: string | null;
+  country: string | null;
+  invoice_footer: string | null;
+  terms_and_conditions: string | null;
+  default_customer_message: string | null;
+  payment_details: unknown;
+};
+
+type PaymentDetails = {
+  payment_display_name?: string;
+  paybill_number?: string;
+  paybill_account_number?: string;
+  till_number?: string;
+  pochi_la_biashara_phone?: string;
+  send_money_phone?: string;
+  cheque_payee?: string;
+  contact_phone?: string;
+  whatsapp_number?: string;
+  bank_name?: string;
+  bank_account_name?: string;
+};
 
 export function generateStaticParams() {
   return settingsSections.map((section) => ({ section: section.slug }));
+}
+
+function paymentDetailsFromJson(value: unknown): PaymentDetails {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([, item]) => typeof item === "string")
+      .map(([key, item]) => [key, String(item)]),
+  ) as PaymentDetails;
+}
+
+async function loadBusinessSettings(slug: string) {
+  if (slug !== "business-profile" && slug !== "payments") return null;
+  const businessId = await getActiveBusinessId();
+  if (!businessId) return null;
+  const supabase = await createSupabaseServerClient();
+  const { data } = await supabase
+    .from("businesses")
+    .select(
+      "legal_name, trading_name, kra_pin, phone, alternative_phone, email, website, physical_address, postal_address, town, county, country, invoice_footer, terms_and_conditions, default_customer_message, payment_details",
+    )
+    .eq("id", businessId)
+    .maybeSingle<BusinessSettings>();
+  return data ?? null;
+}
+
+function TextField({
+  name,
+  label,
+  defaultValue,
+  placeholder,
+  type = "text",
+  required = false,
+}: {
+  name: string;
+  label: string;
+  defaultValue?: string | null;
+  placeholder?: string;
+  type?: string;
+  required?: boolean;
+}) {
+  return (
+    <label className="grid gap-2 text-sm font-semibold">
+      {label}
+      <input
+        name={`field_${name}`}
+        type={type}
+        required={required}
+        defaultValue={defaultValue ?? ""}
+        placeholder={placeholder ?? label}
+        className="rounded-md border border-slate-300 px-3 py-2 text-sm font-normal"
+      />
+      <input type="hidden" name={`label_${name}`} value={label} />
+    </label>
+  );
+}
+
+function TextAreaField({
+  name,
+  label,
+  defaultValue,
+  placeholder,
+}: {
+  name: string;
+  label: string;
+  defaultValue?: string | null;
+  placeholder?: string;
+}) {
+  return (
+    <label className="grid gap-2 text-sm font-semibold md:col-span-2">
+      {label}
+      <textarea
+        name={`field_${name}`}
+        defaultValue={defaultValue ?? ""}
+        placeholder={placeholder ?? label}
+        className="min-h-24 rounded-md border border-slate-300 px-3 py-2 text-sm font-normal"
+      />
+      <input type="hidden" name={`label_${name}`} value={label} />
+    </label>
+  );
+}
+
+function BusinessProfileFields({ business }: { business: BusinessSettings | null }) {
+  return (
+    <div className="grid gap-4 md:grid-cols-2">
+      <TextField name="legal_name" label="Legal name" defaultValue={business?.legal_name} required />
+      <TextField name="trading_name" label="Trading name shown in the app and documents" defaultValue={business?.trading_name} required />
+      <TextField name="kra_pin" label="KRA PIN" defaultValue={business?.kra_pin} />
+      <TextField name="phone" label="Primary phone" defaultValue={business?.phone} />
+      <TextField name="alternative_phone" label="Alternative phone" defaultValue={business?.alternative_phone} />
+      <TextField name="email" label="Business email" type="email" defaultValue={business?.email} />
+      <TextField name="website" label="Website" defaultValue={business?.website} />
+      <TextField name="town" label="Town" defaultValue={business?.town} />
+      <TextField name="county" label="County" defaultValue={business?.county} />
+      <TextField name="country" label="Country" defaultValue={business?.country ?? "Kenya"} />
+      <TextAreaField name="physical_address" label="Physical address" defaultValue={business?.physical_address} />
+      <TextAreaField name="postal_address" label="Postal address" defaultValue={business?.postal_address} />
+      <TextAreaField name="invoice_footer" label="Invoice footer note" defaultValue={business?.invoice_footer} />
+      <TextAreaField name="terms_and_conditions" label="Terms and conditions" defaultValue={business?.terms_and_conditions} />
+      <TextAreaField name="default_customer_message" label="Default customer message" defaultValue={business?.default_customer_message} />
+    </div>
+  );
+}
+
+function PaymentMethodFields({ business }: { business: BusinessSettings | null }) {
+  const details = paymentDetailsFromJson(business?.payment_details);
+  const businessName = business?.trading_name || business?.legal_name || "";
+  return (
+    <div className="grid gap-4 md:grid-cols-2">
+      <TextField
+        name="payment_display_name"
+        label="Payment display name"
+        defaultValue={details.payment_display_name ?? businessName}
+        placeholder="Name customers should see when paying"
+        required
+      />
+      <TextField name="till_number" label="M-Pesa Till number" defaultValue={details.till_number} placeholder="8060990" />
+      <TextField name="send_money_phone" label="Send Money M-Pesa number" defaultValue={details.send_money_phone} placeholder="0720243591" />
+      <TextField name="cheque_payee" label="Cheque payee name" defaultValue={details.cheque_payee ?? businessName} placeholder="Cymereg Enterprise" />
+      <TextField name="paybill_number" label="Paybill number" defaultValue={details.paybill_number} />
+      <TextField name="paybill_account_number" label="Paybill account number" defaultValue={details.paybill_account_number} />
+      <TextField name="pochi_la_biashara_phone" label="Pochi la Biashara phone" defaultValue={details.pochi_la_biashara_phone} />
+      <TextField name="contact_phone" label="Payment help contact phone" defaultValue={details.contact_phone ?? business?.phone} />
+      <TextField name="whatsapp_number" label="Payment help WhatsApp" defaultValue={details.whatsapp_number ?? business?.phone} />
+      <TextField name="bank_name" label="Bank name" defaultValue={details.bank_name} />
+      <TextField name="bank_account_name" label="Bank account name" defaultValue={details.bank_account_name} />
+    </div>
+  );
 }
 
 export default async function SettingsSectionPage({
@@ -21,6 +184,7 @@ export default async function SettingsSectionPage({
   const { section: slug } = await params;
   const section = findSettingsSection(slug);
   if (!section) notFound();
+  const businessSettings = await loadBusinessSettings(slug);
 
   const documentPreview = buildDocumentPreview({
     prefix: "INV",
@@ -101,10 +265,16 @@ export default async function SettingsSectionPage({
           <input type="hidden" name="next" value="Continue settings" />
           <h2 className="text-lg font-semibold">Configuration fields</h2>
           <p className="mt-1 text-sm text-slate-600">
-            Validated server actions will persist these values tenant-scoped and record audit events.
+            Save once here and Solva Trade will use these details across the tenant workspace and relevant documents.
           </p>
           <div className="mt-5">
-            <WorkflowFormFields fields={section.fields.slice(0, 10)} />
+            {slug === "business-profile" ? (
+              <BusinessProfileFields business={businessSettings} />
+            ) : slug === "payments" ? (
+              <PaymentMethodFields business={businessSettings} />
+            ) : (
+              <WorkflowFormFields fields={section.fields.slice(0, 10)} />
+            )}
           </div>
           <div className="mt-5 flex flex-wrap gap-3">
             <label className="flex items-center gap-2 rounded-md bg-slate-100 px-3 py-2 text-sm">

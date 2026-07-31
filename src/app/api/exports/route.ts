@@ -50,6 +50,7 @@ type PaymentDetails = {
   till_number?: string;
   pochi_la_biashara_phone?: string;
   send_money_phone?: string;
+  cheque_payee?: string;
   contact_phone?: string;
   whatsapp_number?: string;
   bank_name?: string;
@@ -158,6 +159,7 @@ function paymentInstructions(details: PaymentDetails, businessName: string, fall
   if (details.till_number) lines.push(`M-Pesa Till ${details.till_number} - ${displayName}`);
   if (details.pochi_la_biashara_phone) lines.push(`Pochi la Biashara: ${details.pochi_la_biashara_phone} - ${displayName}`);
   if (details.send_money_phone) lines.push(`Send Money: ${details.send_money_phone} - ${displayName}`);
+  if (details.cheque_payee) lines.push(`Cheque in favor of ${details.cheque_payee}.`);
   if (details.bank_name || details.bank_account_name) {
     lines.push(`Bank transfer: ${[details.bank_name, details.bank_account_name].filter(Boolean).join(" - ")}`);
   }

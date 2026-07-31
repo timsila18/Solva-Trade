@@ -209,6 +209,18 @@ async function getWorkspaceContextForClient(client: SupabaseWorkspaceClient, use
   return { businessId, branchId: branch.id as string, warehouseId: warehouse.id as string, userId };
 }
 
+async function getSettingsBusinessId(client: SupabaseWorkspaceClient, fallbackBusinessId?: string | null) {
+  const businessId = (await getActiveBusinessId()) || fallbackBusinessId;
+  if (!businessId) throw new Error("No active business was selected.");
+  const { data } = await client
+    .from("businesses")
+    .select("id")
+    .eq("id", businessId)
+    .maybeSingle();
+  if (!data?.id) throw new Error("That business was not found or you do not have access to edit it.");
+  return businessId;
+}
+
 type SolvaRpcClient = SupabaseWorkspaceClient & {
   rpc: (
     fn: string,
@@ -987,7 +999,7 @@ async function postDistributionWorkflow(formData: FormData, userId: string, fall
 
 async function updateBusinessPaymentDetails(formData: FormData, userId: string, fallbackBusinessId?: string | null) {
   const admin = await createSupabaseServerClient();
-  const { businessId } = await getWorkspaceContextForClient(admin, userId, fallbackBusinessId);
+  const businessId = await getSettingsBusinessId(admin, fallbackBusinessId);
   const paymentDetails = {
     payment_display_name: getField(formData, "payment_display_name"),
     paybill_number: getField(formData, "paybill_number"),
@@ -995,6 +1007,7 @@ async function updateBusinessPaymentDetails(formData: FormData, userId: string, 
     till_number: getField(formData, "till_number"),
     pochi_la_biashara_phone: getField(formData, "pochi_la_biashara_phone"),
     send_money_phone: getField(formData, "send_money_phone"),
+    cheque_payee: getField(formData, "cheque_payee"),
     contact_phone: getField(formData, "contact_phone"),
     whatsapp_number: getField(formData, "whatsapp_number"),
     bank_name: getField(formData, "bank_name"),
@@ -1006,6 +1019,40 @@ async function updateBusinessPaymentDetails(formData: FormData, userId: string, 
   const { error } = await admin
     .from("businesses")
     .update({ payment_details: cleaned })
+    .eq("id", businessId);
+  if (error) throw new Error(error.message);
+}
+
+async function updateBusinessProfileDetails(formData: FormData, userId: string, fallbackBusinessId?: string | null) {
+  void userId;
+  const admin = await createSupabaseServerClient();
+  const businessId = await getSettingsBusinessId(admin, fallbackBusinessId);
+  const legalName = getField(formData, "legal_name");
+  const tradingName = getField(formData, "trading_name") || legalName;
+  if (!legalName && !tradingName) throw new Error("Enter the business name.");
+
+  const update = {
+    legal_name: legalName || tradingName,
+    trading_name: tradingName || legalName,
+    kra_pin: getField(formData, "kra_pin") || null,
+    phone: getField(formData, "phone") || null,
+    alternative_phone: getField(formData, "alternative_phone") || null,
+    email: getField(formData, "email") || null,
+    website: getField(formData, "website") || null,
+    physical_address: getField(formData, "physical_address") || null,
+    postal_address: getField(formData, "postal_address") || null,
+    town: getField(formData, "town") || null,
+    county: getField(formData, "county") || null,
+    country: getField(formData, "country") || "Kenya",
+    invoice_footer: getField(formData, "invoice_footer") || null,
+    terms_and_conditions: getField(formData, "terms_and_conditions") || null,
+    default_customer_message: getField(formData, "default_customer_message") || null,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { error } = await admin
+    .from("businesses")
+    .update(update)
     .eq("id", businessId);
   if (error) throw new Error(error.message);
 }
@@ -1395,6 +1442,9 @@ export async function completeProcessAction(formData: FormData) {
       }
       if (moduleName === "Settings" && processName === "Payment Methods") {
         await updateBusinessPaymentDetails(formData, user.id, businessId);
+      }
+      if (moduleName === "Settings" && processName === "Business Profile") {
+        await updateBusinessProfileDetails(formData, user.id, businessId);
       }
       if (generatedReference) {
         const reference = generatedReferencePrefix(moduleName, processName, documentName);
