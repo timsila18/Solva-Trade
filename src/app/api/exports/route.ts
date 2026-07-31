@@ -1322,6 +1322,12 @@ function itemBaseLine(item: SalesItemRow, invoice: SalesInvoiceRow | undefined, 
       "Invoice no.": String(invoice?.invoice_number ?? ""),
       Date: invoice ? dateKey(invoice.invoice_date) : todayIsoDate(),
       Customer: String(relatedOne(invoice?.customers)?.customer_name ?? "Walk-in customer"),
+      "Invoice subtotal": money(numberValue(invoice?.subtotal)),
+      "Invoice tax": money(numberValue(invoice?.tax_total)),
+      "Invoice total": money(numberValue(invoice?.total_amount)),
+      "Amount paid": money(numberValue(invoice?.amount_paid)),
+      "Balance due": money(numberValue(invoice?.balance_due)),
+      "Payment status": String(invoice?.status ?? "posted"),
     },
   };
 }
@@ -2708,21 +2714,41 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
             : [];
   const workflowLines = !liveSourceLines.length && !submittedLines.length ? await workflowRecordReportLines(moduleName, processName) : [];
   const lines = liveSourceLines.length ? liveSourceLines : submittedLines.length ? submittedLines : workflowLines;
+  const liveInvoiceDetails = invoiceId ? lines[0]?.details ?? {} : {};
+  const effectivePartyName = liveInvoiceDetails.Customer || partyName;
   const isValuationReport = isProductMasterReport(moduleName, processName) || isProductProfileReport(moduleName, processName) || isInventoryOperationalReport(moduleName, processName);
   const lineValueTotal = lines.reduce((sum, line) => sum + line.lineTotal, 0);
+  const liveInvoiceTotals = invoiceId && lines[0]?.details
+    ? {
+        subtotal: detailAmount(lines[0].details["Invoice subtotal"]),
+        tax: detailAmount(lines[0].details["Invoice tax"]),
+        total: detailAmount(lines[0].details["Invoice total"]),
+        paid: detailAmount(lines[0].details["Amount paid"]),
+        balance: detailAmount(lines[0].details["Balance due"]),
+        status: lines[0].details["Payment status"] ?? "",
+      }
+    : null;
   const subtotal = isValuationReport
     ? lineValueTotal
+    : liveInvoiceTotals?.subtotal
+      ? liveInvoiceTotals.subtotal
     : parseAmount(fieldValue(fields, ["subtotal"], "0")) ||
       lines.reduce((sum, line) => sum + Math.max(0, line.quantity * line.unitPrice - line.discount), 0);
-  const tax = isValuationReport ? 0 : parseAmount(fieldValue(fields, ["tax"], "0")) || lines.reduce((sum, line) => sum + line.taxAmount, 0);
+  const tax = isValuationReport
+    ? 0
+    : liveInvoiceTotals
+      ? liveInvoiceTotals.tax
+      : parseAmount(fieldValue(fields, ["tax"], "0")) || lines.reduce((sum, line) => sum + line.taxAmount, 0);
   const discount = isValuationReport ? 0 : parseAmount(fieldValue(fields, ["discount"], "0")) || lines.reduce((sum, line) => sum + line.discount, 0);
   const total =
-    (isValuationReport ? lineValueTotal : parseAmount(fieldValue(fields, ["total", "amount", "amount_received", "amount_sent"], "0"))) ||
+    (isValuationReport ? lineValueTotal : liveInvoiceTotals?.total || parseAmount(fieldValue(fields, ["total", "amount", "amount_received", "amount_sent"], "0"))) ||
     lineValueTotal ||
     Math.max(0, subtotal - discount + tax);
   const balanceDueField = fieldValue(fields, ["balance_due", "outstanding_amount"], "");
-  const balanceDue = balanceDueField ? parseAmount(balanceDueField) : total;
+  const balanceDue = liveInvoiceTotals ? liveInvoiceTotals.balance : balanceDueField ? parseAmount(balanceDueField) : total;
+  const amountPaid = liveInvoiceTotals ? liveInvoiceTotals.paid : parseAmount(fieldValue(fields, ["amount_paid", "amount_received", "paid"], "0"));
   const reference =
+    liveInvoiceDetails["Invoice no."] ||
     fieldValue(fields, [
       "invoice_number",
       "receipt_number",
@@ -2738,7 +2764,7 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
       "adjustment_number",
       "count_number",
     ]) || `${moduleName.slice(0, 3).toUpperCase()}-${processName.slice(0, 3).toUpperCase()}-${Date.now().toString().slice(-6)}`;
-  const documentDate = fieldValue(fields, ["invoice_date", "receipt_date", "payment_date", "received_date", "date", "delivery_date", "needed_by", "as_of_date"], todayIsoDate());
+  const documentDate = liveInvoiceDetails.Date || fieldValue(fields, ["invoice_date", "receipt_date", "payment_date", "received_date", "date", "delivery_date", "needed_by", "as_of_date"], todayIsoDate());
   const dueDate = fieldValue(fields, ["due_date", "valid_until", "expected_date", "expiry_date", "expected_arrival"], documentDate);
   let processStatus = "Ready for review";
   let sourceAuditNote = lines.length ? "Document values come from the submitted workflow fields." : "No posted transaction rows were found for the selected filters.";
@@ -2772,7 +2798,7 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
   return {
     moduleName,
     processName,
-    partyName,
+    partyName: effectivePartyName,
     businessName: tenant.businessName,
     businessLogoPath: tenant.businessLogoPath,
     businessPhone: tenant.businessPhone,
@@ -2784,15 +2810,18 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
     generatedByRole: tenant.generatedByRole,
     generatedAt: generatedAt(),
     transaction: {
-      "Report owner": partyName,
+      "Report owner": effectivePartyName,
       Business: tenant.businessName,
       "KRA PIN": tenant.kraPin || "Not provided",
+      Customer: effectivePartyName,
+      "Invoice no.": liveInvoiceDetails["Invoice no."] || fieldValue(fields, ["invoice_number"], reference),
       "Reference number": reference,
       "Document date": documentDate,
       "Due or action date": dueDate,
       Branch: fieldValue(fields, ["branch", "dispatch_warehouse", "warehouse", "route"], "Main workspace"),
       Currency: "KES",
       "Payment terms": fieldValue(fields, ["payment_terms", "payment_status", "payment_method", "delivery_terms"], "As entered"),
+      "Payment status": liveInvoiceTotals?.status || fieldValue(fields, ["payment_status"], ""),
       "Payment instructions": tenant.paymentInstructions.join(" | ") || "Not configured",
       "Process status": processStatus,
       "Source workspace": moduleName,
@@ -2806,7 +2835,7 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
       Tax: money(tax),
       Total: money(total),
       ...(processName.toLowerCase().includes("invoice") ? { "Amount due": money(balanceDue) } : {}),
-      "Amount paid": money(parseAmount(fieldValue(fields, ["amount_paid", "amount_received", "paid"], "0"))),
+      "Amount paid": money(amountPaid),
       "Balance due": money(balanceDue),
     },
     approvals: approvalSummary(generatedBy, tenant.generatedByRole),
@@ -3248,7 +3277,7 @@ function htmlDocument(report: Report, print = false) {
     @page { size: A4; margin: 16mm; }
     * { box-sizing: border-box; }
     body { margin: 0; background: #eaf1f8; color: ${brand.navy}; font-family: Arial, Helvetica, sans-serif; }
-    .page { position: relative; max-width: 920px; min-height: 1180px; margin: ${print ? "0" : "24px auto"}; overflow: hidden; background: white; padding: 42px 48px 36px; box-shadow: ${print ? "none" : "0 18px 60px rgba(7,26,43,.12)"}; }
+    .page { position: relative; max-width: 920px; min-height: 1180px; margin: ${print ? "0" : "24px auto"}; overflow: visible; background: white; padding: 42px 48px 36px; box-shadow: ${print ? "none" : "0 18px 60px rgba(7,26,43,.12)"}; }
     .watermark { position: absolute; inset: 28% auto auto 14%; color: rgba(24,183,201,.06); font-size: 150px; font-weight: 900; letter-spacing: 8px; transform: rotate(-18deg); pointer-events: none; white-space: nowrap; }
     .accent { position: absolute; left: 0; right: 0; top: 0; height: 10px; background: linear-gradient(90deg, var(--doc-accent), ${brand.cyan}, ${brand.gold}); }
     header { position: relative; display: grid; grid-template-columns: 1fr 270px; gap: 32px; align-items: start; }
@@ -3306,10 +3335,12 @@ function htmlDocument(report: Report, print = false) {
     .payment-instructions ul { margin: 0; padding-left: 18px; color: ${brand.navy}; font-size: 12px; line-height: 1.6; }
     .terms ol { margin: 0; padding-left: 18px; color: ${brand.slate}; font-size: 11px; line-height: 1.6; }
     .table-wrap { position: relative; margin-top: 26px; border: 1px solid ${brand.border}; border-radius: 10px; overflow: hidden; }
-    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; page-break-inside: auto; }
+    tr, .box, .panel, .receipt-confirmation, .receipt-status, .after-table, .payment-instructions { page-break-inside: avoid; break-inside: avoid; }
     caption { padding: 10px 12px; background: #f8fafc; color: ${brand.slate}; font-size: 11px; font-weight: 800; text-align: left; text-transform: uppercase; }
     th { background: var(--doc-accent); color: white; font-size: 11px; padding: 10px 8px; text-align: left; }
-    td { border-top: 1px solid ${brand.border}; color: ${brand.navy}; font-size: 11px; line-height: 1.35; padding: 10px 8px; vertical-align: top; word-break: break-word; }
+    td, th, dd, p, li { overflow-wrap: anywhere; word-break: normal; }
+    td { border-top: 1px solid ${brand.border}; color: ${brand.navy}; font-size: 11px; line-height: 1.35; padding: 10px 8px; vertical-align: top; }
     .empty-row { color: ${brand.muted}; text-align: center; padding: 22px 12px; }
     tbody tr:nth-child(even) td { background: #f4f8fc; }
     .num { text-align: right; }
@@ -3413,7 +3444,7 @@ class PdfCanvas {
     this.ops.push(`q ${width.toFixed(2)} 0 0 ${height.toFixed(2)} ${x.toFixed(2)} ${y.toFixed(2)} cm /${name} Do Q`);
   }
 
-  wrap(value: string, x: number, y: number, width: number, size = 10, color = "navy", bold = false, leading = size + 4) {
+  wrap(value: string, x: number, y: number, width: number, size = 10, color = "navy", bold = false, leading = size + 4, maxLines = 5) {
     const maxChars = Math.max(8, Math.floor(width / (size * 0.52)));
     const words = splitForPdfCell(value, maxChars);
     const rows: string[] = [];
@@ -3428,8 +3459,13 @@ class PdfCanvas {
       }
     });
     if (current) rows.push(current);
-    rows.slice(0, 5).forEach((row, index) => this.text(row, x, y - index * leading, size, color, bold));
-    return y - Math.min(rows.length, 5) * leading;
+    const visibleRows = rows.slice(0, maxLines);
+    if (rows.length > maxLines && visibleRows.length) {
+      const last = visibleRows[visibleRows.length - 1];
+      visibleRows[visibleRows.length - 1] = last.length > 3 ? `${last.slice(0, Math.max(1, maxChars - 3))}...` : "...";
+    }
+    visibleRows.forEach((row, index) => this.text(row, x, y - index * leading, size, color, bold));
+    return y - Math.min(rows.length, maxLines) * leading;
   }
 
   output() {
@@ -3503,14 +3539,14 @@ function renderPdfTable(canvas: PdfCanvas, report: Report, startY: number) {
 
   let renderedRows = 0;
   for (const [rowIndex, row] of rows.entries()) {
-    const cellLines = row.map((cell, index) => wrapLineCount(cell, (widths[index] ?? 70) - 10, 7.2, 3));
-    const height = Math.max(32, Math.max(...cellLines) * 10 + 16);
-    if (y - height < 220) break;
+    const cellLines = row.map((cell, index) => wrapLineCount(cell, (widths[index] ?? 70) - 10, 7, 2));
+    const height = Math.max(28, Math.max(...cellLines) * 9 + 14);
+    if (y - height < 260) break;
     canvas.rect(x, y - height + 6, 530, height, rowIndex % 2 === 0 ? "white" : "soft");
     canvas.line(x, y + 6, x + 530, y + 6);
     cursor = x;
     row.forEach((cell, index) => {
-      canvas.wrap(cell || "-", cursor + 5, y - 8, (widths[index] ?? 70) - 10, 7.2, "navy", false, 10);
+      canvas.wrap(cell || "-", cursor + 5, y - 8, (widths[index] ?? 70) - 10, 7, "navy", false, 9, 2);
       cursor += widths[index] ?? 70;
     });
     y -= height;
@@ -3640,14 +3676,14 @@ function renderLandscapePdfTable(canvas: PdfCanvas, report: Report, startY: numb
 
   let renderedRows = 0;
   for (const [rowIndex, row] of rows.entries()) {
-    const cellLines = row.map((cell, index) => wrapLineCount(cell, widths[index] - 10, 6.8, 3));
-    const height = Math.max(28, Math.max(...cellLines) * 8.5 + 14);
+    const cellLines = row.map((cell, index) => wrapLineCount(cell, widths[index] - 10, 6.6, 2));
+    const height = Math.max(26, Math.max(...cellLines) * 8 + 13);
     if (y - height < 118) break;
     canvas.rect(x, y - height + 5, 746, height, rowIndex % 2 === 0 ? "white" : "soft");
     canvas.line(x, y + 5, x + 746, y + 5, "border", 0.5);
     cursor = x;
     row.forEach((cell, index) => {
-      canvas.wrap(cell || "-", cursor + 5, y - 7, widths[index] - 10, 6.8, "navy", false, 8.5);
+      canvas.wrap(cell || "-", cursor + 5, y - 7, widths[index] - 10, 6.6, "navy", false, 8, 2);
       cursor += widths[index];
     });
     y -= height;
@@ -3785,14 +3821,19 @@ async function pdf(report: Report) {
   let tableStart = 572;
   if (template === "salesReceipt") {
     const status = receiptPaymentStatus(report);
-    canvas.rect(48, 634, 516, 66, "navy");
-    canvas.text("AMOUNT RECEIVED", 66, 674, 9, "cyan", true);
-    canvas.text(report.totals["Amount paid"] ?? report.totals.Total, 66, 650, 24, "white", true);
-    canvas.text(`Receipt No. ${report.transaction["Reference number"]}`, 374, 666, 10, "white", true);
-    canvas.text(`Received from ${report.partyName}`, 374, 648, 8.5, "white");
-    canvas.rect(48, 594, 516, 28, status.tone === "paid" ? "soft" : "surface");
-    canvas.text(status.label, 66, 604, 17, status.tone === "paid" ? "blue" : "navy", true);
-    canvas.wrap(status.detail, 202, 606, 330, 8, "slate", true);
+    canvas.rect(48, 628, 516, 72, "navy");
+    canvas.text("AMOUNT RECEIVED", 66, 678, 8.5, "cyan", true);
+    canvas.wrap(report.totals["Amount paid"] ?? report.totals.Total, 66, 656, 156, 22, "white", true, 23, 1);
+    canvas.text(`Receipt No. ${report.transaction["Reference number"]}`, 250, 674, 9, "white", true);
+    canvas.wrap(`Received from: ${report.partyName}`, 250, 658, 136, 7.8, "white", false, 8.8, 2);
+    canvas.text(`Date: ${report.transaction["Document date"]}`, 250, 634, 7.5, "white");
+    canvas.text(`Invoice: ${report.transaction["Invoice no."] ?? report.transaction["Reference number"]}`, 404, 674, 8, "white", true);
+    canvas.text(`Sale total: ${report.totals.Total}`, 404, 658, 7.5, "white");
+    canvas.text(`Balance: ${report.totals["Balance due"]}`, 404, 644, 7.5, "white");
+    canvas.wrap(`Payment: ${report.transaction["Payment terms"]}`, 404, 632, 132, 7, "white", false, 8, 1);
+    canvas.rect(48, 590, 516, 28, status.tone === "paid" ? "soft" : "surface");
+    canvas.text(status.label, 66, 600, 17, status.tone === "paid" ? "blue" : "navy", true);
+    canvas.wrap(status.detail, 202, 602, 330, 8, "slate", true, 9, 2);
     canvas.text("PAYMENT LINE ITEMS", 48, 572, 11, "blue", true);
     tableStart = 550;
   } else if (template === "grn") {
@@ -3860,27 +3901,37 @@ async function pdf(report: Report) {
 
   const yAfterTable = renderPdfTable(canvas, report, tableStart);
 
-  const totalsY = Math.max(180, yAfterTable);
-  canvas.text("TOTALS", 384, totalsY, 11, "blue", true);
-  Object.entries(report.totals).forEach(([label, value], index, all) => {
-    const y = totalsY - 22 - index * 22;
-    canvas.rect(384, y - 4, 174, 20, index === all.length - 1 ? "surface" : "white");
-    canvas.text(label, 394, y + 2, 8.5, index === all.length - 1 ? "blue" : "slate", index === all.length - 1);
-    canvas.text(value, 480, y + 2, 8.5, index === all.length - 1 ? "blue" : "navy", true);
+  const summaryTop = Math.max(236, Math.min(536, yAfterTable));
+  const preferredTotals = template === "salesReceipt"
+    ? ["Subtotal", "Tax", "Total", "Amount paid", "Balance due"]
+    : ["Subtotal", "Discount", "Tax", "Total", "Amount due", "Balance due"];
+  const totalEntries = preferredTotals
+    .filter((label, index, list) => report.totals[label] && list.indexOf(label) === index)
+    .map((label) => [label, report.totals[label]] as [string, string]);
+
+  canvas.text("TOTALS", 384, summaryTop, 10, "blue", true);
+  totalEntries.forEach(([label, value], index) => {
+    const isGrand = label === "Total" || label === "Amount paid" || label === "Balance due" || label === "Amount due";
+    const y = summaryTop - 18 - index * 16;
+    canvas.rect(384, y - 3, 174, 15, isGrand ? "surface" : "white");
+    canvas.wrap(label, 392, y + 1, 78, 7.2, isGrand ? "blue" : "slate", isGrand, 8, 1);
+    canvas.wrap(value, 472, y + 1, 78, 7.2, isGrand ? "blue" : "navy", true, 8, 1);
   });
-  if (shouldShowPaymentInstructions(report)) {
-    const paymentY = Math.max(126, totalsY - 134);
-    canvas.rect(384, paymentY - 6, 174, 76, "soft");
-    canvas.text("HOW TO PAY", 394, paymentY + 50, 8, "blue", true);
-    report.paymentInstructions.slice(0, 4).forEach((line, index) => {
-      canvas.wrap(line, 394, paymentY + 34 - index * 16, 154, 7.2, "navy", false, 8.5);
+
+  const paymentTop = summaryTop - 24 - totalEntries.length * 16;
+  if (shouldShowPaymentInstructions(report) && paymentTop >= 144) {
+    canvas.rect(384, paymentTop - 52, 174, 58, "soft");
+    canvas.text("HOW TO PAY", 394, paymentTop - 10, 7.2, "blue", true);
+    report.paymentInstructions.slice(0, 3).forEach((line, index) => {
+      canvas.wrap(line, 394, paymentTop - 24 - index * 12, 154, 6.2, "navy", false, 7.2, 1);
     });
   }
 
-  canvas.text(approvalTitle, 48, totalsY, 11, "blue", true);
-  Object.entries(report.approvals).forEach(([label, value], index) => {
-    canvas.text(`${label}:`, 48, totalsY - 22 - index * 18, 8, "muted", true);
-    canvas.wrap(value, 112, totalsY - 22 - index * 18, 210, 8, "navy");
+  canvas.text(approvalTitle, 48, summaryTop, 10, "blue", true);
+  Object.entries(report.approvals).slice(0, 4).forEach(([label, value], index) => {
+    const y = summaryTop - 18 - index * 22;
+    canvas.text(`${label}:`, 48, y + 1, 7.2, "muted", true);
+    canvas.wrap(value, 116, y + 1, 218, 7.2, "navy", false, 8.2, 2);
   });
 
   const signatureLabels = signatureLabelsFor(report);
@@ -3890,10 +3941,10 @@ async function pdf(report: Report) {
   });
   if (template === "salesReceipt") {
     const status = receiptPaymentStatus(report);
-    canvas.rect(48, 116, 516, 30, "soft");
-    canvas.text("SALES RECEIPT SLIP", 62, 130, 8, "blue", true);
-    canvas.text(status.label, 258, 130, 11, "blue", true);
-    canvas.text(`Amount received: ${report.totals["Amount paid"] ?? report.totals.Total}`, 394, 130, 8, "navy", true);
+    canvas.rect(48, 112, 516, 28, "soft");
+    canvas.text("SALES RECEIPT SLIP", 62, 126, 7.5, "blue", true);
+    canvas.text(status.label, 230, 126, 10, "blue", true);
+    canvas.wrap(`Amount received: ${report.totals["Amount paid"] ?? report.totals.Total}`, 370, 126, 170, 7.2, "navy", true, 8, 1);
   }
   canvas.line(48, 58, 564, 58, "border");
   canvas.wrap(`${report.businessName} document generated by Solva Trade. ${style.footerNote} Printed by ${report.generatedBy} on ${report.generatedAt}.`, 76, 42, 460, 7.5, "muted");
