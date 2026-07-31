@@ -79,6 +79,143 @@ function getBoolean(formData: FormData, key: string) {
   return getField(formData, key).toLowerCase() === "yes";
 }
 
+function getRawField(formData: FormData, key: string) {
+  const value = formData.get(key);
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function getRawNumber(formData: FormData, key: string) {
+  const number = Number(getRawField(formData, key).replace(/,/g, ""));
+  return Number.isFinite(number) ? number : 0;
+}
+
+function selectedLineIndexes(formData: FormData) {
+  const count = getNumber(formData, "line_count");
+  return Array.from({ length: count }, (_, index) => index).filter((index) => {
+    const selected = getRawField(formData, `field_line_${index}_selected`);
+    const productId = getRawField(formData, `field_line_${index}_product_id`);
+    const quantity = getRawNumber(formData, `field_line_${index}_quantity`);
+    return productId && quantity > 0 && (selected === "yes" || selected === "on");
+  });
+}
+
+type SalesInvoiceLineInput = {
+  index: number;
+  productId: string;
+  quantity: number;
+  unitPrice: number;
+  discount: number;
+  taxRate: number;
+  taxAmount: number;
+  lineSubtotal: number;
+  lineTotal: number;
+};
+
+function salesInvoiceLinesFromForm(formData: FormData): SalesInvoiceLineInput[] {
+  const indexes = selectedLineIndexes(formData);
+  if (indexes.length > 0) {
+    return indexes.map((index) => {
+      const quantity = getRawNumber(formData, `field_line_${index}_quantity`);
+      const unitPrice = getRawNumber(formData, `field_line_${index}_unit_price`);
+      const discount = getRawNumber(formData, `field_line_${index}_discount`);
+      const taxRate = getRawNumber(formData, `field_line_${index}_tax_rate`);
+      const lineSubtotal = Math.max(0, quantity * unitPrice - discount);
+      const taxAmount = getRawNumber(formData, `field_line_${index}_tax_amount`) || lineSubtotal * (taxRate / 100);
+      const lineTotal = getRawNumber(formData, `field_line_${index}_line_total`) || Math.max(0, lineSubtotal + taxAmount);
+      return {
+        index,
+        productId: getRawField(formData, `field_line_${index}_product_id`),
+        quantity,
+        unitPrice,
+        discount,
+        taxRate,
+        taxAmount,
+        lineSubtotal,
+        lineTotal,
+      };
+    });
+  }
+
+  const quantity = getNumber(formData, "quantity") || getNumber(formData, "ordered_quantity");
+  const unitPrice = getNumber(formData, "unit_price") || getNumber(formData, "price");
+  const discount = getNumber(formData, "discount");
+  const lineSubtotal = getNumber(formData, "subtotal") || Math.max(0, quantity * unitPrice - discount);
+  const taxAmount = getNumber(formData, "tax");
+  const lineTotal = getNumber(formData, "total") || Math.max(0, lineSubtotal + taxAmount);
+  return [{
+    index: 0,
+    productId: getField(formData, "product_id"),
+    quantity,
+    unitPrice,
+    discount,
+    taxRate: 0,
+    taxAmount,
+    lineSubtotal,
+    lineTotal,
+  }];
+}
+
+type GoodsReceivedLineInput = {
+  index: number;
+  productId: string;
+  deliveredQuantity: number;
+  rejectedQuantity: number;
+  acceptedQuantity: number;
+  unitCost: number;
+  batch: string | null;
+  expiryDate: string | null;
+  directCost: number;
+  localCost: number;
+  sourceVariance: number;
+};
+
+function goodsReceivedLinesFromForm(formData: FormData, sourceType: string): GoodsReceivedLineInput[] {
+  const indexes = selectedLineIndexes(formData);
+  if (indexes.length > 0) {
+    return indexes.map((index) => {
+      const deliveredQuantity = getRawNumber(formData, `field_line_${index}_quantity`);
+      const rejectedQuantity = getRawNumber(formData, `field_line_${index}_rejected_quantity`);
+      const acceptedQuantity = Math.max(0, deliveredQuantity - rejectedQuantity);
+      const unitCost = getRawNumber(formData, `field_line_${index}_unit_cost`);
+      const directCost = getRawNumber(formData, `field_line_${index}_direct_reference_unit_cost`);
+      const localCost = getRawNumber(formData, `field_line_${index}_local_reference_unit_cost`) || (sourceType !== "direct_supplier" ? unitCost : 0);
+      return {
+        index,
+        productId: getRawField(formData, `field_line_${index}_product_id`),
+        deliveredQuantity,
+        rejectedQuantity,
+        acceptedQuantity,
+        unitCost,
+        batch: getRawField(formData, `field_line_${index}_batch`) || null,
+        expiryDate: getRawField(formData, `field_line_${index}_expiry_date`) || null,
+        directCost,
+        localCost,
+        sourceVariance: localCost && directCost ? localCost - directCost : 0,
+      };
+    });
+  }
+
+  const deliveredQuantity = getNumber(formData, "received_quantity");
+  const rejectedQuantity = getNumber(formData, "rejected_quantity");
+  const acceptedQuantity = getNumber(formData, "accepted_quantity") || Math.max(0, deliveredQuantity - rejectedQuantity) || deliveredQuantity;
+  const unitCost = getNumber(formData, "unit_cost");
+  const directCost = getNumber(formData, "direct_reference_unit_cost");
+  const localCost = getNumber(formData, "local_reference_unit_cost") || (sourceType !== "direct_supplier" ? unitCost : 0);
+  return [{
+    index: 0,
+    productId: getField(formData, "product_id"),
+    deliveredQuantity,
+    rejectedQuantity,
+    acceptedQuantity,
+    unitCost,
+    batch: getField(formData, "batch") || null,
+    expiryDate: getField(formData, "expiry_date") || null,
+    directCost,
+    localCost,
+    sourceVariance: localCost && directCost ? localCost - directCost : 0,
+  }];
+}
+
 function normalizedLookup(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
@@ -142,6 +279,8 @@ function sourceTypeValue(value: string) {
     alternative_supplier: "alternative_supplier",
     "emergency purchase": "emergency_purchase",
     emergency_purchase: "emergency_purchase",
+    "opening stock": "opening_stock",
+    opening_stock: "opening_stock",
   };
   return sourceMap[value.trim().toLowerCase()] ?? "direct_supplier";
 }
@@ -249,32 +388,36 @@ async function postSalesInvoice(formData: FormData, userId: string, fallbackBusi
   const admin = await createSupabaseServerClient();
   const { businessId, branchId, warehouseId } = await getWorkspaceContextForClient(admin, userId, fallbackBusinessId);
   const customerId = getField(formData, "customer_id");
-  const productId = getField(formData, "product_id");
-  const quantity = getNumber(formData, "quantity") || getNumber(formData, "ordered_quantity");
-  const unitPrice = getNumber(formData, "unit_price") || getNumber(formData, "price");
-  const discount = getNumber(formData, "discount");
-  const subtotal = getNumber(formData, "subtotal") || Math.max(0, quantity * unitPrice - discount);
-  const tax = getNumber(formData, "tax");
-  const total = getNumber(formData, "total") || Math.max(0, subtotal + tax);
+  const lines = salesInvoiceLinesFromForm(formData);
+  const subtotal = lines.reduce((sum, line) => sum + line.lineSubtotal, 0);
+  const tax = lines.reduce((sum, line) => sum + line.taxAmount, 0);
+  const total = lines.reduce((sum, line) => sum + line.lineTotal, 0);
   const paid = getNumber(formData, "amount_paid") || getNumber(formData, "amount_received");
   const invoiceNumber = getField(formData, "invoice_number") || `INV-${Date.now().toString().slice(-8)}`;
   const invoiceDate = getField(formData, "invoice_date") || new Date().toISOString().slice(0, 10);
   const dueDate = getField(formData, "due_date") || invoiceDate;
 
   if (!customerId) throw new Error("Select a saved customer before submitting the sale.");
-  if (!productId || quantity <= 0) throw new Error("Select a saved product and enter a quantity before submitting the sale.");
+  if (!lines.length) throw new Error("Tick at least one product and enter the quantity sold.");
+  for (const line of lines) {
+    if (!line.productId || line.quantity <= 0) throw new Error("Every selected sale row needs a saved product and quantity.");
+    if (line.unitPrice <= 0) throw new Error("Every selected sale row needs a selling price.");
+  }
 
-  const { data: product } = await admin
+  const productIds = [...new Set(lines.map((line) => line.productId))];
+  const { data: products } = await admin
     .from("products")
-    .select("track_inventory, product_name, standard_cost")
+    .select("id, track_inventory, product_name, standard_cost")
     .eq("business_id", businessId)
-    .eq("id", productId)
-    .maybeSingle();
-  if (!product) throw new Error("Selected product was not found.");
-
-  if (product.track_inventory) {
-    const available = await availableStock(admin, businessId, branchId, warehouseId, productId);
-    if (available < quantity) throw new Error(`Insufficient stock for ${product.product_name}. Available: ${available}.`);
+    .in("id", productIds);
+  const productsById = new Map((products ?? []).map((product) => [String(product.id), product]));
+  for (const line of lines) {
+    const product = productsById.get(line.productId);
+    if (!product) throw new Error("One selected product was not found.");
+    if (product.track_inventory) {
+      const available = await availableStock(admin, businessId, branchId, warehouseId, line.productId);
+      if (available < line.quantity) throw new Error(`Insufficient stock for ${product.product_name}. Available: ${available}.`);
+    }
   }
 
   const { data: invoice, error: invoiceError } = await admin
@@ -299,33 +442,36 @@ async function postSalesInvoice(formData: FormData, userId: string, fallbackBusi
     .single();
   if (invoiceError || !invoice) throw new Error(invoiceError?.message ?? "Could not post the invoice.");
 
-  const { data: item, error: itemError } = await admin.from("sales_invoice_items").insert({
+  const invoiceItems = lines.map((line) => ({
     business_id: businessId,
     invoice_id: invoice.id,
-    product_id: productId,
-    invoice_quantity: quantity,
-    delivered_quantity: quantity,
-    base_quantity: quantity,
-    unit_price: unitPrice,
-    tax_amount: tax,
-    line_total: total,
-  }).select("id").single();
-  if (itemError || !item) throw new Error(itemError?.message ?? "Could not post invoice item.");
+    product_id: line.productId,
+    invoice_quantity: line.quantity,
+    delivered_quantity: line.quantity,
+    base_quantity: line.quantity,
+    unit_price: line.unitPrice,
+    tax_amount: line.taxAmount,
+    line_total: line.lineTotal,
+  }));
+  const { data: items, error: itemError } = await admin.from("sales_invoice_items").insert(invoiceItems).select("id, product_id");
+  if (itemError || !items?.length) throw new Error(itemError?.message ?? "Could not post invoice items.");
 
-  if (product.track_inventory) {
+  for (const line of lines) {
+    const product = productsById.get(line.productId);
+    if (!product?.track_inventory) continue;
     const unitCost = Number(product.standard_cost ?? 0);
     const { data: movement, error: movementError } = await admin.from("stock_movements").insert({
       business_id: businessId,
       branch_id: branchId,
       warehouse_id: warehouseId,
-      product_id: productId,
+      product_id: line.productId,
       movement_type: "sale",
       direction: "out",
-      quantity_base: quantity,
-      display_quantity: quantity,
+      quantity_base: line.quantity,
+      display_quantity: line.quantity,
       unit_conversion_factor: 1,
       unit_cost: unitCost,
-      total_cost: unitCost * quantity,
+      total_cost: unitCost * line.quantity,
       reference_document_type: "sales_invoice",
       reference_document_id: invoice.id,
       reference_number: invoiceNumber,
@@ -334,16 +480,18 @@ async function postSalesInvoice(formData: FormData, userId: string, fallbackBusi
     }).select("id").single();
     if (movementError || !movement) throw new Error(movementError?.message ?? "Could not post stock movement.");
 
+    const invoiceItem = items.find((item) => String(item.product_id) === line.productId);
+    if (!invoiceItem?.id) continue;
     const { error: allocationError } = await (admin as SolvaRpcClient).rpc("allocate_sale_fifo_source", {
       target_business_id: businessId,
       target_invoice_id: invoice.id,
-      target_invoice_item_id: item.id,
+      target_invoice_item_id: invoiceItem.id,
       target_stock_movement_id: movement.id,
-      target_product_id: productId,
+      target_product_id: line.productId,
       target_branch_id: branchId,
       target_warehouse_id: warehouseId,
-      target_quantity: quantity,
-      target_sale_unit_price: unitPrice,
+      target_quantity: line.quantity,
+      target_sale_unit_price: line.unitPrice,
     });
     if (allocationError) throw new Error(allocationError.message);
   }
@@ -448,17 +596,10 @@ async function postGoodsReceived(formData: FormData, userId: string, fallbackBus
   const admin = await createSupabaseServerClient();
   const { businessId, branchId, warehouseId } = await getWorkspaceContextForClient(admin, userId, fallbackBusinessId);
   let supplierId = getField(formData, "supplier_id");
-  let productId = getField(formData, "product_id");
-  const deliveredQuantity = getNumber(formData, "received_quantity");
-  const rejectedQuantity = getNumber(formData, "rejected_quantity");
-  const acceptedQuantity = getNumber(formData, "accepted_quantity") || Math.max(0, deliveredQuantity - rejectedQuantity) || deliveredQuantity;
-  const unitCost = getNumber(formData, "unit_cost");
   const grnNumber = getField(formData, "grn_number") || `GRN-${Date.now().toString().slice(-8)}`;
   const receiptDate = getField(formData, "received_date") || new Date().toISOString().slice(0, 10);
   const sourceType = sourceTypeValue(getField(formData, "source_type"));
-  const directCost = getNumber(formData, "direct_reference_unit_cost");
-  const localCost = getNumber(formData, "local_reference_unit_cost") || (sourceType !== "direct_supplier" ? unitCost : 0);
-  const sourceVariance = localCost && directCost ? localCost - directCost : 0;
+  const lines = goodsReceivedLinesFromForm(formData, sourceType);
   const sourceReason = getField(formData, "source_reason") || null;
 
   if (!supplierId) {
@@ -478,29 +619,13 @@ async function postGoodsReceived(formData: FormData, userId: string, fallbackBus
     }
   }
 
-  if (!productId) {
-    const productInput = normalizedLookup(getField(formData, "product"));
-    if (productInput) {
-      const { data: products } = await admin
-        .from("products")
-        .select("id, product_name, product_code, sku")
-        .eq("business_id", businessId)
-        .eq("active", true)
-        .eq("archived", false)
-        .limit(300);
-      const match = (products ?? []).find((product) =>
-        [product.product_name, product.product_code, product.sku]
-          .filter(Boolean)
-          .some((value) => normalizedLookup(String(value)) === productInput),
-      );
-      productId = match?.id ?? "";
-    }
-  }
-
   if (!supplierId) throw new Error("Choose the supplier from the saved supplier list before receiving stock.");
-  if (!productId) throw new Error("Choose the product from the saved product list before receiving stock.");
-  if (acceptedQuantity <= 0) throw new Error("Enter the accepted quantity received.");
-  if (unitCost <= 0) throw new Error("Enter the purchase unit cost for this receipt.");
+  if (!lines.length) throw new Error("Tick at least one delivered product and enter received quantity.");
+  for (const line of lines) {
+    if (!line.productId) throw new Error("Every selected receipt row needs a saved product.");
+    if (line.acceptedQuantity <= 0) throw new Error("Every selected receipt row needs an accepted quantity greater than zero.");
+    if (line.unitCost <= 0) throw new Error("Every selected receipt row needs a purchase unit cost.");
+  }
 
   const { data: supplier } = await admin
     .from("suppliers")
@@ -510,15 +635,21 @@ async function postGoodsReceived(formData: FormData, userId: string, fallbackBus
     .maybeSingle();
   if (!supplier) throw new Error("Selected supplier was not found.");
 
-  const { data: product } = await admin
+  const productIds = [...new Set(lines.map((line) => line.productId))];
+  const { data: products } = await admin
     .from("products")
-    .select("product_name")
+    .select("id, product_name")
     .eq("business_id", businessId)
-    .eq("id", productId)
-    .maybeSingle();
-  if (!product) throw new Error("Selected product was not found.");
+    .in("id", productIds);
+  const productsById = new Map((products ?? []).map((product) => [String(product.id), product]));
+  for (const line of lines) {
+    if (!productsById.has(line.productId)) throw new Error("One selected product was not found.");
+  }
 
   const supplierName = supplier.trading_name || supplier.legal_name;
+  const firstDirectCost = lines.find((line) => line.directCost > 0)?.directCost ?? 0;
+  const firstLocalCost = lines.find((line) => line.localCost > 0)?.localCost ?? 0;
+  const firstVariance = lines.find((line) => line.sourceVariance !== 0)?.sourceVariance ?? 0;
   const { data: grn, error: grnError } = await admin
     .from("goods_received_notes")
     .insert({
@@ -533,13 +664,13 @@ async function postGoodsReceived(formData: FormData, userId: string, fallbackBus
       status: "posted",
       source_type: sourceType,
       source_reason: sourceReason,
-      direct_reference_unit_cost: directCost || null,
-      local_reference_unit_cost: localCost || null,
-      source_unit_cost_variance: sourceVariance || null,
+      direct_reference_unit_cost: firstDirectCost || null,
+      local_reference_unit_cost: firstLocalCost || null,
+      source_unit_cost_variance: firstVariance || null,
       notes: [
         sourceReason ? `Source reason: ${sourceReason}` : "",
-        directCost ? `Direct reference cost: ${directCost}` : "",
-        localCost ? `Local reference cost: ${localCost}` : "",
+        firstDirectCost ? `Direct reference cost: ${firstDirectCost}` : "",
+        firstLocalCost ? `Local reference cost: ${firstLocalCost}` : "",
       ]
         .filter(Boolean)
         .join("; "),
@@ -549,40 +680,41 @@ async function postGoodsReceived(formData: FormData, userId: string, fallbackBus
     .single();
   if (grnError || !grn) throw new Error(grnError?.message ?? "Could not post the GRN.");
 
-  const { error: itemError } = await admin.from("goods_received_note_items").insert({
+  const grnItems = lines.map((line) => ({
     business_id: businessId,
     grn_id: grn.id,
-    product_id: productId,
-    supplier_batch: getField(formData, "batch") || null,
-    expiry_date: getField(formData, "expiry_date") || null,
-    delivered_quantity: deliveredQuantity || acceptedQuantity,
-    accepted_quantity: acceptedQuantity,
-    rejected_quantity: rejectedQuantity,
-    base_quantity: acceptedQuantity,
-    unit_cost: unitCost,
+    product_id: line.productId,
+    supplier_batch: line.batch,
+    expiry_date: line.expiryDate,
+    delivered_quantity: line.deliveredQuantity || line.acceptedQuantity,
+    accepted_quantity: line.acceptedQuantity,
+    rejected_quantity: line.rejectedQuantity,
+    base_quantity: line.acceptedQuantity,
+    unit_cost: line.unitCost,
     warehouse_id: warehouseId,
-    quality_status: rejectedQuantity > 0 ? "accepted_with_issues" : "accepted",
+    quality_status: line.rejectedQuantity > 0 ? "accepted_with_issues" : "accepted",
     source_type: sourceType,
-    direct_reference_unit_cost: directCost || null,
-    local_reference_unit_cost: localCost || null,
-    source_unit_cost_variance: sourceVariance || null,
+    direct_reference_unit_cost: line.directCost || null,
+    local_reference_unit_cost: line.localCost || null,
+    source_unit_cost_variance: line.sourceVariance || null,
     source_reason: sourceReason,
     notes: `Source: ${sourceType.replaceAll("_", " ")} via ${supplierName}`,
-  });
+  }));
+  const { error: itemError } = await admin.from("goods_received_note_items").insert(grnItems);
   if (itemError) throw new Error(itemError.message);
 
-  const { error: movementError } = await admin.from("stock_movements").insert({
+  const movements = lines.map((line) => ({
     business_id: businessId,
     branch_id: branchId,
     warehouse_id: warehouseId,
-    product_id: productId,
+    product_id: line.productId,
     movement_type: "purchase_receipt",
     direction: "in",
-    quantity_base: acceptedQuantity,
-    display_quantity: acceptedQuantity,
+    quantity_base: line.acceptedQuantity,
+    display_quantity: line.acceptedQuantity,
     unit_conversion_factor: 1,
-    unit_cost: unitCost,
-    total_cost: unitCost * acceptedQuantity,
+    unit_cost: line.unitCost,
+    total_cost: line.unitCost * line.acceptedQuantity,
     reference_document_type: "goods_received_note",
     reference_document_id: grn.id,
     reference_number: grnNumber,
@@ -591,12 +723,13 @@ async function postGoodsReceived(formData: FormData, userId: string, fallbackBus
     source_type: sourceType,
     source_supplier_id: supplierId,
     source_supplier_name: supplierName,
-    direct_reference_unit_cost: directCost || null,
-    local_reference_unit_cost: localCost || null,
-    source_unit_cost_variance: sourceVariance || null,
+    direct_reference_unit_cost: line.directCost || null,
+    local_reference_unit_cost: line.localCost || null,
+    source_unit_cost_variance: line.sourceVariance || null,
     source_reason: sourceReason,
     created_by: userId,
-  });
+  }));
+  const { error: movementError } = await admin.from("stock_movements").insert(movements);
   if (movementError) throw new Error(movementError.message);
   return { grnNumber };
 }

@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { FileText, Printer } from "lucide-react";
 import { completeProcessAction } from "@/app/(app)/actions";
+import { MultiLineTransactionForm } from "@/components/app/multi-line-transaction-form";
 import { WorkflowFormFields } from "@/components/app/workflow-form-fields";
 import { purchasingReports } from "@/lib/purchasing";
 import { getSalesWorkflowLookups } from "@/lib/workflow-live-data";
@@ -99,6 +100,7 @@ export default async function PurchasingWorkflowPage({
   const config = workflows[workflow];
   if (!config) notFound();
   const lookups = await getSalesWorkflowLookups();
+  const today = new Date().toISOString().slice(0, 10);
 
   return (
     <div className="pb-20">
@@ -112,7 +114,11 @@ export default async function PurchasingWorkflowPage({
         <input type="hidden" name="document" value={primaryDocument[workflow] ?? config.title} />
         <input type="hidden" name="returnTo" value={`/purchases/${workflow}`} />
         <input type="hidden" name="next" value={`Continue ${config.title}`} />
-        <WorkflowFormFields fields={config.fields} products={lookups.products} suppliers={lookups.suppliers} autoFillProductPrice={false} />
+        {workflow === "goods-received" ? (
+          <MultiLineTransactionForm mode="goods-received" suppliers={lookups.suppliers} products={lookups.products} today={today} />
+        ) : (
+          <WorkflowFormFields fields={config.fields} products={lookups.products} suppliers={lookups.suppliers} autoFillProductPrice={false} />
+        )}
         <div className="mt-6">
           <button name="intent" value={workflow === "goods-received" ? "Posted and received" : "Submitted for approval"} className="inline-flex min-h-11 items-center justify-center rounded-md bg-emerald-700 px-5 py-3 text-sm font-semibold text-white">
             {workflow === "goods-received" ? "Receive stock and generate GRN" : "Submit for approval"}

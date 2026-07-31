@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { FileText, Printer } from "lucide-react";
 import { completeProcessAction } from "@/app/(app)/actions";
+import { MultiLineTransactionForm } from "@/components/app/multi-line-transaction-form";
 import { WorkflowFormFields } from "@/components/app/workflow-form-fields";
 import { getSalesWorkflowLookups } from "@/lib/workflow-live-data";
 
@@ -68,6 +69,7 @@ export default async function SalesWorkflowPage({
   const config = workflows[workflow];
   if (!config) notFound();
   const lookups = await getSalesWorkflowLookups();
+  const today = new Date().toISOString().slice(0, 10);
 
   return (
     <div className="pb-20">
@@ -81,7 +83,11 @@ export default async function SalesWorkflowPage({
         <input type="hidden" name="document" value={primaryDocument[workflow] ?? config.title} />
         <input type="hidden" name="returnTo" value={`/sales/${workflow}`} />
         <input type="hidden" name="next" value={`Continue ${config.title}`} />
-        <WorkflowFormFields fields={config.fields} customers={lookups.customers} products={lookups.products} unpaidInvoices={lookups.unpaidInvoices} />
+        {workflow === "invoices" ? (
+          <MultiLineTransactionForm mode="sale" customers={lookups.customers} products={lookups.products} today={today} />
+        ) : (
+          <WorkflowFormFields fields={config.fields} customers={lookups.customers} products={lookups.products} unpaidInvoices={lookups.unpaidInvoices} />
+        )}
         <div className="mt-6">
           <button name="intent" value="Submitted" className="inline-flex min-h-11 items-center justify-center rounded-md bg-emerald-700 px-5 py-3 text-sm font-semibold text-white">
             {workflow === "invoices" ? "Create invoice" : "Submit"}
