@@ -28,6 +28,13 @@ export default async function ActionCompletePage({
   const excelHref = `${exportBase}&format=excel`;
   const pdfHref = `${exportBase}&format=pdf`;
   const printHref = `${exportBase}&format=print`;
+  const deliveryNoteParams = new URLSearchParams(exportParams);
+  deliveryNoteParams.set("process", "Delivery Note");
+  deliveryNoteParams.set("format", "pdf");
+  const relatedDocuments =
+    moduleName === "Sales" && processName === "Invoices" && !error
+      ? [{ label: "Delivery Note PDF", href: `/api/exports?${deliveryNoteParams.toString()}` }]
+      : [];
   const historyHref = moduleName === "Sales" ? "/sales#invoice-history" : moduleName === "Purchasing" ? "/purchases#grn-history" : "/reports";
   const historyLabel = moduleName === "Sales" ? "Invoice History" : moduleName === "Purchasing" ? "GRN History" : "Report Centre";
 
@@ -56,6 +63,12 @@ export default async function ActionCompletePage({
                 <Download className="h-4 w-4" />
                 Download PDF
               </a>
+              {relatedDocuments.map((document) => (
+                <a key={document.label} href={document.href} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm font-semibold text-[var(--solva-blue-700)]">
+                  <Download className="h-4 w-4" />
+                  {document.label}
+                </a>
+              ))}
               <a href={printHref} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700">
                 <Printer className="h-4 w-4" />
                 Print

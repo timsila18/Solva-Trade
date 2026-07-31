@@ -116,7 +116,7 @@ function receiptHref(invoice: SalesInvoiceRow) {
   return salesDocumentHref(invoice, "Sales Receipt");
 }
 
-function salesDocumentHref(invoice: SalesInvoiceRow, process: "Sales Receipt" | "Invoice") {
+function salesDocumentHref(invoice: SalesInvoiceRow, process: "Sales Receipt" | "Invoice" | "Delivery Note") {
   const total = asNumber(invoice.total_amount);
   const paid = asNumber(invoice.amount_paid);
   const balance = asNumber(invoice.balance_due);
@@ -133,6 +133,10 @@ function salesDocumentHref(invoice: SalesInvoiceRow, process: "Sales Receipt" | 
     field_customer: customerName(invoice),
     label_invoice_date: "Invoice date",
     field_invoice_date: invoice.invoice_date || "",
+    label_delivery_date: "Delivery date",
+    field_delivery_date: invoice.invoice_date || "",
+    label_delivery_status: "Delivery status",
+    field_delivery_status: "Ready for delivery",
     label_amount_paid: "Amount paid",
     field_amount_paid: paid.toFixed(2),
     label_total: "Total",
@@ -328,6 +332,9 @@ export default async function SalesPage() {
                     )}
                     <a href={salesDocumentHref(invoice, "Invoice")} className="inline-flex min-h-9 items-center justify-center rounded-md border border-slate-200 px-3 text-xs font-semibold text-slate-700">
                       Download invoice
+                    </a>
+                    <a href={salesDocumentHref(invoice, "Delivery Note")} className="inline-flex min-h-9 items-center justify-center rounded-md border border-cyan-200 bg-cyan-50 px-3 text-xs font-semibold text-[var(--solva-blue-700)]">
+                      Download delivery note
                     </a>
                   </div>
                 </article>
