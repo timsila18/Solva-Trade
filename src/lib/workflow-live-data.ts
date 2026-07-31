@@ -173,11 +173,11 @@ export async function getSalesWorkflowLookups(): Promise<SalesWorkflowLookups> {
         tax_category: product.tax_category,
       });
       return {
-        id: product.id,
-        name: product.product_name,
-        code: product.sku ?? product.product_code,
+        id: String(product.id),
+        name: String(product.product_name ?? product.sku ?? product.product_code ?? "Unnamed product"),
+        code: String(product.sku ?? product.product_code ?? ""),
         price: Number(product.default_selling_price_placeholder ?? 0),
-        available: stockByProduct.get(product.id) ?? 0,
+        available: stockByProduct.get(String(product.id)) ?? 0,
         vatRate: tax.rate,
         vatCode: tax.code,
         trackInventory: Boolean(product.track_inventory),
@@ -208,11 +208,11 @@ export async function getSalesWorkflowLookups(): Promise<SalesWorkflowLookups> {
       };
     }),
     suppliers: (suppliers ?? []).map((supplier) => ({
-      id: supplier.id,
-      name: supplier.trading_name || supplier.legal_name,
-      code: supplier.supplier_code,
+      id: String(supplier.id),
+      name: String(supplier.trading_name || supplier.legal_name || "Unnamed supplier"),
+      code: String(supplier.supplier_code ?? ""),
       phone: supplier.primary_phone ?? "",
-      type: supplier.supplier_type,
+      type: String(supplier.supplier_type ?? ""),
     })),
   };
 }

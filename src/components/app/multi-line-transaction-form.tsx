@@ -166,6 +166,8 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
           </thead>
           <tbody>
             {searchableProducts.map(({ product, index }) => {
+              const productName = product.name || "Unnamed product";
+              const productCode = product.code || "";
               const quantity = numberValue(quantities[index]);
               const unitValue = numberValue(prices[index]);
               const discount = numberValue(discounts[index]);
@@ -174,7 +176,7 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
               const accepted = Math.max(0, quantity - numberValue(rejected[index]));
               const receiptTotal = accepted * unitValue;
               return (
-                <tr key={product.id} className="border-b border-slate-100 odd:bg-white even:bg-slate-50">
+                <tr key={product.id || index} className="border-b border-slate-100 odd:bg-white even:bg-slate-50">
                   <td className="px-3 py-2 align-middle">
                     <input
                       type="checkbox"
@@ -184,16 +186,16 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
                       onChange={(event) => setSelected((current) => ({ ...current, [index]: event.target.checked }))}
                       className="h-4 w-4"
                     />
-                    <input type="hidden" name={`field_line_${index}_product_id`} value={product.id} />
-                    <input type="hidden" name={`field_line_${index}_product_name`} value={product.name} />
-                    <input type="hidden" name={`field_line_${index}_product_code`} value={product.code} />
+                    <input type="hidden" name={`field_line_${index}_product_id`} value={product.id || ""} />
+                    <input type="hidden" name={`field_line_${index}_product_name`} value={productName} />
+                    <input type="hidden" name={`field_line_${index}_product_code`} value={productCode} />
                     <input type="hidden" name={`field_line_${index}_tax_rate`} value={product.vatRate ?? 0} />
                     <input type="hidden" name={`field_line_${index}_tax_amount`} value={mode === "sale" ? tax.toFixed(2) : "0"} />
                     <input type="hidden" name={`field_line_${index}_line_total`} value={(mode === "sale" ? saleTotal : receiptTotal).toFixed(2)} />
                   </td>
                   <td className="px-3 py-2 align-middle">
-                    <p className="font-semibold text-slate-950">{product.name}</p>
-                    <p className="text-xs text-slate-500">{product.code || "No code"} {product.vatCode ? `- ${product.vatCode}` : ""}</p>
+                    <p className="font-semibold text-slate-950">{productName}</p>
+                    <p className="text-xs text-slate-500">{productCode || "No code"} {product.vatCode ? `- ${product.vatCode}` : ""}</p>
                   </td>
                   <td className="px-3 py-2 align-middle text-slate-600">{product.trackInventory ? money(product.available) : "Service"}</td>
                   <td className="px-3 py-2 align-middle">
