@@ -71,7 +71,7 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
         setField(form, `field_line_${index}_line_total`, lineTotal.toFixed(2));
         setField(form, `field_line_${index}_line_subtotal`, lineSubtotal.toFixed(2));
         const taxDisplay = form.querySelector(`[data-line-tax="${index}"]`);
-        if (taxDisplay) taxDisplay.textContent = money(lineTax);
+        if (taxDisplay) taxDisplay.textContent = mode === "sale" ? "Included" : money(lineTax);
         const display = form.querySelector(`[data-line-total="${index}"]`);
         if (display) display.textContent = money(lineTotal);
         if (!isSelected) return current;
@@ -235,7 +235,7 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
               <th className="px-3 py-3">{mode === "sale" ? "Quantity" : "Received qty"}</th>
               <th className="px-3 py-3">{mode === "sale" ? "Selling price (VAT included)" : "Unit cost"}</th>
               {mode === "sale" ? <th className="px-3 py-3">Discount</th> : <th className="px-3 py-3">Rejected</th>}
-              <th className="px-3 py-3">{mode === "sale" ? "VAT" : "Batch"}</th>
+              <th className="px-3 py-3">{mode === "sale" ? "VAT basis" : "Batch"}</th>
               <th className="px-3 py-3">{mode === "sale" ? "Line total" : "Expiry"}</th>
             </tr>
           </thead>
@@ -334,7 +334,7 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
                     </td>
                   )}
                   {mode === "sale" ? (
-                    <td className="px-3 py-2 align-middle text-slate-600"><span data-line-tax={index}>{money(tax)}</span></td>
+                    <td className="px-3 py-2 align-middle text-slate-600"><span data-line-tax={index}>Included</span></td>
                   ) : (
                     <td className="px-3 py-2 align-middle">
                       <input name={`field_line_${index}_batch`} placeholder="Batch" className="w-32 rounded-md border border-slate-300 px-2 py-2" />

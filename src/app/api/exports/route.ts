@@ -3194,13 +3194,15 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
   const effectivePartyName = liveInvoiceDetails.Customer || liveGrnDetails.Supplier || partyName;
   const isValuationReport = isProductMasterReport(moduleName, processName) || isProductProfileReport(moduleName, processName) || isInventoryOperationalReport(moduleName, processName);
   const lineValueTotal = lines.reduce((sum, line) => sum + line.lineTotal, 0);
+  const isLiveCustomerInvoice = Boolean(invoiceId && liveInvoiceDetails["Invoice no."]);
+  const liveInvoiceLineTotal = isLiveCustomerInvoice && lineValueTotal > 0 ? lineValueTotal : 0;
   const liveInvoiceTotals = invoiceId && lines[0]?.details
     ? {
-        subtotal: detailAmount(lines[0].details["Invoice subtotal"]),
-        tax: detailAmount(lines[0].details["Invoice tax"]),
-        total: detailAmount(lines[0].details["Invoice total"]),
+        subtotal: liveInvoiceLineTotal || detailAmount(lines[0].details["Invoice subtotal"]),
+        tax: 0,
+        total: liveInvoiceLineTotal || detailAmount(lines[0].details["Invoice total"]),
         paid: detailAmount(lines[0].details["Amount paid"]),
-        balance: detailAmount(lines[0].details["Balance due"]),
+        balance: Math.max(0, (liveInvoiceLineTotal || detailAmount(lines[0].details["Invoice total"])) - detailAmount(lines[0].details["Amount paid"])),
         status: lines[0].details["Payment status"] ?? "",
       }
     : null;
@@ -3215,7 +3217,7 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
     : liveInvoiceTotals
       ? liveInvoiceTotals.tax
       : parseAmount(fieldValue(fields, ["tax"], "0")) || lines.reduce((sum, line) => sum + line.taxAmount, 0);
-  const discount = isValuationReport ? 0 : parseAmount(fieldValue(fields, ["discount"], "0")) || lines.reduce((sum, line) => sum + line.discount, 0);
+  const discount = isValuationReport || isLiveCustomerInvoice ? 0 : parseAmount(fieldValue(fields, ["discount"], "0")) || lines.reduce((sum, line) => sum + line.discount, 0);
   const total =
     (isValuationReport ? lineValueTotal : liveInvoiceTotals?.total || parseAmount(fieldValue(fields, ["total", "amount", "amount_received", "amount_sent"], "0"))) ||
     lineValueTotal ||
@@ -4980,7 +4982,9 @@ async function pdf(report: Report) {
   const yAfterTable = renderPdfTable(canvas, report, tableStart);
 
   const summaryTop = Math.max(236, Math.min(536, yAfterTable));
-  const preferredTotals = template === "salesReceipt"
+  const preferredTotals = report.processName === "Invoice"
+    ? ["Subtotal", "Total", "Amount due", "Balance due"]
+    : template === "salesReceipt"
     ? ["Subtotal", "Tax", "Total", "Amount paid", "Balance due"]
     : ["Subtotal", "Discount", "Tax", "Total", "Amount due", "Balance due"];
   const totalEntries = preferredTotals
