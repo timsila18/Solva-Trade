@@ -433,6 +433,14 @@ function isFinancialStatementReport(moduleName: string, processName: string) {
   );
 }
 
+function isProfitAndLossReport(reportOrModule: Report | string, processName?: string) {
+  const value =
+    typeof reportOrModule === "string"
+      ? `${reportOrModule} ${processName ?? ""}`.toLowerCase()
+      : `${reportOrModule.moduleName} ${reportOrModule.processName}`.toLowerCase();
+  return value.includes("profit and loss") || value.includes("income statement");
+}
+
 function isProductMasterReport(moduleName: string, processName: string) {
   const value = `${moduleName} ${processName}`.toLowerCase();
   return (
@@ -4126,6 +4134,151 @@ function renderLandscapePdfTable(canvas: PdfCanvas, report: Report, startY: numb
   return y - 12;
 }
 
+function profitLossAmount(line: ReportLine) {
+  return detailAmount(line.details?.Amount ?? money(line.lineTotal));
+}
+
+function profitLossRows(report: Report) {
+  const rows = report.lines.filter((line) => line.sku !== "LEDGER");
+  const revenue = rows.filter((line) => {
+    const section = `${line.details?.Section ?? line.batch} ${line.details?.Class ?? line.taxRate}`.toLowerCase();
+    return section.includes("revenue") || section.includes("income");
+  });
+  const cost = rows.filter((line) => {
+    const section = `${line.details?.Section ?? line.batch} ${line.details?.Class ?? line.taxRate}`.toLowerCase();
+    return section.includes("cost");
+  });
+  const expenses = rows.filter((line) => {
+    const section = `${line.details?.Section ?? line.batch} ${line.details?.Class ?? line.taxRate}`.toLowerCase();
+    return section.includes("expense");
+  });
+  const summaries = rows.filter((line) => line.sku === "TOTAL");
+  const otherIncomeKeywords = ["commission", "rent", "interest", "discount", "dividend", "royalty", "premium", "bad debts recovered", "miscellaneous", "sundry"];
+  const otherIncome = revenue.filter((line) => {
+    const label = `${line.description} ${line.details?.Section ?? ""}`.toLowerCase();
+    return otherIncomeKeywords.some((keyword) => label.includes(keyword));
+  });
+  const tradingIncome = revenue.filter((line) => !otherIncome.includes(line));
+  const totalRevenue = tradingIncome.reduce((sum, line) => sum + profitLossAmount(line), 0);
+  const totalOtherIncome = otherIncome.reduce((sum, line) => sum + Math.abs(profitLossAmount(line)), 0);
+  const totalCost = cost.reduce((sum, line) => sum + Math.abs(profitLossAmount(line)), 0);
+  const totalExpenses = expenses.reduce((sum, line) => sum + Math.abs(profitLossAmount(line)), 0);
+  const grossProfit = totalRevenue - totalCost;
+  const netProfit = grossProfit + totalOtherIncome - totalExpenses;
+  const left = [
+    ...(grossProfit < 0 ? [{ label: "Gross Loss (transferred from trading account)", amount: Math.abs(grossProfit), bold: true, section: "Trading result" }] : []),
+    { label: "Office, Administration and Operating Expenses", amount: null, bold: true, section: "header" },
+    ...expenses.map((line) => ({ label: line.description, amount: Math.abs(profitLossAmount(line)), bold: false, section: line.details?.Section ?? "Expenses" })),
+    ...(netProfit > 0 ? [{ label: "Net Profit transferred to capital", amount: netProfit, bold: true, section: "Net result" }] : []),
+  ];
+  const right = [
+    ...(grossProfit >= 0 ? [{ label: "Gross Profit (transferred from trading account)", amount: grossProfit, bold: true, section: "Trading result" }] : []),
+    ...otherIncome.map((line) => ({ label: line.description, amount: Math.abs(profitLossAmount(line)), bold: false, section: line.details?.Section ?? "Income" })),
+    ...summaries
+      .filter((line) => {
+        const label = line.description.toLowerCase();
+        return !label.includes("total revenue") && !label.includes("gross profit") && !label.includes("cost of sales") && !label.includes("operating expenses") && !label.includes("net profit") && !label.includes("net loss");
+      })
+      .map((line) => ({ label: line.description, amount: Math.abs(profitLossAmount(line)), bold: false, section: line.details?.Section ?? "Other income" })),
+    ...(netProfit < 0 ? [{ label: "Net Loss transferred to capital", amount: Math.abs(netProfit), bold: true, section: "Net result" }] : []),
+  ];
+  return { left, right, totalRevenue, totalCost, totalExpenses, totalOtherIncome, grossProfit, netProfit };
+}
+
+function drawProfitLossSide(
+  canvas: PdfCanvas,
+  rows: Array<{ label: string; amount: number | null; bold: boolean; section: string }>,
+  x: number,
+  y: number,
+  width: number,
+  maxRows: number,
+) {
+  let cursorY = y;
+  rows.slice(0, maxRows).forEach((row, index) => {
+    if (row.amount === null) {
+      canvas.text(row.label, x, cursorY, 8.2, "blue", true);
+      cursorY -= 13;
+      return;
+    }
+    if (index % 2 === 0) canvas.rect(x - 4, cursorY - 4, width + 8, 12, "surface");
+    canvas.wrap(row.label, x, cursorY, width - 92, row.bold ? 7.8 : 7.3, row.bold ? "navy" : "slate", row.bold, 8.5, 1);
+    canvas.fitText(money(row.amount), x + width - 86, cursorY, 82, 7.4, row.bold ? "navy" : "slate", true, 5.8);
+    cursorY -= 13;
+  });
+  if (rows.length > maxRows) {
+    canvas.text(`+ ${rows.length - maxRows} more lines in Excel/CSV export`, x, cursorY, 7, "blue", true);
+    cursorY -= 12;
+  }
+  return cursorY;
+}
+
+async function profitAndLossPdf(report: Report) {
+  const canvas = new PdfCanvas();
+  const assets = await pdfAssets(report, "landscape");
+  const tenantLogo = assets.find((asset) => asset.name === "TenantLogo");
+  const solvaLogo = assets.find((asset) => asset.name === "SolvaLogo");
+  const pl = profitLossRows(report);
+  const leftTotal = (pl.grossProfit < 0 ? Math.abs(pl.grossProfit) : 0) + pl.totalExpenses + Math.max(pl.netProfit, 0);
+  const rightTotal = (pl.grossProfit >= 0 ? pl.grossProfit : 0) + pl.totalOtherIncome + Math.max(-pl.netProfit, 0);
+  const closingTotal = Math.max(leftTotal, rightTotal, 0);
+
+  canvas.rect(0, 0, 842, 595, "white");
+  canvas.rect(0, 586, 280, 9, "blue");
+  canvas.rect(280, 586, 280, 9, "cyan");
+  canvas.rect(560, 586, 282, 9, "gold");
+  canvas.text("SOLVA TRADE", 214, 302, 54, "watermark", true);
+  canvas.text("Profit and Loss Account", 310, 282, 13, "watermark");
+
+  canvas.rect(48, 508, 54, 50, "surface");
+  if (!drawFittedImage(canvas, tenantLogo, 52, 512, 46, 42)) canvas.text(initials(report.businessName), 61, 528, 17, "blue", true);
+  canvas.text(report.businessName, 118, 546, 17, "navy", true);
+  canvas.wrap(`${report.businessLocation}${report.kraPin ? ` | KRA PIN: ${report.kraPin}` : ""}`, 118, 526, 330, 8, "slate");
+  canvas.text("PROFIT AND LOSS ACCOUNT", 304, 548, 17, "navy", true);
+  canvas.text(`For the period ended ${report.transaction["Document date"]}`, 326, 532, 8.2, "slate");
+  canvas.text(`Generated: ${report.generatedAt}`, 344, 518, 7.6, "muted");
+  canvas.rect(700, 520, 94, 28, "navy");
+  if (!drawFittedImage(canvas, solvaLogo, 704, 523, 86, 22)) {
+    canvas.text("SOLVA", 714, 532, 12, "white", true);
+    canvas.text("TRADE", 760, 532, 9, "cyan", true);
+  }
+
+  const resultTone = pl.netProfit >= 0 ? "blue" : "gold";
+  const kpis = [
+    ["Gross profit / loss", money(pl.grossProfit)],
+    ["Operating expenses", money(pl.totalExpenses)],
+    [pl.netProfit >= 0 ? "Net profit" : "Net loss", money(pl.netProfit)],
+  ];
+  kpis.forEach(([label, value], index) => {
+    const x = 48 + index * 250;
+    canvas.rect(x, 462, 226, 34, "surface");
+    canvas.text(label.toUpperCase(), x + 12, 482, 6.8, "muted", true);
+    canvas.fitText(value, x + 12, 468, 126, 11, index === 2 ? resultTone : "blue", true, 7);
+  });
+
+  canvas.rect(48, 94, 746, 350, "white", true);
+  canvas.rect(48, 418, 746, 26, "navy");
+  canvas.text("DR - EXPENSES, LOSSES AND NET PROFIT", 62, 428, 8.6, "white", true);
+  canvas.text("KES", 360, 428, 8.6, "white", true);
+  canvas.text("CR - INCOME, GAINS AND NET LOSS", 434, 428, 8.6, "white", true);
+  canvas.text("KES", 746, 428, 8.6, "white", true);
+  canvas.line(421, 94, 421, 444, "border", 0.8);
+
+  drawProfitLossSide(canvas, pl.left, 62, 402, 336, 22);
+  drawProfitLossSide(canvas, pl.right, 434, 402, 336, 22);
+  canvas.line(62, 122, 398, 122, "navy", 0.8);
+  canvas.line(434, 122, 770, 122, "navy", 0.8);
+  canvas.text("Total", 62, 108, 8.5, "navy", true);
+  canvas.fitText(money(closingTotal), 312, 108, 86, 8.5, "navy", true, 6);
+  canvas.text("Total", 434, 108, 8.5, "navy", true);
+  canvas.fitText(money(closingTotal), 684, 108, 86, 8.5, "navy", true, 6);
+
+  canvas.line(48, 72, 794, 72, "border", 0.5);
+  canvas.text(`${report.businessName} | Profit and Loss Account`, 48, 54, 7.2, "muted");
+  canvas.text(`Generated by Solva Trade on ${report.generatedAt}. ${blueprintFor(report).footerNote}`, 254, 54, 7.2, "muted");
+  canvas.text("Page 1 of 1", 746, 54, 7.2, "muted");
+  return pdfDocument(canvas.output(), 842, 595, assets);
+}
+
 async function landscapePdf(report: Report) {
   const canvas = new PdfCanvas();
   const style = blueprintFor(report);
@@ -4203,6 +4356,7 @@ async function landscapePdf(report: Report) {
 }
 
 async function pdf(report: Report) {
+  if (isProfitAndLossReport(report)) return profitAndLossPdf(report);
   if (isLandscapePdfReport(report)) return landscapePdf(report);
 
   const canvas = new PdfCanvas();
