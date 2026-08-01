@@ -2996,6 +2996,10 @@ function templateFor(report: Report): DocumentTemplate {
 }
 
 function shouldShowPaymentInstructions(report: Report) {
+  if (report.businessName.toLowerCase().includes("cymereg") && isDayToDayDocument(report)) {
+    return false;
+  }
+
   const value = `${report.moduleName} ${report.processName}`.toLowerCase();
   return Boolean(
     report.paymentInstructions.length &&
