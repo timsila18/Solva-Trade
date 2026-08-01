@@ -215,7 +215,10 @@ export default async function DashboardPage() {
         .limit(20),
     ]);
 
-    const invoices = invoicesResult.data ?? [];
+    const invoices = (invoicesResult.data ?? []).filter((invoice) => {
+      const status = String(invoice.status ?? "").toLowerCase();
+      return status !== "reversed" && status !== "cancelled";
+    });
     todayInvoiceCount = invoices.filter((invoice) => String(invoice.invoice_date) === today).length;
     todaySales = invoices
       .filter((invoice) => String(invoice.invoice_date) === today)

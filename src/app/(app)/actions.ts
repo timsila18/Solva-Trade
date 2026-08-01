@@ -592,6 +592,158 @@ async function postCustomerPayment(
   };
 }
 
+export async function reverseSalesInvoiceAction(formData: FormData) {
+  const invoiceId = safeText(formData.get("invoiceId"), "");
+  const reason = safeText(formData.get("reason"), "Sale cancelled or entered by mistake.");
+  const params = new URLSearchParams({
+    module: "Sales",
+    process: "Invoice Reversal",
+    document: "Credit Note",
+    intent: "Reversed",
+    returnTo: "/sales",
+    next: "Back to sales",
+  });
+
+  try {
+    if (!invoiceId) throw new Error("Open the invoice to reverse first.");
+
+    const supabase = await createSupabaseServerClient();
+    const admin = createSupabaseAdminClient();
+    const { data } = await supabase.auth.getUser();
+    const user = data.user;
+    const businessId =
+      (await getActiveBusinessId()) ||
+      (typeof user?.app_metadata?.active_business_id === "string" ? user.app_metadata.active_business_id : null);
+    if (!user || !businessId) throw new Error("Sign in to reverse an invoice.");
+
+    const { data: invoice, error: invoiceError } = await admin
+      .from("sales_invoices")
+      .select("id, business_id, branch_id, customer_id, invoice_number, invoice_date, status, total_amount, amount_paid, balance_due")
+      .eq("business_id", businessId)
+      .eq("id", invoiceId)
+      .maybeSingle();
+    if (invoiceError) throw new Error(invoiceError.message);
+    if (!invoice) throw new Error("That invoice was not found in this business.");
+
+    const status = String(invoice.status ?? "").toLowerCase();
+    if (status === "reversed" || status === "cancelled") {
+      throw new Error("This invoice has already been reversed.");
+    }
+
+    const reversalNumber = `REV-${String(invoice.invoice_number || Date.now()).replace(/[^A-Za-z0-9-]+/g, "-")}`;
+    const { data: movements, error: movementLoadError } = await admin
+      .from("stock_movements")
+      .select(
+        "id, branch_id, warehouse_id, product_id, variant_id, batch_id, display_unit_id, quantity_base, display_quantity, unit_conversion_factor, unit_cost, total_cost",
+      )
+      .eq("business_id", businessId)
+      .eq("reference_document_type", "sales_invoice")
+      .eq("reference_document_id", invoiceId)
+      .eq("direction", "out");
+    if (movementLoadError) throw new Error(movementLoadError.message);
+
+    const reversalMovements = (movements ?? []).map((movement) => ({
+      business_id: businessId,
+      branch_id: movement.branch_id,
+      warehouse_id: movement.warehouse_id,
+      product_id: movement.product_id,
+      variant_id: movement.variant_id,
+      batch_id: movement.batch_id,
+      display_unit_id: movement.display_unit_id,
+      movement_type: "reversal",
+      direction: "in",
+      quantity_base: Number(movement.quantity_base ?? 0),
+      display_quantity: Number(movement.display_quantity ?? movement.quantity_base ?? 0),
+      unit_conversion_factor: Number(movement.unit_conversion_factor ?? 1) || 1,
+      unit_cost: Number(movement.unit_cost ?? 0),
+      total_cost: Number(movement.total_cost ?? 0),
+      reference_document_type: "sales_invoice_reversal",
+      reference_document_id: invoiceId,
+      reference_number: reversalNumber,
+      reason,
+      notes: `Reversal of stock issue ${movement.id} for invoice ${invoice.invoice_number}.`,
+      movement_date: new Date().toISOString(),
+      created_by: user.id,
+      approval_status: "posted",
+      reversal_reference_id: movement.id,
+      is_reversal: true,
+    }));
+
+    if (reversalMovements.length) {
+      const { error: reversalError } = await admin.from("stock_movements").insert(reversalMovements);
+      if (reversalError) throw new Error(reversalError.message);
+    }
+
+    const { data: allocations } = await admin
+      .from("customer_payment_allocations")
+      .select("customer_payment_id")
+      .eq("business_id", businessId)
+      .eq("invoice_id", invoiceId);
+    const paymentIds = [...new Set((allocations ?? []).map((allocation) => String(allocation.customer_payment_id)).filter(Boolean))];
+    if (paymentIds.length) {
+      await admin.from("customer_payments").update({ status: "reversed", notes: `Reversed with invoice ${invoice.invoice_number}: ${reason}` }).eq("business_id", businessId).in("id", paymentIds);
+    }
+
+    await admin.from("sales_source_allocations").delete().eq("business_id", businessId).eq("sales_invoice_id", invoiceId);
+
+    const { error: updateError } = await admin
+      .from("sales_invoices")
+      .update({
+        status: "reversed",
+        delivery_status: "cancelled",
+        amount_paid: 0,
+        balance_due: 0,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("business_id", businessId)
+      .eq("id", invoiceId);
+    if (updateError) throw new Error(updateError.message);
+
+    const reversalForm = new FormData();
+    reversalForm.set("module", "Sales");
+    reversalForm.set("process", "Invoice Reversal");
+    reversalForm.set("document", "Credit Note");
+    reversalForm.set("intent", "Reversed");
+    reversalForm.set("returnTo", "/sales");
+    reversalForm.set("next", "Back to sales");
+    reversalForm.set("field_invoice_number", String(invoice.invoice_number ?? invoiceId));
+    reversalForm.set("label_invoice_number", "Original invoice");
+    reversalForm.set("field_credit_note_number", reversalNumber);
+    reversalForm.set("label_credit_note_number", "Reversal number");
+    reversalForm.set("field_reason", reason);
+    reversalForm.set("label_reason", "Reason");
+    reversalForm.set("field_total", Number(invoice.total_amount ?? 0).toFixed(2));
+    reversalForm.set("label_total", "Reversed invoice amount");
+    await persistWorkflowRecord(reversalForm, user.id, businessId, { table: "sales_invoices", id: invoiceId }, reversalNumber);
+
+    await admin.from("audit_logs").insert({
+      business_id: businessId,
+      user_id: user.id,
+      action: "invoice.reversed",
+      module: "Sales",
+      entity_type: "sales_invoice",
+      entity_id: invoiceId,
+      new_value: {
+        invoice_number: invoice.invoice_number,
+        reversal_number: reversalNumber,
+        reason,
+        stock_movements_reversed: reversalMovements.length,
+        related_payments_reversed: paymentIds.length,
+      },
+    });
+
+    params.set("invoiceId", invoiceId);
+    appendGeneratedDocumentField(params, "invoice_number", "Original invoice", String(invoice.invoice_number ?? invoiceId));
+    appendGeneratedDocumentField(params, "credit_note_number", "Reversal number", reversalNumber);
+    appendGeneratedDocumentField(params, "reason", "Reason", reason);
+    appendGeneratedDocumentField(params, "total", "Reversed invoice amount", Number(invoice.total_amount ?? 0).toFixed(2));
+  } catch (error) {
+    params.set("error", error instanceof Error ? error.message : "The invoice could not be reversed.");
+  }
+
+  redirect(`/action-complete?${params.toString()}`);
+}
+
 async function postGoodsReceived(formData: FormData, userId: string, fallbackBusinessId?: string | null) {
   const admin = await createSupabaseServerClient();
   const { businessId, branchId, warehouseId } = await getWorkspaceContextForClient(admin, userId, fallbackBusinessId);

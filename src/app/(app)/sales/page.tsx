@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { AlertTriangle, CheckCircle2, Clock3, FileText, ReceiptText, UserPlus } from "lucide-react";
-import { completeProcessAction } from "@/app/(app)/actions";
+import { completeProcessAction, reverseSalesInvoiceAction } from "@/app/(app)/actions";
 import { EmptyState, MetricCard, PageHero, PlainCard } from "@/components/ui/premium";
 import { salesSummary, salesWorkflows } from "@/lib/sales-data";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -110,6 +110,11 @@ function daysSince(dateValue: string | null) {
   const then = new Date(dateValue);
   if (Number.isNaN(then.getTime())) return 0;
   return Math.max(0, Math.floor((Date.now() - then.getTime()) / 86_400_000));
+}
+
+function isReversedSale(invoice: SalesInvoiceRow) {
+  const status = String(invoice.status ?? "").toLowerCase();
+  return status === "reversed" || status === "cancelled";
 }
 
 function receiptHref(invoice: SalesInvoiceRow) {
@@ -237,6 +242,7 @@ export default async function SalesPage() {
               const total = asNumber(invoice.total_amount);
               const paid = asNumber(invoice.amount_paid);
               const balance = asNumber(invoice.balance_due);
+              const reversed = isReversedSale(invoice);
               const isPaid = balance <= 0;
               const isPartPaid = !isPaid && paid > 0;
               const age = daysSince(invoice.invoice_date);
@@ -248,14 +254,16 @@ export default async function SalesPage() {
                       <h3 className="font-semibold text-slate-950">{invoice.invoice_number || "Sale without number"}</h3>
                       <span
                         className={`rounded-full px-2.5 py-1 text-xs font-black tracking-wide ${
-                          isPaid
+                          reversed
+                            ? "bg-slate-200 text-slate-700"
+                            : isPaid
                             ? "bg-emerald-100 text-emerald-800"
                             : isPartPaid
                               ? "bg-amber-100 text-amber-800"
                               : "bg-rose-100 text-rose-800"
                         }`}
                       >
-                        {isPaid ? "PAID" : isPartPaid ? "PART PAID" : "UNPAID"}
+                        {reversed ? "REVERSED" : isPaid ? "PAID" : isPartPaid ? "PART PAID" : "UNPAID"}
                       </span>
                       {shouldRemind ? (
                         <span className="inline-flex items-center gap-1 rounded-full bg-orange-50 px-2.5 py-1 text-xs font-semibold text-orange-800">
@@ -284,7 +292,11 @@ export default async function SalesPage() {
                     </div>
                   </dl>
                   <div className="flex flex-col gap-2">
-                    {isPaid ? (
+                    {reversed ? (
+                      <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm font-semibold text-slate-600">
+                        This sale was reversed. Stock has been restored and the invoice no longer counts in live totals.
+                      </div>
+                    ) : isPaid ? (
                       <a href={receiptHref(invoice)} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-emerald-700 px-4 py-3 text-sm font-semibold text-white">
                         <ReceiptText className="h-4 w-4" />
                         Download PAID receipt
@@ -336,6 +348,23 @@ export default async function SalesPage() {
                     <a href={salesDocumentHref(invoice, "Delivery Note")} className="inline-flex min-h-9 items-center justify-center rounded-md border border-cyan-200 bg-cyan-50 px-3 text-xs font-semibold text-[var(--solva-blue-700)]">
                       Download delivery note
                     </a>
+                    {!reversed ? (
+                      <form action={reverseSalesInvoiceAction} className="grid gap-2 rounded-md border border-rose-100 bg-rose-50 p-3">
+                        <input type="hidden" name="invoiceId" value={invoice.id} />
+                        <label className="text-xs font-semibold text-rose-800" htmlFor={`reverse-reason-${invoice.id}`}>
+                          Reverse only if this sale was entered by mistake or cancelled
+                        </label>
+                        <input
+                          id={`reverse-reason-${invoice.id}`}
+                          name="reason"
+                          defaultValue="Sale cancelled or entered by mistake."
+                          className="min-h-10 rounded-md border border-rose-200 bg-white px-3 text-xs font-semibold text-slate-800"
+                        />
+                        <button type="submit" className="inline-flex min-h-10 items-center justify-center rounded-md border border-rose-200 bg-white px-3 text-xs font-black text-rose-700">
+                          Reverse sale and restore stock
+                        </button>
+                      </form>
+                    ) : null}
                   </div>
                 </article>
               );
