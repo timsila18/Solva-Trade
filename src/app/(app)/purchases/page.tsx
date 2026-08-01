@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { CheckCircle2, FileText, PackageCheck, Printer, ShoppingCart } from "lucide-react";
+import { reverseGoodsReceivedNoteAction, updateGoodsReceivedNoteDetailsAction } from "@/app/(app)/actions";
 import { EmptyState, MetricCard, PageHero, PlainCard } from "@/components/ui/premium";
 import { purchasingSummary, purchasingWorkflows } from "@/lib/purchasing-data";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -175,48 +176,93 @@ export default async function PurchasesPage() {
           <div className="mt-4 divide-y divide-slate-200 overflow-hidden rounded-lg border border-slate-200">
             {grns.map((grn) => {
               const stats = grnStats(grn);
+              const status = String(grn.status ?? "posted").toLowerCase();
+              const locked = status === "reversed" || status === "cancelled";
               return (
-                <article key={grn.id} className="grid gap-4 bg-white p-4 lg:grid-cols-[1.25fr_1fr_1.25fr] lg:items-center">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="font-semibold text-slate-950">{grn.grn_number || "GRN without number"}</h3>
-                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-black uppercase tracking-wide text-emerald-800">
-                        <CheckCircle2 className="h-3.5 w-3.5" />
-                        {grn.status || "posted"}
-                      </span>
+                <article key={grn.id} className="bg-white p-4">
+                  <div className="grid gap-4 lg:grid-cols-[1.25fr_1fr_1.25fr] lg:items-center">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="font-semibold text-slate-950">{grn.grn_number || "GRN without number"}</h3>
+                        <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-black uppercase tracking-wide ${locked ? "bg-rose-100 text-rose-800" : "bg-emerald-100 text-emerald-800"}`}>
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                          {grn.status || "posted"}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-sm text-slate-600">{supplierName(grn)}</p>
+                      <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Received {grn.receipt_date || "not dated"} {grn.supplier_delivery_note_number ? `- supplier note ${grn.supplier_delivery_note_number}` : ""}
+                      </p>
                     </div>
-                    <p className="mt-1 text-sm text-slate-600">{supplierName(grn)}</p>
-                    <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      Received {grn.receipt_date || "not dated"} {grn.supplier_delivery_note_number ? `- supplier note ${grn.supplier_delivery_note_number}` : ""}
-                    </p>
+                    <dl className="grid grid-cols-3 gap-2 text-sm">
+                      <div className="rounded-md bg-slate-50 p-3">
+                        <dt className="text-xs font-semibold text-slate-500">Accepted</dt>
+                        <dd className="mt-1 font-semibold text-slate-950">{stats.accepted.toLocaleString("en-KE", { maximumFractionDigits: 2 })}</dd>
+                      </div>
+                      <div className="rounded-md bg-rose-50 p-3">
+                        <dt className="text-xs font-semibold text-rose-700">Rejected</dt>
+                        <dd className="mt-1 font-semibold text-rose-950">{stats.rejected.toLocaleString("en-KE", { maximumFractionDigits: 2 })}</dd>
+                      </div>
+                      <div className="rounded-md bg-cyan-50 p-3">
+                        <dt className="text-xs font-semibold text-cyan-700">Value</dt>
+                        <dd className="mt-1 font-semibold text-cyan-950">{money(stats.value)}</dd>
+                      </div>
+                    </dl>
+                    <div className="grid gap-2 sm:grid-cols-3">
+                      <a href={grnDocumentHref(grn, "pdf")} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-[var(--solva-blue-700)] px-3 text-sm font-semibold text-white">
+                        <FileText className="h-4 w-4" />
+                        PDF
+                      </a>
+                      <a href={grnDocumentHref(grn, "excel")} className="inline-flex min-h-10 items-center justify-center rounded-md border border-cyan-200 bg-cyan-50 px-3 text-sm font-semibold text-[var(--solva-blue-700)]">
+                        Excel
+                      </a>
+                      <a href={grnDocumentHref(grn, "print")} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-slate-200 px-3 text-sm font-semibold text-slate-700">
+                        <Printer className="h-4 w-4" />
+                        Print
+                      </a>
+                    </div>
                   </div>
-                  <dl className="grid grid-cols-3 gap-2 text-sm">
-                    <div className="rounded-md bg-slate-50 p-3">
-                      <dt className="text-xs font-semibold text-slate-500">Accepted</dt>
-                      <dd className="mt-1 font-semibold text-slate-950">{stats.accepted.toLocaleString("en-KE", { maximumFractionDigits: 2 })}</dd>
+
+                  <details className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <summary className="cursor-pointer text-sm font-semibold text-slate-800">Correct this GRN</summary>
+                    <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                      <form action={updateGoodsReceivedNoteDetailsAction} className="rounded-md border border-slate-200 bg-white p-3">
+                        <input type="hidden" name="grnId" value={grn.id} />
+                        <h4 className="text-sm font-semibold text-slate-950">Update receipt details</h4>
+                        <p className="mt-1 text-xs leading-5 text-slate-600">Use this for harmless corrections such as receiving date or supplier delivery note number.</p>
+                        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                          <label className="text-xs font-semibold text-slate-600">
+                            Received date
+                            <input name="receipt_date" type="date" defaultValue={grn.receipt_date ?? ""} className="mt-1 min-h-10 w-full rounded-md border border-slate-300 px-3 text-sm" />
+                          </label>
+                          <label className="text-xs font-semibold text-slate-600">
+                            Supplier delivery note
+                            <input name="supplier_delivery_note_number" defaultValue={grn.supplier_delivery_note_number ?? ""} className="mt-1 min-h-10 w-full rounded-md border border-slate-300 px-3 text-sm" />
+                          </label>
+                        </div>
+                        <label className="mt-3 block text-xs font-semibold text-slate-600">
+                          Correction note
+                          <input name="reason" placeholder="Example: delivery note number corrected" className="mt-1 min-h-10 w-full rounded-md border border-slate-300 px-3 text-sm" />
+                        </label>
+                        <button className="mt-3 min-h-10 rounded-md bg-slate-900 px-4 text-sm font-semibold text-white">Update details</button>
+                      </form>
+
+                      <form action={reverseGoodsReceivedNoteAction} className="rounded-md border border-rose-200 bg-white p-3">
+                        <input type="hidden" name="grnId" value={grn.id} />
+                        <h4 className="text-sm font-semibold text-rose-950">Reverse stock receipt</h4>
+                        <p className="mt-1 text-xs leading-5 text-rose-700">
+                          Use this when product, quantity or unit cost was wrong. Stock is restored through a reversal movement, then receive the goods again correctly.
+                        </p>
+                        <label className="mt-3 block text-xs font-semibold text-slate-600">
+                          Reason
+                          <input name="reason" required disabled={locked} placeholder={locked ? "Already reversed or cancelled" : "Example: wrong unit cost entered"} className="mt-1 min-h-10 w-full rounded-md border border-slate-300 px-3 text-sm disabled:bg-slate-100" />
+                        </label>
+                        <button disabled={locked} className="mt-3 min-h-10 rounded-md bg-rose-700 px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300">
+                          Reverse GRN and restore stock
+                        </button>
+                      </form>
                     </div>
-                    <div className="rounded-md bg-rose-50 p-3">
-                      <dt className="text-xs font-semibold text-rose-700">Rejected</dt>
-                      <dd className="mt-1 font-semibold text-rose-950">{stats.rejected.toLocaleString("en-KE", { maximumFractionDigits: 2 })}</dd>
-                    </div>
-                    <div className="rounded-md bg-cyan-50 p-3">
-                      <dt className="text-xs font-semibold text-cyan-700">Value</dt>
-                      <dd className="mt-1 font-semibold text-cyan-950">{money(stats.value)}</dd>
-                    </div>
-                  </dl>
-                  <div className="grid gap-2 sm:grid-cols-3">
-                    <a href={grnDocumentHref(grn, "pdf")} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-[var(--solva-blue-700)] px-3 text-sm font-semibold text-white">
-                      <FileText className="h-4 w-4" />
-                      PDF
-                    </a>
-                    <a href={grnDocumentHref(grn, "excel")} className="inline-flex min-h-10 items-center justify-center rounded-md border border-cyan-200 bg-cyan-50 px-3 text-sm font-semibold text-[var(--solva-blue-700)]">
-                      Excel
-                    </a>
-                    <a href={grnDocumentHref(grn, "print")} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-slate-200 px-3 text-sm font-semibold text-slate-700">
-                      <Printer className="h-4 w-4" />
-                      Print
-                    </a>
-                  </div>
+                  </details>
                 </article>
               );
             })}

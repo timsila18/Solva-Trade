@@ -751,6 +751,227 @@ export async function reverseSalesInvoiceAction(formData: FormData) {
   redirect(`/action-complete?${params.toString()}`);
 }
 
+export async function updateGoodsReceivedNoteDetailsAction(formData: FormData) {
+  const grnId = safeText(formData.get("grnId"), "");
+  const receiptDate = safeText(formData.get("receipt_date"), "");
+  const supplierDeliveryNoteNumber = safeText(formData.get("supplier_delivery_note_number"), "");
+  const reason = safeText(formData.get("reason"), "Corrected receipt details.");
+  const params = new URLSearchParams({
+    module: "Purchasing",
+    process: "GRN Detail Update",
+    document: "Goods Received Note (GRN)",
+    intent: "Updated",
+    returnTo: "/purchases#grn-history",
+    next: "Back to GRN History",
+  });
+
+  try {
+    if (!grnId) throw new Error("Open the GRN history and choose the receipt to update.");
+
+    const supabase = await createSupabaseServerClient();
+    const admin = createSupabaseAdminClient();
+    const { data } = await supabase.auth.getUser();
+    const user = data.user;
+    const businessId =
+      (await getActiveBusinessId()) ||
+      (typeof user?.app_metadata?.active_business_id === "string" ? user.app_metadata.active_business_id : null);
+    if (!user || !businessId) throw new Error("Sign in to update a GRN.");
+
+    const updatePayload: Record<string, string | null> = {
+      supplier_delivery_note_number: supplierDeliveryNoteNumber || null,
+      updated_at: new Date().toISOString(),
+    };
+    if (receiptDate) updatePayload.receipt_date = receiptDate;
+
+    const { data: grn, error } = await admin
+      .from("goods_received_notes")
+      .update(updatePayload)
+      .eq("business_id", businessId)
+      .eq("id", grnId)
+      .select("id, grn_number, receipt_date, supplier_delivery_note_number")
+      .single();
+    if (error || !grn) throw new Error(error?.message ?? "Could not update that GRN.");
+
+    await admin.from("audit_logs").insert({
+      business_id: businessId,
+      user_id: user.id,
+      action: "grn.details_updated",
+      module: "Purchasing",
+      entity_type: "goods_received_note",
+      entity_id: grnId,
+      new_value: {
+        grn_number: grn.grn_number,
+        receipt_date: grn.receipt_date,
+        supplier_delivery_note_number: grn.supplier_delivery_note_number,
+        reason,
+      },
+    });
+
+    params.set("grnId", grnId);
+    appendGeneratedDocumentField(params, "grn_number", "GRN number", String(grn.grn_number ?? grnId));
+    appendGeneratedDocumentField(params, "received_date", "Received date", String(grn.receipt_date ?? ""));
+    appendGeneratedDocumentField(params, "supplier_delivery_note_number", "Supplier delivery note number", String(grn.supplier_delivery_note_number ?? ""));
+    appendGeneratedDocumentField(params, "reason", "Correction note", reason);
+  } catch (error) {
+    params.set("error", error instanceof Error ? error.message : "The GRN details could not be updated.");
+  }
+
+  redirect(`/action-complete?${params.toString()}`);
+}
+
+export async function reverseGoodsReceivedNoteAction(formData: FormData) {
+  const grnId = safeText(formData.get("grnId"), "");
+  const reason = safeText(formData.get("reason"), "GRN entered by mistake or supplier delivery cancelled.");
+  const params = new URLSearchParams({
+    module: "Purchasing",
+    process: "GRN Reversal",
+    document: "Goods Received Note (GRN)",
+    intent: "Reversed",
+    returnTo: "/purchases#grn-history",
+    next: "Back to GRN History",
+  });
+
+  try {
+    if (!grnId) throw new Error("Open the GRN history and choose the receipt to reverse.");
+
+    const supabase = await createSupabaseServerClient();
+    const admin = createSupabaseAdminClient();
+    const { data } = await supabase.auth.getUser();
+    const user = data.user;
+    const businessId =
+      (await getActiveBusinessId()) ||
+      (typeof user?.app_metadata?.active_business_id === "string" ? user.app_metadata.active_business_id : null);
+    if (!user || !businessId) throw new Error("Sign in to reverse a GRN.");
+
+    const { data: grn, error: grnError } = await admin
+      .from("goods_received_notes")
+      .select("id, business_id, branch_id, warehouse_id, supplier_id, grn_number, status, receipt_date")
+      .eq("business_id", businessId)
+      .eq("id", grnId)
+      .maybeSingle();
+    if (grnError) throw new Error(grnError.message);
+    if (!grn) throw new Error("That GRN was not found in this business.");
+
+    const status = String(grn.status ?? "").toLowerCase();
+    if (status === "reversed" || status === "cancelled") throw new Error("This GRN has already been reversed or cancelled.");
+
+    const { data: movements, error: movementLoadError } = await admin
+      .from("stock_movements")
+      .select("id, branch_id, warehouse_id, product_id, variant_id, batch_id, display_unit_id, quantity_base, display_quantity, unit_conversion_factor, unit_cost, total_cost")
+      .eq("business_id", businessId)
+      .eq("reference_document_type", "goods_received_note")
+      .eq("reference_document_id", grnId)
+      .eq("direction", "in");
+    if (movementLoadError) throw new Error(movementLoadError.message);
+    if (!movements?.length) throw new Error("No posted stock movements were found for this GRN.");
+
+    const movementIds = movements.map((movement) => String(movement.id));
+    const { data: layers, error: layerError } = await admin
+      .from("fifo_cost_layers")
+      .select("id, receipt_movement_id, original_quantity, remaining_quantity")
+      .eq("business_id", businessId)
+      .in("receipt_movement_id", movementIds);
+    if (layerError) throw new Error(layerError.message);
+
+    const layerByMovement = new Map((layers ?? []).map((layer) => [String(layer.receipt_movement_id), layer]));
+    for (const movement of movements) {
+      const layer = layerByMovement.get(String(movement.id));
+      const received = Number(movement.quantity_base ?? 0);
+      const remaining = Number(layer?.remaining_quantity ?? received);
+      if (remaining + 0.000001 < received) {
+        throw new Error("This GRN cannot be fully reversed because some of its stock has already been sold, transferred or used. Reverse the related stock usage first, then reverse this GRN.");
+      }
+    }
+
+    const reversalNumber = `REV-${String(grn.grn_number || Date.now()).replace(/[^A-Za-z0-9-]+/g, "-")}`;
+    const reversalMovements = movements.map((movement) => ({
+      business_id: businessId,
+      branch_id: movement.branch_id,
+      warehouse_id: movement.warehouse_id,
+      product_id: movement.product_id,
+      variant_id: movement.variant_id,
+      batch_id: movement.batch_id,
+      display_unit_id: movement.display_unit_id,
+      movement_type: "reversal",
+      direction: "out",
+      quantity_base: Number(movement.quantity_base ?? 0),
+      display_quantity: Number(movement.display_quantity ?? movement.quantity_base ?? 0),
+      unit_conversion_factor: Number(movement.unit_conversion_factor ?? 1) || 1,
+      unit_cost: Number(movement.unit_cost ?? 0),
+      total_cost: Number(movement.total_cost ?? 0),
+      reference_document_type: "goods_received_note_reversal",
+      reference_document_id: grnId,
+      reference_number: reversalNumber,
+      reason,
+      notes: `Reversal of stock receipt ${movement.id} for GRN ${grn.grn_number}.`,
+      movement_date: new Date().toISOString(),
+      created_by: user.id,
+      approval_status: "posted",
+      reversal_reference_id: movement.id,
+      is_reversal: true,
+    }));
+
+    const { error: reversalError } = await admin.from("stock_movements").insert(reversalMovements);
+    if (reversalError) throw new Error(reversalError.message);
+
+    const layerIds = (layers ?? []).map((layer) => String(layer.id)).filter(Boolean);
+    if (layerIds.length) {
+      const { error: closeLayersError } = await admin
+        .from("fifo_cost_layers")
+        .update({ remaining_quantity: 0, active: false, updated_at: new Date().toISOString() })
+        .eq("business_id", businessId)
+        .in("id", layerIds);
+      if (closeLayersError) throw new Error(closeLayersError.message);
+    }
+
+    const { error: updateError } = await admin
+      .from("goods_received_notes")
+      .update({ status: "reversed", notes: reason, updated_at: new Date().toISOString() })
+      .eq("business_id", businessId)
+      .eq("id", grnId);
+    if (updateError) throw new Error(updateError.message);
+
+    const reversalForm = new FormData();
+    reversalForm.set("module", "Purchasing");
+    reversalForm.set("process", "GRN Reversal");
+    reversalForm.set("document", "Goods Received Note (GRN)");
+    reversalForm.set("intent", "Reversed");
+    reversalForm.set("returnTo", "/purchases#grn-history");
+    reversalForm.set("next", "Back to GRN History");
+    reversalForm.set("field_grn_number", String(grn.grn_number ?? grnId));
+    reversalForm.set("label_grn_number", "Original GRN");
+    reversalForm.set("field_reversal_number", reversalNumber);
+    reversalForm.set("label_reversal_number", "Reversal number");
+    reversalForm.set("field_reason", reason);
+    reversalForm.set("label_reason", "Reason");
+    await persistWorkflowRecord(reversalForm, user.id, businessId, { table: "goods_received_notes", id: grnId }, reversalNumber);
+
+    await admin.from("audit_logs").insert({
+      business_id: businessId,
+      user_id: user.id,
+      action: "grn.reversed",
+      module: "Purchasing",
+      entity_type: "goods_received_note",
+      entity_id: grnId,
+      new_value: {
+        grn_number: grn.grn_number,
+        reversal_number: reversalNumber,
+        reason,
+        stock_movements_reversed: reversalMovements.length,
+      },
+    });
+
+    params.set("grnId", grnId);
+    appendGeneratedDocumentField(params, "grn_number", "Original GRN", String(grn.grn_number ?? grnId));
+    appendGeneratedDocumentField(params, "reversal_number", "Reversal number", reversalNumber);
+    appendGeneratedDocumentField(params, "reason", "Reason", reason);
+  } catch (error) {
+    params.set("error", error instanceof Error ? error.message : "The GRN could not be reversed.");
+  }
+
+  redirect(`/action-complete?${params.toString()}`);
+}
+
 async function postGoodsReceived(formData: FormData, userId: string, fallbackBusinessId?: string | null) {
   const admin = await createSupabaseServerClient();
   const { businessId, branchId, warehouseId } = await getWorkspaceContextForClient(admin, userId, fallbackBusinessId);
