@@ -432,7 +432,8 @@ function isFinancialStatementReport(moduleName: string, processName: string) {
     value.includes("balance sheet") ||
     value.includes("cash flow") ||
     value.includes("general ledger") ||
-    value.includes("account ledger")
+    value.includes("account ledger") ||
+    value.includes("bank reconciliation")
   );
 }
 
@@ -459,6 +460,10 @@ function isCashFlowStatementReport(report: Report) {
 function isGeneralLedgerReport(report: Report) {
   const value = `${report.moduleName} ${report.processName}`.toLowerCase();
   return value.includes("general ledger") || value.includes("account ledger");
+}
+
+function isBankReconciliationReport(report: Report) {
+  return `${report.moduleName} ${report.processName}`.toLowerCase().includes("bank reconciliation");
 }
 
 function isProductMasterReport(moduleName: string, processName: string) {
@@ -4607,6 +4612,123 @@ async function generalLedgerPdf(report: Report) {
   return pdfDocument(canvas.output(), 612, 842, assets);
 }
 
+async function bankReconciliationPdf(report: Report) {
+  const canvas = new PdfCanvas();
+  const assets = await pdfAssets(report, "portrait");
+  const tenantLogo = assets.find((asset) => asset.name === "TenantLogo");
+  const solvaLogo = assets.find((asset) => asset.name === "SolvaLogo");
+  const lines = report.lines.filter((line) => line.sku !== "LEDGER" && line.sku !== "TOTAL");
+  const cashLines = lines.filter((line) => {
+    const value = `${line.description} ${line.batch} ${line.details?.Class ?? ""}`.toLowerCase();
+    return value.includes("cash") || value.includes("bank") || value.includes("mpesa") || value.includes("m-pesa");
+  });
+  const sourceLines = cashLines.length ? cashLines : lines;
+  const deposits = sourceLines.filter((line) => detailAmount(line.details?.Debit ?? money(line.unitPrice)) > 0);
+  const withdrawals = sourceLines.filter((line) => detailAmount(line.details?.Credit ?? money(line.discount)) > 0);
+  const bankOpening = sourceLines.reduce((sum, line) => sum + detailAmount(line.details?.Closing ?? money(line.lineTotal)), 0);
+  const depositTotal = deposits.reduce((sum, line) => sum + detailAmount(line.details?.Debit ?? money(line.unitPrice)), 0);
+  const outstandingTotal = withdrawals.reduce((sum, line) => sum + detailAmount(line.details?.Credit ?? money(line.discount)), 0);
+  const adjustedBank = bankOpening + depositTotal - outstandingTotal;
+  const bookOpening = adjustedBank;
+  const receivableCollected = 0;
+  const interestEarned = 0;
+  const bookAdditions = receivableCollected + interestEarned;
+  const serviceCharges = 0;
+  const nsfChecks = 0;
+  const bookDeductions = nsfChecks + serviceCharges;
+  const adjustedBook = bookOpening + bookAdditions - bookDeductions;
+  const closing = adjustedBook;
+  const periodDate = new Date(`${report.transaction["Document date"]}T00:00:00.000Z`);
+  const periodLabel = new Intl.DateTimeFormat("en-KE", { month: "long", day: "numeric", year: "numeric", timeZone: "Africa/Nairobi" }).format(periodDate);
+
+  function amount(value: number, x: number, y: number, width = 92, bold = false, color: keyof typeof pdfColors = "navy") {
+    canvas.fitText(value ? money(value) : "-", x, y, width, 9, color, bold, 6.2);
+  }
+
+  function underline(x: number, y: number, width: number, heavy = false) {
+    canvas.line(x, y, x + width, y, "black", heavy ? 1.1 : 0.55);
+  }
+
+  function row(label: string, value: number, y: number, indent = 0, bold = false, total = false) {
+    canvas.text(label, 58 + indent, y, 9.2, "black", bold);
+    amount(value, 466, y, 88, bold, total ? "black" : "blue");
+    if (total) underline(464, y - 4, 92, bold);
+  }
+
+  canvas.rect(0, 0, 612, 842, "white");
+  canvas.text("SOLVA TRADE", 84, 432, 70, "watermark", true);
+  canvas.rect(0, 805, 612, 38, "navy");
+  canvas.rect(0, 805, 204, 38, "blue");
+  canvas.rect(204, 805, 204, 38, "cyan");
+  canvas.rect(408, 805, 204, 38, "gold");
+  if (!drawFittedImage(canvas, tenantLogo, 52, 814, 72, 22)) canvas.text(initials(report.businessName), 62, 817, 13, "white", true);
+  canvas.text(report.businessName, 138, 826, 13, "white", true);
+  canvas.text("Bank reconciliation control", 138, 812, 7.8, "white");
+  if (!drawFittedImage(canvas, solvaLogo, 458, 814, 92, 22)) canvas.text("SOLVA TRADE", 470, 818, 10, "white", true);
+
+  canvas.rect(40, 762, 532, 24, "soft");
+  canvas.text("Bank Reconciliation Statement", 50, 769, 14, "blue", true);
+  canvas.text(report.businessName, 58, 724, 10, "black", true);
+  canvas.text("Bank Reconciliation Statement", 58, 706, 10, "black", true);
+  canvas.text(`Period Ended ${periodLabel}`, 58, 688, 10, "black", true);
+  canvas.wrap(`${report.businessLocation}${report.kraPin ? ` | KRA PIN: ${report.kraPin}` : ""}`, 58, 668, 312, 7.2, "slate", false, 8.4, 2);
+  canvas.text(`Generated: ${report.generatedAt}`, 408, 724, 7.4, "muted");
+  canvas.text(`Reference: ${report.transaction["Reference number"]}`, 408, 710, 7.4, "muted");
+
+  let y = 632;
+  row(`Cash balance as per bank statement, ${periodLabel}`, bankOpening, y);
+  y -= 20;
+  row("Add: Deposits in transit", depositTotal, y);
+  y -= 10;
+  underline(464, y, 92);
+  y -= 16;
+  amount(bankOpening + depositTotal, 466, y, 88, false, "black");
+  y -= 42;
+  row("Deduct: Outstanding cheques / bank payments not yet cleared", outstandingTotal, y);
+  y -= 10;
+  underline(464, y, 92);
+  y -= 28;
+  row("Adjusted cash balance", adjustedBank, y, 0, true, true);
+
+  y -= 48;
+  row("Balance as per depositor's record", bookOpening, y);
+  y -= 20;
+  row("Add: Receivables collected by bank", receivableCollected, y);
+  y -= 20;
+  row("Interest earned", interestEarned, y, 34);
+  y -= 10;
+  underline(464, y, 92);
+  y -= 16;
+  amount(bookOpening + bookAdditions, 466, y, 88, false, "black");
+  y -= 42;
+  row("Deduction: NSF / reversed customer payments", nsfChecks, y);
+  y -= 20;
+  row("Bank service charges and posting differences", serviceCharges, y, 34);
+  y -= 10;
+  underline(464, y, 92);
+  y -= 16;
+  amount(bookDeductions, 466, y, 88, false, "black");
+  y -= 32;
+  row("Adjusted cash balance", closing, y, 0, true, true);
+
+  canvas.rect(58, 92, 496, 44, "surface");
+  canvas.text("RECONCILIATION NOTE", 76, 116, 7.4, "blue", true);
+  canvas.wrap(
+    `This statement compares posted bank/cash ledger activity with the book balance. Book-side additions and deductions stay at zero until bank collections, interest, charges, reversals or NSF items are posted as finance records.`,
+    76,
+    102,
+    452,
+    7.1,
+    "slate",
+    false,
+    8.6,
+    3,
+  );
+  canvas.text(`${report.businessName} | Bank Reconciliation Statement`, 48, 42, 7.2, "muted");
+  canvas.text(`Prepared by ${report.generatedBy} via Solva Trade`, 332, 42, 7.2, "muted");
+  return pdfDocument(canvas.output(), 612, 842, assets);
+}
+
 async function landscapePdf(report: Report) {
   const canvas = new PdfCanvas();
   const style = blueprintFor(report);
@@ -4689,6 +4811,7 @@ async function pdf(report: Report) {
   if (isBalanceSheetReport(report)) return balanceSheetPdf(report);
   if (isCashFlowStatementReport(report)) return cashFlowPdf(report);
   if (isGeneralLedgerReport(report)) return generalLedgerPdf(report);
+  if (isBankReconciliationReport(report)) return bankReconciliationPdf(report);
   if (isLandscapePdfReport(report)) return landscapePdf(report);
 
   const canvas = new PdfCanvas();
