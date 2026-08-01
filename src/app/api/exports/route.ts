@@ -3009,6 +3009,49 @@ function shouldShowPaymentInstructions(report: Report) {
   );
 }
 
+function isDayToDayDocument(report: Report) {
+  const value = `${report.moduleName} ${report.processName}`.toLowerCase();
+  const dailyTerms = [
+    "invoice",
+    "receipt",
+    "quotation",
+    "proforma",
+    "goods received",
+    "grn",
+    "purchase order",
+    "purchase requisition",
+    "rfq",
+    "delivery note",
+    "dispatch note",
+    "credit note",
+    "debit note",
+    "payment voucher",
+    "receipt voucher",
+    "customer statement",
+    "supplier statement",
+  ];
+  const reportTerms = [
+    "report",
+    "register",
+    "trial balance",
+    "balance sheet",
+    "profit and loss",
+    "income statement",
+    "cash flow",
+    "ledger",
+    "audit",
+    "compliance",
+    "business health",
+    "executive",
+    "kpi",
+    "tax summary",
+    "vat report",
+    "management accounts",
+  ];
+
+  return dailyTerms.some((term) => value.includes(term)) && !reportTerms.some((term) => value.includes(term));
+}
+
 function paymentInstructionHtml(report: Report) {
   if (!shouldShowPaymentInstructions(report)) return "";
   return `<article class="payment-instructions">
@@ -3593,6 +3636,13 @@ function approvalSummary(generatedBy: string, role: string): Record<string, stri
 }
 
 function signatureLabelsFor(report: Report) {
+  if (isDayToDayDocument(report)) {
+    const template = templateFor(report);
+    if (template === "grn") return ["Received by", "Checked by", "Date"];
+    if (template === "purchaseOrder") return ["Prepared by", "Supplier", "Date"];
+    if (template === "deliveryNote" || template === "dispatchNote") return ["Delivered by", "Received by", "Date"];
+    return ["Prepared by", "Customer", "Date"];
+  }
   if (report.generatedByRole === "owner") {
     return ["Issued by Business Owner", "Received / acknowledged by", "Date and stamp"];
   }
@@ -3645,6 +3695,27 @@ function introValue(report: Report, kind: string) {
 }
 
 function introCards(report: Report, columns: "two-column" | "invoice-grid" | "po-grid" | "grn-grid") {
+  if (isDayToDayDocument(report)) {
+    const template = templateFor(report);
+    const partyTitle = template === "grn" || template === "purchaseOrder" ? "Supplier" : "Bill to";
+    const shipTitle = template === "grn" || template === "purchaseOrder" ? "Receive at" : "Ship to";
+    return `
+      <section class="daily-document-grid">
+        <article class="box">
+          <h3>${htmlEscape(partyTitle)}</h3>
+          <p class="party">${htmlEscape(report.partyName)}</p>
+        </article>
+        <article class="box">
+          <h3>${htmlEscape(shipTitle)}</h3>
+          <p class="party">${htmlEscape(template === "grn" || template === "purchaseOrder" ? report.businessName : report.partyName)}</p>
+        </article>
+        <article class="box">
+          <h3>${htmlEscape(report.processName)} details</h3>
+          ${documentMetaCard(report)}
+        </article>
+      </section>
+    `;
+  }
   const blueprint = blueprintFor(report);
   return `
     <section class="${columns}">
@@ -3725,6 +3796,14 @@ function templateIntro(report: Report) {
 function templateOutro(report: Report) {
   const blueprint = blueprintFor(report);
   const template = templateFor(report);
+  if (isDayToDayDocument(report) && blueprint.emphasis !== "receipt") {
+    const note = template === "grn"
+      ? "Goods received as listed above. Differences, rejected quantities or damaged items should be noted before signing."
+      : template === "purchaseOrder"
+        ? "Please quote this document number on delivery notes and invoices."
+        : "Thank you for choosing us. We appreciate your business.";
+    return `<section class="terms compact-note"><h3>Note</h3><p>${htmlEscape(note)}</p></section>`;
+  }
   if (blueprint.emphasis === "receipt") {
     const status = receiptPaymentStatus(report);
     return `<section class="receipt-slip"><div><strong>Sales Receipt Slip</strong><span>${htmlEscape(report.partyName)}</span></div><div><strong>${htmlEscape(status.label)}</strong><span>${htmlEscape(report.totals["Amount paid"] ?? report.totals.Total)}</span></div></section>`;
@@ -3758,8 +3837,15 @@ function htmlDocument(report: Report, print = false) {
     .join("");
   const template = templateFor(report);
   const style = blueprintFor(report);
+  const dailyDocument = isDayToDayDocument(report);
   const approvalTitle = report.generatedByRole === "owner" ? "Owner Certification and Audit" : "Approval and Audit";
   const signatureLabels = signatureLabelsFor(report);
+  const noteTitle = template === "grn" ? "Receiving note" : template === "purchaseOrder" ? "Supplier note" : "Note to customer";
+  const noteBody = template === "grn"
+    ? "Goods received as listed. Rejected or damaged quantities should be noted before signing."
+    : template === "purchaseOrder"
+      ? "Please quote this document number on delivery notes and invoices."
+      : "Thanks for choosing us. We appreciate your business.";
 
   return `<!doctype html>
 <html>
@@ -3785,9 +3871,10 @@ function htmlDocument(report: Report, print = false) {
     .solva-mark { margin-top: 18px; display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; border: 1px solid ${brand.border}; padding: 7px 11px; color: var(--doc-accent); font-size: 12px; font-weight: 800; }
     .solva-mark img { width: 92px; height: 24px; object-fit: contain; }
     .intro { position: relative; margin-top: 34px; }
-    .two-column, .grn-grid, .invoice-grid, .po-grid { display: grid; gap: 18px; }
+    .two-column, .grn-grid, .invoice-grid, .po-grid, .daily-document-grid { display: grid; gap: 18px; }
     .two-column, .grn-grid { grid-template-columns: 1fr 1fr; }
     .invoice-grid, .po-grid { grid-template-columns: 1fr 1fr 1fr; }
+    .daily-document-grid { grid-template-columns: .9fr .9fr 1.15fr; }
     .panel { border: 1px solid ${brand.border}; border-radius: 10px; background: ${brand.soft}; padding: 16px; }
     .box { border: 1px solid ${brand.border}; border-radius: 8px; background: white; padding: 14px; min-height: 116px; }
     .box.dark { background: ${brand.navy}; color: white; }
@@ -3893,11 +3980,15 @@ function htmlDocument(report: Report, print = false) {
     </section>
 
     <section class="after-table">
-      <article class="panel audit">
+      ${
+        dailyDocument
+          ? `<article class="panel audit compact-note"><h3>${htmlEscape(noteTitle)}</h3><p>${htmlEscape(noteBody)}</p></article>`
+          : `<article class="panel audit">
         <h3>${htmlEscape(approvalTitle)}</h3>
         <dl class="details">${approvalRows}</dl>
         <ul>${report.auditTrail.map((item) => `<li>${htmlEscape(item)}</li>`).join("")}</ul>
-      </article>
+      </article>`
+      }
       <article class="totals">
         <table>${totalRows}</table>
         ${paymentInstructionHtml(report)}
@@ -3911,7 +4002,7 @@ function htmlDocument(report: Report, print = false) {
     ${templateOutro(report)}
 
     <footer>
-      ${htmlEscape(report.businessName)} document generated by Solva Trade. Printed by ${htmlEscape(report.generatedBy)} on ${htmlEscape(report.generatedAt)}.
+      ${htmlEscape(report.businessName)} document generated by Solva Trade${dailyDocument ? "" : `. Printed by ${htmlEscape(report.generatedBy)}`} on ${htmlEscape(report.generatedAt)}.
     </footer>
   </main>
 </body>
@@ -4863,6 +4954,7 @@ async function pdf(report: Report) {
   const title = titleFor(report);
   const template = templateFor(report);
   const style = blueprintFor(report);
+  const dailyDocument = isDayToDayDocument(report);
   const approvalTitle = report.generatedByRole === "owner" ? "OWNER CERTIFICATION AND AUDIT" : "APPROVAL AND AUDIT";
   const assets = await pdfAssets(report, "portrait");
   const tenantLogo = assets.find((asset) => asset.name === "TenantLogo");
@@ -4966,16 +5058,27 @@ async function pdf(report: Report) {
     canvas.text("Reason: approved adjustment", 328, 642, 8.5, "navy");
     canvas.text(style.table.toUpperCase(), 48, 594, 11, "blue", true);
   } else {
-    canvas.rect(48, 628, 160, 72, "soft");
-    canvas.rect(224, 628, 160, 72, "soft");
-    canvas.rect(400, 628, 164, 72, "soft");
-    canvas.text("BILL TO", 62, 676, 9, "blue", true);
-    canvas.wrap(report.partyName, 62, 656, 124, 10, "navy", true);
-    canvas.text("SUPPLY / DELIVERY", 238, 676, 9, "blue", true);
-    canvas.wrap(report.transaction.Branch, 238, 656, 124, 10, "navy", true);
-    canvas.text("INVOICE DETAILS", 414, 676, 9, "blue", true);
-    canvas.text(`Date: ${report.transaction["Document date"]}`, 414, 656, 8.5, "navy");
-    canvas.text(`Due: ${report.transaction["Due or action date"]}`, 414, 642, 8.5, "navy");
+    if (dailyDocument) {
+      canvas.rect(48, 628, 250, 72, "soft");
+      canvas.rect(314, 628, 250, 72, "soft");
+      canvas.text("BILL TO", 62, 676, 9, "blue", true);
+      canvas.wrap(report.partyName, 62, 656, 210, 10, "navy", true);
+      canvas.text("INVOICE DETAILS", 328, 676, 9, "blue", true);
+      canvas.text(`Invoice no.: ${report.transaction["Reference number"]}`, 328, 656, 8.5, "navy");
+      canvas.text(`Invoice date: ${report.transaction["Document date"]}`, 328, 642, 8.5, "navy");
+      canvas.text(`Due date: ${report.transaction["Due or action date"]}`, 328, 628, 8.5, "navy");
+    } else {
+      canvas.rect(48, 628, 160, 72, "soft");
+      canvas.rect(224, 628, 160, 72, "soft");
+      canvas.rect(400, 628, 164, 72, "soft");
+      canvas.text("BILL TO", 62, 676, 9, "blue", true);
+      canvas.wrap(report.partyName, 62, 656, 124, 10, "navy", true);
+      canvas.text("SUPPLY / DELIVERY", 238, 676, 9, "blue", true);
+      canvas.wrap(report.transaction.Branch, 238, 656, 124, 10, "navy", true);
+      canvas.text("INVOICE DETAILS", 414, 676, 9, "blue", true);
+      canvas.text(`Date: ${report.transaction["Document date"]}`, 414, 656, 8.5, "navy");
+      canvas.text(`Due: ${report.transaction["Due or action date"]}`, 414, 642, 8.5, "navy");
+    }
     canvas.text(style.table.toUpperCase(), 48, 594, 11, "blue", true);
   }
 
@@ -5009,12 +5112,23 @@ async function pdf(report: Report) {
     });
   }
 
-  canvas.text(approvalTitle, 48, summaryTop, 10, "blue", true);
-  Object.entries(report.approvals).slice(0, 4).forEach(([label, value], index) => {
-    const y = summaryTop - 18 - index * 22;
-    canvas.text(`${label}:`, 48, y + 1, 7.2, "muted", true);
-    canvas.wrap(value, 116, y + 1, 218, 7.2, "navy", false, 8.2, 2);
-  });
+  if (dailyDocument) {
+    const noteTitle = template === "grn" ? "RECEIVING NOTE" : template === "purchaseOrder" ? "SUPPLIER NOTE" : "NOTE TO CUSTOMER";
+    const noteBody = template === "grn"
+      ? "Goods received as listed. Rejected or damaged quantities should be noted before signing."
+      : template === "purchaseOrder"
+        ? "Please quote this document number on delivery notes and invoices."
+        : "Thanks for choosing us. We appreciate your business.";
+    canvas.text(noteTitle, 48, summaryTop, 10, "blue", true);
+    canvas.wrap(noteBody, 48, summaryTop - 18, 286, 8.2, "navy", false, 10.2, 4);
+  } else {
+    canvas.text(approvalTitle, 48, summaryTop, 10, "blue", true);
+    Object.entries(report.approvals).slice(0, 4).forEach(([label, value], index) => {
+      const y = summaryTop - 18 - index * 22;
+      canvas.text(`${label}:`, 48, y + 1, 7.2, "muted", true);
+      canvas.wrap(value, 116, y + 1, 218, 7.2, "navy", false, 8.2, 2);
+    });
+  }
 
   const signatureLabels = signatureLabelsFor(report);
   [48, 242, 436].forEach((x, index) => {
@@ -5029,7 +5143,16 @@ async function pdf(report: Report) {
     canvas.fitText(`Amount received: ${report.totals["Amount paid"] ?? report.totals.Total}`, 370, 126, 170, 7.2, "navy", true, 6);
   }
   canvas.line(48, 58, 564, 58, "border");
-  canvas.wrap(`${report.businessName} document generated by Solva Trade. ${style.footerNote} Printed by ${report.generatedBy} on ${report.generatedAt}.`, 76, 42, 460, 7.5, "muted");
+  canvas.wrap(
+    dailyDocument
+      ? `${report.businessName} document generated by Solva Trade on ${report.generatedAt}.`
+      : `${report.businessName} document generated by Solva Trade. ${style.footerNote} Printed by ${report.generatedBy} on ${report.generatedAt}.`,
+    76,
+    42,
+    460,
+    7.5,
+    "muted",
+  );
 
   return pdfDocument(canvas.output(), 612, 842, assets);
 }
