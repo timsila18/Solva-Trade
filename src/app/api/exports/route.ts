@@ -1708,42 +1708,44 @@ function itemBaseLine(item: SalesItemRow, invoice: SalesInvoiceRow | undefined, 
   const product = relatedOne(item.products);
   const quantity = numberValue(item.invoice_quantity);
   const unitPrice = numberValue(item.unit_price);
-  const tax = numberValue(item.tax_amount);
   const total = numberValue(item.line_total);
-  const amount = Math.max(0, total - tax);
-  const effectiveVatRate = amount ? (tax / amount) * 100 : 0;
+  const amountPaid = numberValue(invoice?.amount_paid);
+  const balanceDue = numberValue(invoice?.balance_due);
   return {
     sku: String(product?.sku ?? product?.product_code ?? `ITEM-${index + 1}`),
     description: String(product?.product_name ?? "Sold item"),
     unit: "Unit",
     quantity,
     unitPrice,
-    discount: numberValue(product?.standard_cost),
-    taxRate: effectiveVatRate ? `${effectiveVatRate.toFixed(1)}% incl.` : "No VAT",
-    taxAmount: tax,
+    discount: 0,
+    taxRate: "VAT incl.",
+    taxAmount: 0,
     lineTotal: total,
     warehouse: invoice ? dateKey(invoice.invoice_date) : "Posted sales",
     batch: String(invoice?.invoice_number ?? "Invoice"),
-    notes: `Customer: ${String(relatedOne(invoice?.customers)?.customer_name ?? "Walk-in customer")}.`,
+    notes: `Customer: ${String(relatedOne(invoice?.customers)?.customer_name ?? "Walk-in customer")}. Selling price is VAT-inclusive where VAT applies.`,
     details: {
       "Item no": String(product?.product_code ?? product?.sku ?? ""),
       "Item name": String(product?.product_name ?? "Sold item"),
       "Item description": String(product?.product_name ?? "Sold item"),
-      "VAT-inclusive unit price": money(unitPrice),
-      "Exclusive unit price": quantity > 0 ? money(amount / quantity) : money(0),
+      "Inclusive Unit Price": money(unitPrice),
+      "Unit Price": money(unitPrice),
+      Price: money(unitPrice),
       Qty: quantity.toLocaleString("en-KE", { maximumFractionDigits: 2 }),
-      "Exclusive amount": money(amount),
-      "Tax rate": effectiveVatRate ? `${effectiveVatRate.toFixed(1)}% incl.` : "0%",
-      Tax: money(tax),
+      Amount: money(total),
+      "Tax rate": "VAT included where applicable",
+      Tax: money(0),
       "Total payable": money(total),
+      "Amount Paid": money(amountPaid),
+      "Balance Due": money(balanceDue),
       "Invoice no.": String(invoice?.invoice_number ?? ""),
       Date: invoice ? dateKey(invoice.invoice_date) : todayIsoDate(),
       Customer: String(relatedOne(invoice?.customers)?.customer_name ?? "Walk-in customer"),
-      "Invoice subtotal": money(numberValue(invoice?.subtotal)),
-      "Invoice tax": money(numberValue(invoice?.tax_total)),
+      "Invoice subtotal": money(numberValue(invoice?.total_amount)),
+      "Invoice tax": money(0),
       "Invoice total": money(numberValue(invoice?.total_amount)),
-      "Amount paid": money(numberValue(invoice?.amount_paid)),
-      "Balance due": money(numberValue(invoice?.balance_due)),
+      "Amount paid": money(amountPaid),
+      "Balance due": money(balanceDue),
       "Payment status": String(invoice?.status ?? "posted"),
     },
   };
@@ -2404,9 +2406,9 @@ const documentBlueprints: Record<string, DocumentBlueprint> = {
       ["Invoice Details", "Invoice number, invoice date, due date and payment terms.", "meta"],
       ["Amount Due", "Shows what the customer should pay and the current outstanding balance.", "note"],
     ],
-    headers: ["Code", "Description", "Qty", "Unit Price", "Discount", "Tax", "Amount"],
+    headers: ["Code", "Description", "Qty", "Inclusive Unit Price", "Amount", "Amount Paid", "Balance Due"],
     signatures: ["Prepared by", "Customer / recipient", "Owner"],
-    footerNote: "This invoice states the amount due from the customer. Tax details are shown where applicable.",
+    footerNote: "This invoice states the amount due from the customer. Selling prices are VAT-inclusive where VAT applies, so VAT is not added again on top.",
     emphasis: "invoice",
   },
   "Tax Invoice": {
