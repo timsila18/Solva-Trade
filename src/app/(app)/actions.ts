@@ -602,6 +602,7 @@ async function postCustomerPayment(
 export async function reverseSalesInvoiceAction(formData: FormData) {
   const invoiceId = safeText(formData.get("invoiceId"), "");
   const reason = safeText(formData.get("reason"), "Sale cancelled or entered by mistake.");
+  const reversePin = safeText(formData.get("reverse_pin"), "");
   const params = new URLSearchParams({
     module: "Sales",
     process: "Invoice Reversal",
@@ -613,6 +614,7 @@ export async function reverseSalesInvoiceAction(formData: FormData) {
 
   try {
     if (!invoiceId) throw new Error("Open the invoice to reverse first.");
+    if (reversePin !== "2027") throw new Error("Enter the owner reversal PIN to reverse this sale.");
 
     const supabase = await createSupabaseServerClient();
     const admin = createSupabaseAdminClient();

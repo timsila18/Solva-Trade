@@ -40,8 +40,8 @@ const workflows: Record<string, { title: string; description: string; fields: st
 
 const workflowDocuments: Record<string, string[]> = {
   quotations: ["Quotation", "Proforma Invoice"],
-  orders: ["Sales Order", "Dispatch Note", "Delivery Note"],
-  invoices: ["Invoice", "Simplified Invoice", "Delivery Note", "Customer Statement"],
+  orders: ["Sales Order", "Dispatch Note"],
+  invoices: ["Invoice", "Simplified Invoice", "Customer Statement"],
   payments: ["Sales Receipt", "Receipt Voucher", "Outstanding Balance Statement"],
   returns: ["Sales Return Note", "Credit Note"],
   "debtor-ageing": ["Customer Aging Report", "Outstanding Balance Statement", "Customer Statement"],

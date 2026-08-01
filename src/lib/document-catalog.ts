@@ -33,7 +33,6 @@ export const documentCatalog: BusinessDocument[] = [
     "Credit Note",
     "Debit Note",
     "Sales Receipt",
-    "Delivery Note",
     "Dispatch Note",
     "Customer Statement",
     "Outstanding Balance Statement",

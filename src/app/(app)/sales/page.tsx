@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AlertTriangle, CheckCircle2, Clock3, FileText, ReceiptText, UserPlus } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock3, Eye, FileText, ReceiptText, UserPlus } from "lucide-react";
 import { completeProcessAction, reverseSalesInvoiceAction } from "@/app/(app)/actions";
 import { EmptyState, MetricCard, PageHero, PlainCard } from "@/components/ui/premium";
 import { salesSummary, salesWorkflows } from "@/lib/sales-data";
@@ -121,7 +121,7 @@ function receiptHref(invoice: SalesInvoiceRow) {
   return salesDocumentHref(invoice, "Sales Receipt");
 }
 
-function salesDocumentHref(invoice: SalesInvoiceRow, process: "Sales Receipt" | "Invoice" | "Delivery Note") {
+function salesDocumentHref(invoice: SalesInvoiceRow, process: "Sales Receipt" | "Invoice") {
   const total = asNumber(invoice.total_amount);
   const paid = asNumber(invoice.amount_paid);
   const balance = asNumber(invoice.balance_due);
@@ -345,25 +345,41 @@ export default async function SalesPage() {
                     <a href={salesDocumentHref(invoice, "Invoice")} className="inline-flex min-h-9 items-center justify-center rounded-md border border-slate-200 px-3 text-xs font-semibold text-slate-700">
                       Download invoice
                     </a>
-                    <a href={salesDocumentHref(invoice, "Delivery Note")} className="inline-flex min-h-9 items-center justify-center rounded-md border border-cyan-200 bg-cyan-50 px-3 text-xs font-semibold text-[var(--solva-blue-700)]">
-                      Download delivery note
-                    </a>
                     {!reversed ? (
-                      <form action={reverseSalesInvoiceAction} className="grid gap-2 rounded-md border border-rose-100 bg-rose-50 p-3">
-                        <input type="hidden" name="invoiceId" value={invoice.id} />
-                        <label className="text-xs font-semibold text-rose-800" htmlFor={`reverse-reason-${invoice.id}`}>
-                          Reverse only if this sale was entered by mistake or cancelled
-                        </label>
-                        <input
-                          id={`reverse-reason-${invoice.id}`}
-                          name="reason"
-                          defaultValue="Sale cancelled or entered by mistake."
-                          className="min-h-10 rounded-md border border-rose-200 bg-white px-3 text-xs font-semibold text-slate-800"
-                        />
-                        <button type="submit" className="inline-flex min-h-10 items-center justify-center rounded-md border border-rose-200 bg-white px-3 text-xs font-black text-rose-700">
-                          Reverse sale and restore stock
-                        </button>
-                      </form>
+                      <details className="rounded-md border border-rose-100 bg-rose-50 p-2">
+                        <summary className="flex cursor-pointer items-center justify-center gap-2 text-xs font-black text-rose-700">
+                          <Eye className="h-3.5 w-3.5" />
+                          Reverse
+                        </summary>
+                        <form action={reverseSalesInvoiceAction} className="mt-3 grid gap-2">
+                          <input type="hidden" name="invoiceId" value={invoice.id} />
+                          <label className="text-xs font-semibold text-rose-800" htmlFor={`reverse-pin-${invoice.id}`}>
+                            Owner PIN
+                          </label>
+                          <input
+                            id={`reverse-pin-${invoice.id}`}
+                            name="reverse_pin"
+                            type="password"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            required
+                            placeholder="Enter PIN"
+                            className="min-h-9 rounded-md border border-rose-200 bg-white px-3 text-xs font-semibold text-slate-800"
+                          />
+                          <label className="text-xs font-semibold text-rose-800" htmlFor={`reverse-reason-${invoice.id}`}>
+                            Reason
+                          </label>
+                          <input
+                            id={`reverse-reason-${invoice.id}`}
+                            name="reason"
+                            defaultValue="Sale cancelled or entered by mistake."
+                            className="min-h-9 rounded-md border border-rose-200 bg-white px-3 text-xs font-semibold text-slate-800"
+                          />
+                          <button type="submit" className="inline-flex min-h-9 items-center justify-center rounded-md bg-rose-700 px-3 text-xs font-black text-white">
+                            Confirm reverse
+                          </button>
+                        </form>
+                      </details>
                     ) : null}
                   </div>
                 </article>
