@@ -3064,6 +3064,30 @@ function paymentInstructionHtml(report: Report) {
   </article>`;
 }
 
+function displayTotalEntries(report: Report) {
+  if (isDayToDayDocument(report)) {
+    const total =
+      report.totals.Total ??
+      report.totals["Amount due"] ??
+      report.totals["Amount paid"] ??
+      report.totals["Balance due"] ??
+      report.totals.Subtotal ??
+      "KES 0.00";
+    return [["Total", total] as [string, string]];
+  }
+
+  const template = templateFor(report);
+  const preferredTotals = report.processName === "Invoice"
+    ? ["Subtotal", "Total", "Amount due", "Balance due"]
+    : template === "salesReceipt"
+      ? ["Subtotal", "Tax", "Total", "Amount paid", "Balance due"]
+      : ["Subtotal", "Discount", "Tax", "Total", "Amount due", "Balance due"];
+
+  return preferredTotals
+    .filter((label, index, list) => report.totals[label] && list.indexOf(label) === index)
+    .map((label) => [label, report.totals[label]] as [string, string]);
+}
+
 async function tenantContext() {
   const fallback = {
     businessName: "Your company",
@@ -3833,7 +3857,7 @@ function htmlDocument(report: Report, print = false) {
         .join("")}</tr>`,
     )
     .join("") || `<tr><td colspan="${headers.length}" class="empty-row">No posted records found for the selected filters.</td></tr>`;
-  const totalRows = Object.entries(report.totals)
+  const totalRows = displayTotalEntries(report)
     .map(([label, value], index, all) => `<tr class="${index === all.length - 1 ? "grand" : ""}"><th>${htmlEscape(label)}</th><td>${htmlEscape(value)}</td></tr>`)
     .join("");
   const approvalRows = Object.entries(report.approvals)
@@ -5089,14 +5113,7 @@ async function pdf(report: Report) {
   const yAfterTable = renderPdfTable(canvas, report, tableStart);
 
   const summaryTop = Math.max(236, Math.min(536, yAfterTable));
-  const preferredTotals = report.processName === "Invoice"
-    ? ["Subtotal", "Total", "Amount due", "Balance due"]
-    : template === "salesReceipt"
-    ? ["Subtotal", "Tax", "Total", "Amount paid", "Balance due"]
-    : ["Subtotal", "Discount", "Tax", "Total", "Amount due", "Balance due"];
-  const totalEntries = preferredTotals
-    .filter((label, index, list) => report.totals[label] && list.indexOf(label) === index)
-    .map((label) => [label, report.totals[label]] as [string, string]);
+  const totalEntries = displayTotalEntries(report);
 
   canvas.text("TOTALS", 384, summaryTop, 10, "blue", true);
   totalEntries.forEach(([label, value], index) => {
