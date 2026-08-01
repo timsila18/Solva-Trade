@@ -317,15 +317,14 @@ export default async function DashboardPage() {
 
   return (
     <div className="pb-24">
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
         <DashboardTile label="Today sales" value={money(todaySales)} caption={todayInvoiceCount > 0 ? `${todayInvoiceCount} posted today` : "No sale posted today"} icon={ShoppingCart} tone="blue" />
         <DashboardTile label="Cash collected" value={money(cashCollected)} caption={paymentCount > 0 ? `${paymentCount} receipt${paymentCount === 1 ? "" : "s"} today` : "No receipt posted today"} icon={Banknote} tone="green" />
         <DashboardTile label="Customers owing" value={money(customersOwing)} caption={customersOwing > 0 ? `${overdueCustomers} invoice${overdueCustomers === 1 ? "" : "s"} to follow up` : "Follow-up list is clean"} icon={CreditCard} tone="gold" />
         <DashboardTile label="Active customers" value={activeCustomers.toLocaleString("en-KE")} caption={activeCustomers > 0 ? "Customer list is active" : "Create the first customer"} icon={Users} tone="cyan" />
         <DashboardTile label="Stock alerts" value={stockAlerts.toLocaleString("en-KE")} caption={stockAlerts > 0 ? "Review reorder or negative stock" : "Stock position is clean"} icon={PackagePlus} tone="rose" />
+        <ProfitPrivacyCard businessName={businessName} pin={profitPin} periods={profitPeriods} />
       </section>
-
-      <ProfitPrivacyCard businessName={businessName} pin={profitPin} periods={profitPeriods} />
 
       <PageHero
         eyebrow={`${greeting()} ${userName}`}
