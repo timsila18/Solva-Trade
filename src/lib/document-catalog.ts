@@ -243,6 +243,7 @@ export const documentCatalog: BusinessDocument[] = [
     "VAT Report",
     "VAT Purchase Schedule",
     "VAT Sales Schedule",
+    "KRA ETR Sales Report",
     "Withholding Tax Report",
     "Tax Summary",
     "eTIMS Submission Report",

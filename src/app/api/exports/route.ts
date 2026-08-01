@@ -418,6 +418,11 @@ function isSalesOperationalReport(moduleName: string, processName: string) {
   );
 }
 
+function isKraEtrSalesReport(moduleName: string, processName: string) {
+  const value = `${moduleName} ${processName}`.toLowerCase();
+  return value.includes("kra etr sales") || value.includes("etr sales report") || value.includes("cui invoice");
+}
+
 function isFinancialStatementReport(moduleName: string, processName: string) {
   const value = `${moduleName} ${processName}`.toLowerCase();
   return (
@@ -1395,6 +1400,18 @@ type SalesItemRow = {
   products?: { product_name?: string | null; product_code?: string | null; sku?: string | null; standard_cost?: number | string | null } | { product_name?: string | null; product_code?: string | null; sku?: string | null; standard_cost?: number | string | null }[] | null;
 };
 
+type KraEtrInvoiceRow = SalesInvoiceRow & {
+  customers?: { customer_name?: string | null; customer_code?: string | null; kra_pin?: string | null } | { customer_name?: string | null; customer_code?: string | null; kra_pin?: string | null }[] | null;
+};
+
+type ExternalTaxDocumentRow = {
+  source_document_id?: string | null;
+  control_unit_invoice_number?: string | null;
+  external_document_number?: string | null;
+  external_receipt_number?: string | null;
+  submission_status?: string | null;
+};
+
 type GoodsReceivedItemRow = {
   grn_id?: string | null;
   supplier_batch?: string | null;
@@ -1418,6 +1435,16 @@ function dayName(value: string) {
 
 function monthKey(value: string | null | undefined) {
   return new Intl.DateTimeFormat("en-KE", { month: "short", year: "numeric", timeZone: "Africa/Nairobi" }).format(new Date(`${dateKey(value)}T00:00:00.000Z`));
+}
+
+function kraEtrMonthlyWindow() {
+  const today = todayIsoDate();
+  const [year, month] = today.split("-");
+  return {
+    label: `1-${19} ${new Intl.DateTimeFormat("en-KE", { month: "long", year: "numeric", timeZone: "Africa/Nairobi" }).format(new Date(`${year}-${month}-01T00:00:00.000Z`))}`,
+    start: `${year}-${month}-01`,
+    end: `${year}-${month}-19`,
+  };
 }
 
 function quarterKey(value: string | null | undefined) {
@@ -1463,6 +1490,141 @@ async function salesOperationalData() {
     items: (items ?? []) as SalesItemRow[],
     allocations: (allocations ?? []) as { product_id?: string | null; gross_profit?: number | string | null; total_cost?: number | string | null; sale_value?: number | string | null; quantity?: number | string | null }[],
   };
+}
+
+async function kraEtrSalesReportLines(): Promise<ReportLine[]> {
+  const businessId = await activeReportBusinessId();
+  if (!businessId) return [];
+
+  const supabase = await createSupabaseServerClient();
+  const period = kraEtrMonthlyWindow();
+  const [{ data: invoices }, { data: taxConfig }] = await Promise.all([
+    supabase
+      .from("sales_invoices")
+      .select("id, invoice_number, invoice_date, subtotal, tax_total, total_amount, status, customers(customer_name, customer_code, kra_pin)")
+      .eq("business_id", businessId)
+      .gte("invoice_date", period.start)
+      .lte("invoice_date", period.end)
+      .neq("status", "draft")
+      .order("invoice_date", { ascending: true })
+      .limit(1000),
+    supabase
+      .from("tax_integration_configurations")
+      .select("device_identifier, branch_identifier, taxpayer_identifier, integration_status")
+      .eq("business_id", businessId)
+      .eq("active", true)
+      .limit(1),
+  ]);
+
+  const invoiceRows = (invoices ?? []) as KraEtrInvoiceRow[];
+  const invoiceIds = invoiceRows.map((invoice) => invoice.id).filter(Boolean);
+  if (!invoiceIds.length) {
+    return [
+      {
+        sku: "KRA-ETR",
+        description: `No posted sales found for ${period.label}.`,
+        unit: "Monthly VAT prep",
+        quantity: 0,
+        unitPrice: 0,
+        discount: 0,
+        taxRate: "No rows",
+        taxAmount: 0,
+        lineTotal: 0,
+        warehouse: "Tax workspace",
+        batch: period.label,
+        notes: "Post sales invoices dated within the 1st to 19th VAT-preparation window to populate this report.",
+        details: {
+          "Sr. No": "-",
+          "Customer KRA PIN": "No posted sales",
+          "Customer Name": "No posted sales",
+          "KRA Device No.": "Not configured",
+          "Invoice Date": `${period.start} to ${period.end}`,
+          "CUI Invoice No.": "No posted sales",
+          "Item Description": "No posted sales in this VAT-preparation window",
+          "Exclusive Amount": money(0),
+          VAT: money(0),
+          "Inclusive Amount": money(0),
+        },
+      },
+    ];
+  }
+
+  const [{ data: items }, { data: externalDocs }] = await Promise.all([
+    supabase
+      .from("sales_invoice_items")
+      .select("invoice_id, product_id, invoice_quantity, unit_price, tax_amount, line_total, products(product_name, product_code, sku)")
+      .eq("business_id", businessId)
+      .in("invoice_id", invoiceIds)
+      .limit(3000),
+    supabase
+      .from("external_tax_documents")
+      .select("source_document_id, control_unit_invoice_number, external_document_number, external_receipt_number, submission_status")
+      .eq("business_id", businessId)
+      .eq("source_document_type", "sales_invoice")
+      .in("source_document_id", invoiceIds)
+      .limit(1000),
+  ]);
+
+  const invoiceById = new Map(invoiceRows.map((invoice) => [invoice.id, invoice]));
+  const taxDocByInvoice = new Map(
+    ((externalDocs ?? []) as ExternalTaxDocumentRow[]).map((document) => [String(document.source_document_id), document]),
+  );
+  const config = Array.isArray(taxConfig) ? taxConfig[0] : null;
+  const deviceNumber =
+    typeof config?.device_identifier === "string" && config.device_identifier.trim()
+      ? config.device_identifier.trim()
+      : typeof config?.branch_identifier === "string" && config.branch_identifier.trim()
+        ? config.branch_identifier.trim()
+        : "Not configured";
+
+  return ((items ?? []) as SalesItemRow[])
+    .map((item, index) => {
+      const invoice = invoiceById.get(String(item.invoice_id));
+      const customer = relatedOne(invoice?.customers) as { customer_name?: string | null; customer_code?: string | null; kra_pin?: string | null } | null;
+      const product = relatedOne(item.products);
+      const taxDocument = taxDocByInvoice.get(String(item.invoice_id));
+      const tax = numberValue(item.tax_amount);
+      const inclusive = numberValue(item.line_total);
+      const exclusive = Math.max(0, inclusive - tax);
+      const cui =
+        taxDocument?.control_unit_invoice_number ||
+        taxDocument?.external_document_number ||
+        taxDocument?.external_receipt_number ||
+        invoice?.invoice_number ||
+        "CUI not recorded";
+      const itemDescription = String(product?.product_name ?? product?.product_code ?? "Sold item");
+
+      return {
+        sku: String(index + 1),
+        description: itemDescription,
+        unit: "ETR sale",
+        quantity: numberValue(item.invoice_quantity),
+        unitPrice: exclusive,
+        discount: 0,
+        taxRate: exclusive ? `${((tax / exclusive) * 100).toFixed(1)}% VAT` : "0% VAT",
+        taxAmount: tax,
+        lineTotal: inclusive,
+        warehouse: "KRA VAT return support",
+        batch: String(taxDocument?.submission_status ?? invoice?.status ?? "posted"),
+        notes: `Invoice ${String(invoice?.invoice_number ?? "not recorded")} for ${String(customer?.customer_name ?? "Walk-in customer")}. Period ${period.label}.`,
+        details: {
+          "Sr. No": String(index + 1),
+          "Customer KRA PIN": String(customer?.kra_pin ?? "Not provided"),
+          "Customer Name": String(customer?.customer_name ?? "Walk-in customer"),
+          "KRA Device No.": deviceNumber,
+          "Invoice Date": invoice ? dateKey(invoice.invoice_date) : todayIsoDate(),
+          "CUI Invoice No.": String(cui),
+          "Item Description": itemDescription,
+          "Exclusive Amount": money(exclusive),
+          VAT: money(tax),
+          "Inclusive Amount": money(inclusive),
+          "Invoice No.": String(invoice?.invoice_number ?? ""),
+          "ETR Status": String(taxDocument?.submission_status ?? "Manual / not submitted"),
+          "VAT Prep Period": `${period.start} to ${period.end}`,
+        },
+      };
+    })
+    .filter((line) => line.quantity > 0 || line.lineTotal > 0);
 }
 
 function invoiceBaseLine(invoice: SalesInvoiceRow, index: number): ReportLine {
@@ -2690,6 +2852,24 @@ function blueprintFromTerms(report: Report): DocumentBlueprint {
   if (value.includes("cash flow") || value.includes("income statement") || value.includes("profit") || value.includes("balance sheet") || value.includes("trial balance") || value.includes("ledger") || value.includes("budget") || value.includes("expense analysis")) {
     return { ...base, accent: "#071A2B", soft: "#F8FAFC", label: "Financial statement", table: "Financial statement lines", headers: ["Account Code", "Account Name", "Opening", "Debit", "Credit", "Closing", "Variance"], signatures: ["Prepared by", "Accountant", "Owner / Director"], footerNote: "Financial statements should reconcile to posted ledger entries and approved periods.", emphasis: "ledger" };
   }
+  if (value.includes("kra etr sales") || value.includes("etr sales report") || value.includes("cui invoice")) {
+    return {
+      ...base,
+      accent: "#1455D9",
+      soft: "#EEF6FF",
+      label: "KRA ETR monthly sales register",
+      table: "ETR sales from the 1st to 19th for VAT return preparation",
+      intro: [
+        ["VAT Period", "Sales dated from the 1st to the 19th, ready for review before the 20th filing deadline.", "meta"],
+        ["Taxpayer", "Tenant KRA PIN, customer PINs and configured ETR/eTIMS device reference.", "party"],
+        ["Control Note", "Use this report to reconcile ETR sales before filing VAT. It does not submit to KRA automatically.", "note"],
+      ],
+      headers: ["Sr. No", "Customer KRA PIN", "Customer Name", "KRA Device No.", "Invoice Date", "CUI Invoice No.", "Item Description", "Exclusive Amount", "VAT", "Inclusive Amount"],
+      signatures: ["Prepared by", "Tax review", "Owner approval"],
+      footerNote: "This KRA ETR sales report supports monthly VAT preparation for sales dated 1st to 19th. Confirm CUI and device details before filing on the 20th.",
+      emphasis: "control",
+    };
+  }
   if (value.includes("vat") || value.includes("withholding") || value.includes("tax")) {
     return { ...base, accent: "#1455D9", soft: "#EEF6FF", label: "Tax compliance schedule", table: "Taxable values and filing evidence", headers: ["Tax Period", "Document", "PIN", "Taxable Value", "Tax Rate", "Tax Amount", "Filing Status"], signatures: ["Prepared by", "Tax review", "Authorised by"], footerNote: "Tax reports support statutory review and should be reconciled before submission.", emphasis: "control" };
   }
@@ -2922,9 +3102,11 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
         : isSalesSourceReport(processName)
           ? await salesSourceReportLines(processName)
           : isFinancialStatementReport(moduleName, processName)
-            ? await financialStatementReportLines(processName)
-          : isSalesOperationalReport(moduleName, processName)
-            ? await salesOperationalReportLines(processName)
+          ? await financialStatementReportLines(processName)
+          : isKraEtrSalesReport(moduleName, processName)
+            ? await kraEtrSalesReportLines()
+            : isSalesOperationalReport(moduleName, processName)
+              ? await salesOperationalReportLines(processName)
         : isProductProfileReport(moduleName, processName)
           ? await productMasterReportLines(productId)
           : isCustomerProfileReport(moduleName, processName)
@@ -3010,6 +3192,10 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
     } else if (isSalesOperationalReport(moduleName, processName)) {
       processStatus = "Live sales report from posted invoices, invoice items, customers and source-cost allocations";
       sourceAuditNote = "Sales report values come from posted invoices, invoice items, customers, branches and FIFO/source-cost allocations where available.";
+    } else if (isKraEtrSalesReport(moduleName, processName)) {
+      const period = kraEtrMonthlyWindow();
+      processStatus = "Live KRA ETR sales register for VAT preparation";
+      sourceAuditNote = `KRA ETR rows come from posted sales invoice items dated ${period.start} to ${period.end}, customer KRA PINs, tenant tax device settings and recorded external CUI references where available.`;
     } else if (isFinancialStatementReport(moduleName, processName)) {
       processStatus = "Live financial statement from posted journal account activity";
       sourceAuditNote = "Financial statement values come from posted journal account activity and statement classification mappings.";
@@ -3740,6 +3926,7 @@ function renderPdfTable(canvas: PdfCanvas, report: Report, startY: number) {
     "Inventory Discrepancy Report": ["Item no.", "Item name", "On-hand quantity", "Actual item count", "Inventory discrepancy (auto-fill)", "Reorder level", "Item discontinued?"],
     "Inventory Damage Report": ["Item no.", "Name", "Condition", "Damage report", "Quantity", "Asset value", "Total value"],
     "Sales Tracking Report": ["Product name", "Cost per item", "Markup percentage", "Total sold", "Total revenue", "Profit per item", "Total income"],
+    "KRA ETR Sales Report": ["Sr. No", "Customer KRA PIN", "Customer Name", "KRA Device No.", "Invoice Date", "CUI Invoice No.", "Item Description", "Exclusive Amount", "VAT", "Inclusive Amount"],
   };
   const pdfPreferredHeaders = compactReportHeaders[report.processName] ?? [
     "Item no.",
@@ -3868,6 +4055,7 @@ function wideReportHeaders(report: Report) {
     "Inventory Discrepancy Report": ["Item no.", "Item name", "Vendor", "On-hand quantity", "Actual item count", "Inventory discrepancy (auto-fill)", "Reorder level", "Item discontinued?"],
     "Inventory Damage Report": ["Item no.", "Name", "Vendor", "Condition", "Damage report", "Quantity", "Asset value", "Total value"],
     "Sales Tracking Report": ["Product name", "Cost per item", "Markup percentage", "Total sold", "Total revenue", "Profit per item", "Total income"],
+    "KRA ETR Sales Report": ["Sr. No", "Customer KRA PIN", "Customer Name", "KRA Device No.", "Invoice Date", "CUI Invoice No.", "Item Description", "Exclusive Amount", "VAT", "Inclusive Amount"],
   };
   const requested = preferred[report.processName] ?? ["Period", "Item no.", "Item name", "Name", "Customer", "Vendor", "Revenue (KES)", "Stock quantity", "Total value", "Status", "Notes"];
   const selected = requested.filter((header) => allHeaders.includes(header));
