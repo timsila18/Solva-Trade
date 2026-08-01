@@ -430,7 +430,9 @@ function isFinancialStatementReport(moduleName: string, processName: string) {
     value.includes("income statement") ||
     value.includes("trial balance") ||
     value.includes("balance sheet") ||
-    value.includes("cash flow")
+    value.includes("cash flow") ||
+    value.includes("general ledger") ||
+    value.includes("account ledger")
   );
 }
 
@@ -452,6 +454,11 @@ function isBalanceSheetReport(report: Report) {
 
 function isCashFlowStatementReport(report: Report) {
   return `${report.moduleName} ${report.processName}`.toLowerCase().includes("cash flow");
+}
+
+function isGeneralLedgerReport(report: Report) {
+  const value = `${report.moduleName} ${report.processName}`.toLowerCase();
+  return value.includes("general ledger") || value.includes("account ledger");
 }
 
 function isProductMasterReport(moduleName: string, processName: string) {
@@ -4513,6 +4520,93 @@ async function cashFlowPdf(report: Report) {
   return pdfDocument(canvas.output(), 612, 842, assets);
 }
 
+async function generalLedgerPdf(report: Report) {
+  const canvas = new PdfCanvas();
+  const assets = await pdfAssets(report, "portrait");
+  const tenantLogo = assets.find((asset) => asset.name === "TenantLogo");
+  const solvaLogo = assets.find((asset) => asset.name === "SolvaLogo");
+  const rows = report.lines.filter((line) => line.sku !== "LEDGER" && line.sku !== "TOTAL");
+  const entries = rows.map((line) => {
+    const debit = detailAmount(line.details?.Debit ?? money(line.unitPrice));
+    const credit = detailAmount(line.details?.Credit ?? money(line.discount));
+    return {
+      account: line.description,
+      explanation: line.notes || `${line.details?.Section ?? line.batch} ledger movement.`,
+      ref: line.sku || "-",
+      debit,
+      credit,
+      section: String(line.details?.Section ?? line.batch ?? "Ledger"),
+    };
+  });
+  const debitTotal = entries.reduce((sum, row) => sum + row.debit, 0);
+  const creditTotal = entries.reduce((sum, row) => sum + row.credit, 0);
+  const year = new Date(`${report.transaction["Document date"]}T00:00:00.000Z`).getUTCFullYear().toString();
+
+  canvas.rect(0, 0, 612, 842, "white");
+  canvas.rect(0, 832, 612, 10, "blue");
+  canvas.rect(204, 832, 204, 10, "cyan");
+  canvas.rect(408, 832, 204, 10, "gold");
+  canvas.text("SOLVA TRADE", 88, 430, 68, "watermark", true);
+  canvas.rect(48, 760, 50, 46, "surface");
+  if (!drawFittedImage(canvas, tenantLogo, 52, 764, 42, 38)) canvas.text(initials(report.businessName), 60, 780, 15, "blue", true);
+  canvas.text(report.businessName, 108, 798, 13, "navy", true);
+  canvas.wrap(`${report.businessLocation}${report.kraPin ? ` | KRA PIN: ${report.kraPin}` : ""}`, 108, 780, 242, 7.6, "slate");
+  canvas.text(report.processName.toLowerCase().includes("account ledger") ? "Account Ledger" : "General Journal", 244, 740, 15, "navy", true);
+  canvas.rect(450, 768, 94, 28, "navy");
+  if (!drawFittedImage(canvas, solvaLogo, 454, 772, 86, 20)) canvas.text("SOLVA TRADE", 462, 778, 9, "white", true);
+
+  const x = 42;
+  let y = 694;
+  const widths = [34, 34, 292, 44, 70, 70];
+  canvas.line(x, y + 18, x + 528, y + 18, "navy", 0.8);
+  canvas.line(x, y + 14, x + 528, y + 14, "navy", 0.5);
+  canvas.rect(x, y - 46, 528, 60, "white", true);
+  canvas.text("Date", x + 28, y - 28, 9, "navy", true);
+  canvas.text("Account Title and Explanations", x + 152, y - 28, 9, "navy", true);
+  canvas.text("Ref", x + 372, y - 28, 9, "navy", true);
+  canvas.text("Amount (KES)", x + 424, y + 2, 9, "navy", true);
+  canvas.text("Debit", x + 420, y - 28, 8.4, "navy", true);
+  canvas.text("Credit", x + 490, y - 28, 8.4, "navy", true);
+  let headerLineX = x;
+  widths.slice(0, -1).forEach((width) => {
+    headerLineX += width;
+    canvas.line(headerLineX, y - 46, headerLineX, y + 14, "border", 0.5);
+  });
+  canvas.line(x, y - 48, x + 528, y - 48, "navy", 1.6);
+
+  y -= 72;
+  canvas.text(year, x + 20, y + 12, 8, "navy", true);
+  const maxEntries = 14;
+  entries.slice(0, maxEntries).forEach((entry, index) => {
+    const blockHeight = 40;
+    const month = index === 0 ? new Intl.DateTimeFormat("en-KE", { month: "short", timeZone: "Africa/Nairobi" }).format(new Date(`${report.transaction["Document date"]}T00:00:00.000Z`)) : "";
+    canvas.text(month, x + 8, y - 2, 7.2, "navy", true);
+    canvas.text(String(index + 1).padStart(2, "0"), x + 46, y - 2, 7.2, "navy", true);
+    canvas.wrap(entry.credit && !entry.debit ? `    ${entry.account}` : entry.account, x + 78, y - 2, 240, 8.2, "navy", false, 9, 1);
+    canvas.wrap(`(${entry.explanation})`, x + 78, y - 18, 244, 6.6, "slate", false, 7.4, 1);
+    canvas.fitText(entry.ref, x + 366, y - 2, 34, 7.2, "slate", false, 5.4);
+    canvas.fitText(entry.debit ? plainAmount(entry.debit) : "", x + 420, y - 2, 60, 7.6, "navy", false, 5.6);
+    canvas.fitText(entry.credit ? plainAmount(entry.credit) : "", x + 490, y - 2, 60, 7.6, "navy", false, 5.6);
+    canvas.line(x + 68, y - blockHeight + 8, x + 400, y - blockHeight + 8, "border", 0.4);
+    [x + 34, x + 68, x + 360, x + 404, x + 474].forEach((lineX) => canvas.line(lineX, y + 20, lineX, y - blockHeight + 8, "border", 0.35));
+    y -= blockHeight;
+  });
+  if (entries.length > maxEntries) {
+    canvas.text(`+ ${entries.length - maxEntries} more ledger lines in CSV/Excel export`, x + 78, y + 2, 7, "blue", true);
+    y -= 24;
+  }
+  canvas.line(x, y + 10, x + 528, y + 10, "navy", 1.6);
+  canvas.text("Total", x + 204, y - 24, 9, "navy", true);
+  canvas.fitText(money(debitTotal), x + 408, y - 24, 68, 8.6, "navy", true, 6);
+  canvas.fitText(money(creditTotal), x + 478, y - 24, 68, 8.6, "navy", true, 6);
+  canvas.line(x, y - 42, x + 528, y - 42, "navy", 0.8);
+  canvas.line(x, y - 46, x + 528, y - 46, "navy", 0.5);
+  canvas.text(Math.abs(debitTotal - creditTotal) < 0.01 ? "Balanced general ledger" : `Ledger difference: ${money(debitTotal - creditTotal)}`, x + 8, y - 64, 7.4, Math.abs(debitTotal - creditTotal) < 0.01 ? "blue" : "gold", true);
+
+  canvas.text(`Generated by Solva Trade on ${report.generatedAt}`, 48, 34, 7.2, "muted");
+  return pdfDocument(canvas.output(), 612, 842, assets);
+}
+
 async function landscapePdf(report: Report) {
   const canvas = new PdfCanvas();
   const style = blueprintFor(report);
@@ -4594,6 +4688,7 @@ async function pdf(report: Report) {
   if (isTrialBalanceReport(report)) return trialBalancePdf(report);
   if (isBalanceSheetReport(report)) return balanceSheetPdf(report);
   if (isCashFlowStatementReport(report)) return cashFlowPdf(report);
+  if (isGeneralLedgerReport(report)) return generalLedgerPdf(report);
   if (isLandscapePdfReport(report)) return landscapePdf(report);
 
   const canvas = new PdfCanvas();
