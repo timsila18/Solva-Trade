@@ -1458,6 +1458,15 @@ type GoodsReceivedItemRow = {
   products?: { product_name?: string | null; product_code?: string | null; sku?: string | null } | { product_name?: string | null; product_code?: string | null; sku?: string | null }[] | null;
 };
 
+type GoodsReceivedNoteRow = {
+  id?: string | null;
+  grn_number?: string | null;
+  receipt_date?: string | null;
+  supplier_delivery_note_number?: string | null;
+  status?: string | null;
+  suppliers?: { legal_name?: string | null; trading_name?: string | null; supplier_code?: string | null } | { legal_name?: string | null; trading_name?: string | null; supplier_code?: string | null }[] | null;
+};
+
 function dateKey(value: string | null | undefined) {
   return value ? String(value).slice(0, 10) : todayIsoDate();
 }
@@ -1769,13 +1778,27 @@ async function goodsReceivedDocumentLines(grnId: string | null): Promise<ReportL
   if (!businessId || !grnId) return [];
 
   const supabase = await createSupabaseServerClient();
-  const { data: items } = await supabase
-    .from("goods_received_note_items")
-    .select("grn_id, supplier_batch, expiry_date, delivered_quantity, accepted_quantity, rejected_quantity, unit_cost, source_type, source_reason, products(product_name, product_code, sku)")
-    .eq("business_id", businessId)
-    .eq("grn_id", grnId)
-    .order("created_at", { ascending: true })
-    .limit(300);
+  const [{ data: grns }, { data: items }] = await Promise.all([
+    supabase
+      .from("goods_received_notes")
+      .select("id, grn_number, receipt_date, supplier_delivery_note_number, status, suppliers(legal_name, trading_name, supplier_code)")
+      .eq("business_id", businessId)
+      .eq("id", grnId)
+      .limit(1),
+    supabase
+      .from("goods_received_note_items")
+      .select("grn_id, supplier_batch, expiry_date, delivered_quantity, accepted_quantity, rejected_quantity, unit_cost, source_type, source_reason, products(product_name, product_code, sku)")
+      .eq("business_id", businessId)
+      .eq("grn_id", grnId)
+      .order("created_at", { ascending: true })
+      .limit(300),
+  ]);
+  const grn = ((grns ?? [])[0] ?? undefined) as GoodsReceivedNoteRow | undefined;
+  const supplier = relatedOne(grn?.suppliers);
+  const supplierName = String(supplier?.trading_name ?? supplier?.legal_name ?? "Supplier not recorded");
+  const grnNumber = String(grn?.grn_number ?? grnId);
+  const receiptDate = dateKey(grn?.receipt_date);
+  const supplierDeliveryNote = String(grn?.supplier_delivery_note_number ?? "Not provided");
 
   return ((items ?? []) as GoodsReceivedItemRow[]).map((item, index) => {
     const product = relatedOne(item.products);
@@ -1806,6 +1829,12 @@ async function goodsReceivedDocumentLines(grnId: string | null): Promise<ReportL
         "Qty rejected": rejected.toLocaleString("en-KE", { maximumFractionDigits: 2 }),
         "Unit cost": money(unitCost),
         "Line value": money(total),
+        Supplier: supplierName,
+        "Supplier code": String(supplier?.supplier_code ?? ""),
+        "GRN no.": grnNumber,
+        "Supplier delivery note": supplierDeliveryNote,
+        "Receipt date": receiptDate,
+        "GRN status": String(grn?.status ?? "posted"),
         Batch: String(item.supplier_batch ?? "Not provided"),
         Expiry: String(item.expiry_date ?? "Not applicable"),
         Source: sourceLabel(item.source_type),
@@ -2077,6 +2106,11 @@ function initials(name: string) {
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase())
     .join("") || "ST";
+}
+
+function personInitials(name: string) {
+  const compact = initials(name);
+  return compact === "ST" ? "ST" : compact.split("").join(".");
 }
 
 function titleFor(report: Report) {
@@ -3126,7 +3160,7 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
     searchParams.get("user") ??
     searchParams.get("party") ??
     fieldValue(fields, ["customer", "supplier", "received_from", "paid_to", "payee", "owner", "driver", "employee"], tenant.businessName);
-  const generatedBy = searchParams.get("generatedBy") ?? searchParams.get("printer") ?? tenant.generatedBy;
+  const generatedBy = personInitials(searchParams.get("generatedBy") ?? searchParams.get("printer") ?? tenant.generatedBy);
   const submittedLines = isProfileDocument(moduleName, processName) ? profileLinesFromFields(fields, processName) : reportLineFromFields(fields, processName);
   const liveSourceLines = invoiceId
     ? await salesInvoiceDocumentLines(invoiceId)
@@ -3154,7 +3188,8 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
   const workflowLines = !liveSourceLines.length && !submittedLines.length ? await workflowRecordReportLines(moduleName, processName) : [];
   const lines = liveSourceLines.length ? liveSourceLines : submittedLines.length ? submittedLines : workflowLines;
   const liveInvoiceDetails = invoiceId ? lines[0]?.details ?? {} : {};
-  const effectivePartyName = liveInvoiceDetails.Customer || partyName;
+  const liveGrnDetails = grnId ? lines[0]?.details ?? {} : {};
+  const effectivePartyName = liveInvoiceDetails.Customer || liveGrnDetails.Supplier || partyName;
   const isValuationReport = isProductMasterReport(moduleName, processName) || isProductProfileReport(moduleName, processName) || isInventoryOperationalReport(moduleName, processName);
   const lineValueTotal = lines.reduce((sum, line) => sum + line.lineTotal, 0);
   const liveInvoiceTotals = invoiceId && lines[0]?.details
@@ -3192,6 +3227,7 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
       : Math.max(0, total - amountPaid);
   const reference =
     liveInvoiceDetails["Invoice no."] ||
+    liveGrnDetails["GRN no."] ||
     fieldValue(fields, [
       "invoice_number",
       "receipt_number",
@@ -3207,7 +3243,7 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
       "adjustment_number",
       "count_number",
     ]) || `${moduleName.slice(0, 3).toUpperCase()}-${processName.slice(0, 3).toUpperCase()}-${Date.now().toString().slice(-6)}`;
-  const documentDate = liveInvoiceDetails.Date || fieldValue(fields, ["invoice_date", "receipt_date", "payment_date", "received_date", "date", "delivery_date", "needed_by", "as_of_date"], todayIsoDate());
+  const documentDate = liveInvoiceDetails.Date || liveGrnDetails["Receipt date"] || fieldValue(fields, ["invoice_date", "receipt_date", "payment_date", "received_date", "date", "delivery_date", "needed_by", "as_of_date"], todayIsoDate());
   const dueDate = fieldValue(fields, ["due_date", "valid_until", "expected_date", "expiry_date", "expected_arrival"], documentDate);
   let processStatus = "Ready for review";
   let sourceAuditNote = lines.length ? "Document values come from the submitted workflow fields." : "No posted transaction rows were found for the selected filters.";
@@ -3264,7 +3300,10 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
       Business: tenant.businessName,
       "KRA PIN": tenant.kraPin || "Not provided",
       Customer: effectivePartyName,
+      Supplier: liveGrnDetails.Supplier || fieldValue(fields, ["supplier", "preferred_supplier"], ""),
       "Invoice no.": liveInvoiceDetails["Invoice no."] || fieldValue(fields, ["invoice_number"], reference),
+      "GRN no.": liveGrnDetails["GRN no."] || fieldValue(fields, ["grn_number"], ""),
+      "Supplier delivery note": liveGrnDetails["Supplier delivery note"] || fieldValue(fields, ["supplier_delivery_note_number"], ""),
       "Reference number": reference,
       "Document date": documentDate,
       "Due or action date": dueDate,
