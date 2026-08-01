@@ -67,6 +67,11 @@ function calculationBase(values: Record<string, string>) {
   return explicitSubtotal || explicitAmountBeforeTax || (quantity && price ? quantity * price : 0);
 }
 
+function inclusiveVatAmount(inclusiveAmount: number, vatRate: number) {
+  if (inclusiveAmount <= 0 || vatRate <= 0) return 0;
+  return inclusiveAmount * (vatRate / (100 + vatRate));
+}
+
 export function WorkflowFormFields({
   fields,
   customers = [],
@@ -91,15 +96,16 @@ export function WorkflowFormFields({
   const [values, setValues] = useState<Record<string, string>>({});
 
   const calculated = useMemo(() => {
-    const base = calculationBase(values);
+    const inclusiveBase = calculationBase(values);
     const taxRate = defaultVatRate(values);
     const discount = parseNumber(values.discount);
     const manualTax = parseNumber(values.tax);
-    const shouldAutoTax = base > 0 && !values.tax;
-    const tax = shouldAutoTax ? Math.max(0, (base - discount) * (taxRate / 100)) : manualTax;
-    const total = Math.max(0, base - discount + tax);
+    const total = Math.max(0, inclusiveBase - discount);
+    const shouldAutoTax = total > 0 && !values.tax;
+    const tax = shouldAutoTax ? inclusiveVatAmount(total, taxRate) : manualTax;
+    const exclusiveBase = Math.max(0, total - tax);
     return {
-      subtotal: base ? String(base.toFixed(2)) : values.subtotal ?? "",
+      subtotal: exclusiveBase ? String(exclusiveBase.toFixed(2)) : values.subtotal ?? "",
       tax_rate: taxRate ? String(taxRate.toFixed(2)) : values.tax_rate ?? "",
       vat_rate: taxRate ? String(taxRate.toFixed(2)) : values.vat_rate ?? "",
       tax: tax ? String(tax.toFixed(2)) : values.tax ?? "",

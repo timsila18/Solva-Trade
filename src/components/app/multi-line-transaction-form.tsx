@@ -23,6 +23,11 @@ function numberValue(value: unknown) {
   return Number.isFinite(number) ? number : 0;
 }
 
+function inclusiveTaxAmount(inclusiveAmount: number, vatRate: number) {
+  if (inclusiveAmount <= 0 || vatRate <= 0) return 0;
+  return inclusiveAmount * (vatRate / (100 + vatRate));
+}
+
 export function MultiLineTransactionForm({ mode, customers = [], suppliers = [], products, today }: Props) {
   const [search, setSearch] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
@@ -58,11 +63,15 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
         const discount = fieldNumber(form, `field_line_${index}_discount`);
         const rejectedQuantity = fieldNumber(form, `field_line_${index}_rejected_quantity`);
         const acceptedQuantity = Math.max(0, quantity - rejectedQuantity);
-        const lineSubtotal = mode === "sale" ? Math.max(0, quantity * unitValue - discount) : acceptedQuantity * unitValue;
-        const lineTax = mode === "sale" ? lineSubtotal * ((product.vatRate ?? 0) / 100) : 0;
-        const lineTotal = lineSubtotal + lineTax;
+        const lineInclusive = Math.max(0, quantity * unitValue - discount);
+        const lineTax = mode === "sale" ? inclusiveTaxAmount(lineInclusive, product.vatRate ?? 0) : 0;
+        const lineSubtotal = mode === "sale" ? lineInclusive - lineTax : acceptedQuantity * unitValue;
+        const lineTotal = mode === "sale" ? lineInclusive : lineSubtotal;
         setField(form, `field_line_${index}_tax_amount`, lineTax.toFixed(2));
         setField(form, `field_line_${index}_line_total`, lineTotal.toFixed(2));
+        setField(form, `field_line_${index}_line_subtotal`, lineSubtotal.toFixed(2));
+        const taxDisplay = form.querySelector(`[data-line-tax="${index}"]`);
+        if (taxDisplay) taxDisplay.textContent = money(lineTax);
         const display = form.querySelector(`[data-line-total="${index}"]`);
         if (display) display.textContent = money(lineTotal);
         if (!isSelected) return current;
@@ -224,7 +233,7 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
               <th className="min-w-64 px-3 py-3">Product</th>
               <th className="px-3 py-3">Available</th>
               <th className="px-3 py-3">{mode === "sale" ? "Quantity" : "Received qty"}</th>
-              <th className="px-3 py-3">{mode === "sale" ? "Unit price" : "Unit cost"}</th>
+              <th className="px-3 py-3">{mode === "sale" ? "Selling price (VAT included)" : "Unit cost"}</th>
               {mode === "sale" ? <th className="px-3 py-3">Discount</th> : <th className="px-3 py-3">Rejected</th>}
               <th className="px-3 py-3">{mode === "sale" ? "VAT" : "Batch"}</th>
               <th className="px-3 py-3">{mode === "sale" ? "Line total" : "Expiry"}</th>
@@ -238,8 +247,9 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
               const quantity = 0;
               const unitValue = defaultUnitValue;
               const discount = 0;
-              const tax = Math.max(0, quantity * unitValue - discount) * ((product.vatRate ?? 0) / 100);
-              const saleTotal = Math.max(0, quantity * unitValue - discount + tax);
+              const saleTotal = Math.max(0, quantity * unitValue - discount);
+              const tax = inclusiveTaxAmount(saleTotal, product.vatRate ?? 0);
+              const saleSubtotal = saleTotal - tax;
               const accepted = quantity;
               const receiptTotal = accepted * unitValue;
               const visible = matchingIndexes.has(index);
@@ -258,6 +268,7 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
                     <input type="hidden" name={`field_line_${index}_product_code`} value={productCode} />
                     <input type="hidden" name={`field_line_${index}_tax_rate`} value={product.vatRate ?? 0} />
                     <input type="hidden" name={`field_line_${index}_tax_amount`} defaultValue={mode === "sale" ? tax.toFixed(2) : "0"} />
+                    <input type="hidden" name={`field_line_${index}_line_subtotal`} defaultValue={mode === "sale" ? saleSubtotal.toFixed(2) : "0"} />
                     <input type="hidden" name={`field_line_${index}_line_total`} defaultValue={(mode === "sale" ? saleTotal : receiptTotal).toFixed(2)} />
                   </td>
                   <td className="px-3 py-2 align-middle">
@@ -323,7 +334,7 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
                     </td>
                   )}
                   {mode === "sale" ? (
-                    <td className="px-3 py-2 align-middle text-slate-600">{money(tax)}</td>
+                    <td className="px-3 py-2 align-middle text-slate-600"><span data-line-tax={index}>{money(tax)}</span></td>
                   ) : (
                     <td className="px-3 py-2 align-middle">
                       <input name={`field_line_${index}_batch`} placeholder="Batch" className="w-32 rounded-md border border-slate-300 px-2 py-2" />
@@ -356,7 +367,7 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
           <p ref={summaryRefs.quantity} className="mt-1 text-xl font-semibold">0.00</p>
         </div>
         <div>
-          <p className="text-xs font-semibold uppercase text-slate-500">{mode === "sale" ? "Subtotal" : "Stock value"}</p>
+          <p className="text-xs font-semibold uppercase text-slate-500">{mode === "sale" ? "Exclusive amount" : "Stock value"}</p>
           <p ref={summaryRefs.subtotal} className="mt-1 text-xl font-semibold">KES 0.00</p>
         </div>
         <div>

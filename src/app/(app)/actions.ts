@@ -89,6 +89,11 @@ function getRawNumber(formData: FormData, key: string) {
   return Number.isFinite(number) ? number : 0;
 }
 
+function inclusiveVatAmount(inclusiveAmount: number, vatRate: number) {
+  if (inclusiveAmount <= 0 || vatRate <= 0) return 0;
+  return inclusiveAmount * (vatRate / (100 + vatRate));
+}
+
 function selectedLineIndexes(formData: FormData) {
   const count = getNumber(formData, "line_count");
   return Array.from({ length: count }, (_, index) => index).filter((index) => {
@@ -119,9 +124,10 @@ function salesInvoiceLinesFromForm(formData: FormData): SalesInvoiceLineInput[] 
       const unitPrice = getRawNumber(formData, `field_line_${index}_unit_price`);
       const discount = getRawNumber(formData, `field_line_${index}_discount`);
       const taxRate = getRawNumber(formData, `field_line_${index}_tax_rate`);
-      const lineSubtotal = Math.max(0, quantity * unitPrice - discount);
-      const taxAmount = getRawNumber(formData, `field_line_${index}_tax_amount`) || lineSubtotal * (taxRate / 100);
-      const lineTotal = getRawNumber(formData, `field_line_${index}_line_total`) || Math.max(0, lineSubtotal + taxAmount);
+      const lineInclusive = getRawNumber(formData, `field_line_${index}_line_total`) || Math.max(0, quantity * unitPrice - discount);
+      const taxAmount = getRawNumber(formData, `field_line_${index}_tax_amount`) || inclusiveVatAmount(lineInclusive, taxRate);
+      const lineSubtotal = getRawNumber(formData, `field_line_${index}_line_subtotal`) || Math.max(0, lineInclusive - taxAmount);
+      const lineTotal = lineInclusive;
       return {
         index,
         productId: getRawField(formData, `field_line_${index}_product_id`),
@@ -139,16 +145,17 @@ function salesInvoiceLinesFromForm(formData: FormData): SalesInvoiceLineInput[] 
   const quantity = getNumber(formData, "quantity") || getNumber(formData, "ordered_quantity");
   const unitPrice = getNumber(formData, "unit_price") || getNumber(formData, "price");
   const discount = getNumber(formData, "discount");
-  const lineSubtotal = getNumber(formData, "subtotal") || Math.max(0, quantity * unitPrice - discount);
-  const taxAmount = getNumber(formData, "tax");
-  const lineTotal = getNumber(formData, "total") || Math.max(0, lineSubtotal + taxAmount);
+  const taxRate = getNumber(formData, "tax_rate") || getNumber(formData, "vat_rate");
+  const lineTotal = getNumber(formData, "total") || Math.max(0, quantity * unitPrice - discount);
+  const taxAmount = getNumber(formData, "tax") || inclusiveVatAmount(lineTotal, taxRate);
+  const lineSubtotal = getNumber(formData, "subtotal") || Math.max(0, lineTotal - taxAmount);
   return [{
     index: 0,
     productId: getField(formData, "product_id"),
     quantity,
     unitPrice,
     discount,
-    taxRate: 0,
+    taxRate,
     taxAmount,
     lineSubtotal,
     lineTotal,
@@ -491,7 +498,7 @@ async function postSalesInvoice(formData: FormData, userId: string, fallbackBusi
       target_branch_id: branchId,
       target_warehouse_id: warehouseId,
       target_quantity: line.quantity,
-      target_sale_unit_price: line.unitPrice,
+      target_sale_unit_price: line.quantity > 0 ? line.lineSubtotal / line.quantity : 0,
     });
     if (allocationError) throw new Error(allocationError.message);
   }

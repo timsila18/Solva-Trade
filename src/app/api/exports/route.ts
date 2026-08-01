@@ -1702,6 +1702,7 @@ function itemBaseLine(item: SalesItemRow, invoice: SalesInvoiceRow | undefined, 
   const tax = numberValue(item.tax_amount);
   const total = numberValue(item.line_total);
   const amount = Math.max(0, total - tax);
+  const effectiveVatRate = amount ? (tax / amount) * 100 : 0;
   return {
     sku: String(product?.sku ?? product?.product_code ?? `ITEM-${index + 1}`),
     description: String(product?.product_name ?? "Sold item"),
@@ -1709,7 +1710,7 @@ function itemBaseLine(item: SalesItemRow, invoice: SalesInvoiceRow | undefined, 
     quantity,
     unitPrice,
     discount: numberValue(product?.standard_cost),
-    taxRate: amount ? `${((tax / amount) * 100).toFixed(1)}%` : "No VAT",
+    taxRate: effectiveVatRate ? `${effectiveVatRate.toFixed(1)}% incl.` : "No VAT",
     taxAmount: tax,
     lineTotal: total,
     warehouse: invoice ? dateKey(invoice.invoice_date) : "Posted sales",
@@ -1719,12 +1720,13 @@ function itemBaseLine(item: SalesItemRow, invoice: SalesInvoiceRow | undefined, 
       "Item no": String(product?.product_code ?? product?.sku ?? ""),
       "Item name": String(product?.product_name ?? "Sold item"),
       "Item description": String(product?.product_name ?? "Sold item"),
-      Price: money(unitPrice),
+      "VAT-inclusive unit price": money(unitPrice),
+      "Exclusive unit price": quantity > 0 ? money(amount / quantity) : money(0),
       Qty: quantity.toLocaleString("en-KE", { maximumFractionDigits: 2 }),
-      Amount: money(amount),
-      "Tax rate": amount ? `${((tax / amount) * 100).toFixed(1)}%` : "0%",
+      "Exclusive amount": money(amount),
+      "Tax rate": effectiveVatRate ? `${effectiveVatRate.toFixed(1)}% incl.` : "0%",
       Tax: money(tax),
-      Total: money(total),
+      "Total payable": money(total),
       "Invoice no.": String(invoice?.invoice_number ?? ""),
       Date: invoice ? dateKey(invoice.invoice_date) : todayIsoDate(),
       Customer: String(relatedOne(invoice?.customers)?.customer_name ?? "Walk-in customer"),
@@ -1755,7 +1757,7 @@ async function salesInvoiceDocumentLines(invoiceId: string | null): Promise<Repo
       .select("invoice_id, product_id, invoice_quantity, unit_price, tax_amount, line_total, products(product_name, product_code, sku, standard_cost)")
       .eq("business_id", businessId)
       .eq("invoice_id", invoiceId)
-      .order("created_at", { ascending: true })
+      .order("id", { ascending: true })
       .limit(200),
   ]);
   const invoice = ((invoices ?? [])[0] ?? undefined) as SalesInvoiceRow | undefined;
