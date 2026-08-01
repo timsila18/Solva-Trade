@@ -1506,7 +1506,10 @@ export async function completeProcessAction(formData: FormData) {
     returnTo,
     next,
   });
-  documentFieldParams(formData).forEach((value, key) => params.append(key, value));
+  const usesSavedDocumentExport =
+    (moduleName === "Sales" && processName === "Invoices") ||
+    (moduleName === "Purchasing" && processName === "Goods Received Notes");
+  if (!usesSavedDocumentExport) documentFieldParams(formData).forEach((value, key) => params.append(key, value));
   let generatedReference: string | undefined;
 
   try {

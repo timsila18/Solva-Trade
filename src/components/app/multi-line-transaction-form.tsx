@@ -1,7 +1,7 @@
 "use client";
 
 import { Search } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CustomerLookup, ProductLookup, SupplierLookup } from "@/lib/workflow-live-data";
 
 type Mode = "sale" | "goods-received";
@@ -25,6 +25,8 @@ function numberValue(value: unknown) {
 
 export function MultiLineTransactionForm({ mode, customers = [], suppliers = [], products, today }: Props) {
   const [search, setSearch] = useState("");
+  const containerRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
   const summaryRefs = {
     quantity: useRef<HTMLParagraphElement>(null),
     subtotal: useRef<HTMLParagraphElement>(null),
@@ -88,18 +90,43 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
   const partyLabel = mode === "sale" ? "Customer" : "Supplier";
   const partyName = mode === "sale" ? "field_customer_id" : "field_supplier_id";
   const partyOptions = mode === "sale" ? customers : suppliers;
-  const searchableProducts = useMemo(() => {
+  const matchingIndexes = useMemo(() => {
     const query = search.toLowerCase().trim();
-    return products
-      .map((product, index) => ({ product, index }))
-      .filter(({ product }) => {
-        if (!query) return true;
-        return [product.name, product.code, product.vatCode].filter(Boolean).some((value) => String(value).toLowerCase().includes(query));
-      });
+    return new Set(
+      products
+        .map((product, index) => ({ product, index }))
+        .filter(({ product }) => {
+          if (!query) return true;
+          return [product.name, product.code, product.vatCode].filter(Boolean).some((value) => String(value).toLowerCase().includes(query));
+        })
+        .map(({ index }) => index),
+    );
   }, [products, search]);
 
+  useEffect(() => {
+    const form = containerRef.current?.closest("form");
+    if (!(form instanceof HTMLFormElement)) return;
+
+    function trimUnselectedLineFields(event: Event) {
+      if (!("formData" in event)) return;
+      const formData = (event as FormDataEvent).formData;
+      products.forEach((_, index) => {
+        const selected = formData.get(`field_line_${index}_selected`);
+        const quantity = numberValue(formData.get(`field_line_${index}_quantity`));
+        const productId = String(formData.get(`field_line_${index}_product_id`) ?? "");
+        if (productId && quantity > 0 && (selected === "yes" || selected === "on")) return;
+        for (const key of Array.from(formData.keys())) {
+          if (key.startsWith(`field_line_${index}_`)) formData.delete(key);
+        }
+      });
+    }
+
+    form.addEventListener("formdata", trimUnselectedLineFields);
+    return () => form.removeEventListener("formdata", trimUnselectedLineFields);
+  }, [products]);
+
   return (
-    <div className="space-y-5">
+    <div ref={containerRef} className="space-y-5">
       <input type="hidden" name="field_line_count" value={products.length} />
       <input type="hidden" name={`label_${mode === "sale" ? "customer_id" : "supplier_id"}`} value={partyLabel} />
       <input type="hidden" name={`label_${mode === "sale" ? "invoice_date" : "received_date"}`} value={sharedDateLabel} />
@@ -164,6 +191,7 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
             <div className="relative flex-1">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input
+                ref={searchRef}
                 type="search"
                 value={search}
                 onChange={(event) => setSearch(event.currentTarget.value)}
@@ -171,10 +199,19 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
                 className="min-h-11 w-full rounded-md border border-slate-300 bg-white pl-9 pr-3 py-2 text-sm font-normal"
               />
             </div>
-            <button type="button" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-[var(--solva-blue-700)] px-4 text-sm font-semibold text-white">
+            <button
+              type="button"
+              onClick={() => searchRef.current?.focus()}
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-[var(--solva-blue-700)] px-4 text-sm font-semibold text-white"
+            >
               <Search className="h-4 w-4" />
               Search
             </button>
+            {search ? (
+              <button type="button" onClick={() => setSearch("")} className="inline-flex min-h-11 items-center justify-center rounded-md border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700">
+                Show all
+              </button>
+            ) : null}
           </div>
         </label>
       </section>
@@ -194,7 +231,7 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
             </tr>
           </thead>
           <tbody>
-            {searchableProducts.map(({ product, index }) => {
+            {products.map((product, index) => {
               const productName = product.name || "Unnamed product";
               const productCode = product.code || "";
               const defaultUnitValue = mode === "sale" && product.price > 0 ? product.price : 0;
@@ -205,8 +242,9 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
               const saleTotal = Math.max(0, quantity * unitValue - discount + tax);
               const accepted = quantity;
               const receiptTotal = accepted * unitValue;
+              const visible = matchingIndexes.has(index);
               return (
-                <tr key={product.id || index} className="border-b border-slate-100 odd:bg-white even:bg-slate-50">
+                <tr key={product.id || index} className={`border-b border-slate-100 odd:bg-white even:bg-slate-50 ${visible ? "" : "hidden"}`}>
                   <td className="px-3 py-2 align-middle">
                     <input
                       type="checkbox"
@@ -301,7 +339,7 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
                 </tr>
               );
             })}
-            {!searchableProducts.length ? (
+            {!matchingIndexes.size ? (
               <tr>
                 <td colSpan={8} className="bg-white px-4 py-8 text-center text-sm text-slate-600">
                   No products match that search. Clear the search or add the product first.
