@@ -1,6 +1,8 @@
 "use client";
 
 import { Search } from "lucide-react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CustomerLookup, ProductLookup, SupplierLookup } from "@/lib/workflow-live-data";
 
@@ -30,6 +32,7 @@ function inclusiveTaxAmount(inclusiveAmount: number, vatRate: number) {
 
 export function MultiLineTransactionForm({ mode, customers = [], suppliers = [], products, today }: Props) {
   const [search, setSearch] = useState("");
+  const pathname = usePathname();
   const containerRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const summaryRefs = {
@@ -134,6 +137,20 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
     return () => form.removeEventListener("formdata", trimUnselectedLineFields);
   }, [products]);
 
+  useEffect(() => {
+    function handleDraftRestore() {
+      const form = containerRef.current?.closest("form");
+      if (form instanceof HTMLFormElement) recalculate(form);
+    }
+
+    window.addEventListener("solva:form-draft-restored", handleDraftRestore);
+    return () => window.removeEventListener("solva:form-draft-restored", handleDraftRestore);
+  });
+
+  const returnTo = encodeURIComponent(pathname);
+  const addPartyHref = mode === "sale" ? `/customers/new?returnTo=${returnTo}` : `/suppliers/new?returnTo=${returnTo}`;
+  const addProductHref = `/inventory/products/new?returnTo=${returnTo}`;
+
   return (
     <div ref={containerRef} className="space-y-5">
       <input type="hidden" name="field_line_count" value={products.length} />
@@ -145,7 +162,12 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
 
       <section className="grid gap-4 rounded-md border border-slate-200 bg-slate-50 p-4 lg:grid-cols-4">
         <label className="grid gap-2 text-sm font-semibold lg:col-span-2">
-          {partyLabel}
+          <span className="flex items-center justify-between gap-3">
+            {partyLabel}
+            <Link href={addPartyHref} className="text-xs font-semibold text-[var(--solva-blue-700)] underline-offset-4 hover:underline">
+              Add missing {partyLabel.toLowerCase()}
+            </Link>
+          </span>
           <select name={partyName} required className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-normal">
             <option value="">Select saved {partyLabel.toLowerCase()}</option>
             {partyOptions.map((party) => (
@@ -195,7 +217,12 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
 
       <section className="rounded-md border border-slate-200 bg-white p-4">
         <label className="grid gap-2 text-sm font-semibold">
-          Search products
+          <span className="flex items-center justify-between gap-3">
+            Search products
+            <Link href={addProductHref} className="text-xs font-semibold text-[var(--solva-blue-700)] underline-offset-4 hover:underline">
+              Add missing product
+            </Link>
+          </span>
           <div className="flex flex-col gap-2 md:flex-row">
             <div className="relative flex-1">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />

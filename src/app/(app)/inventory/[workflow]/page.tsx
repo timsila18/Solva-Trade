@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { completeProcessAction } from "@/app/(app)/actions";
+import { PersistedForm } from "@/components/app/persisted-form";
 import { WorkflowFormFields } from "@/components/app/workflow-form-fields";
 
 const workflows: Record<string, { title: string; description: string; fields: string[] }> = {
@@ -49,7 +50,7 @@ export default async function InventoryWorkflowPage({
       <h1 className="mt-1 text-3xl font-semibold">{config.title}</h1>
       <p className="mt-2 max-w-3xl text-slate-600">{config.description}</p>
 
-      <form action={completeProcessAction} className="mt-6 rounded-lg border border-slate-200 bg-white p-5">
+      <PersistedForm action={completeProcessAction} draftKey={`solva-trade:workflow-draft:inventory:${workflow}`} className="mt-6 rounded-lg border border-slate-200 bg-white p-5">
         <input type="hidden" name="module" value="Inventory" />
         <input type="hidden" name="process" value={config.title} />
         <input type="hidden" name="returnTo" value={`/inventory/${workflow}`} />
@@ -58,7 +59,7 @@ export default async function InventoryWorkflowPage({
         <div className="mt-6">
           <button name="intent" value="Submitted for posting" className="inline-flex min-h-11 items-center justify-center rounded-md bg-emerald-700 px-5 py-3 text-sm font-semibold text-white">Submit for posting</button>
         </div>
-      </form>
+      </PersistedForm>
 
       <section className="mt-6 rounded-lg border border-slate-200 bg-white p-5">
         <h2 className="font-semibold">Posting controls</h2>

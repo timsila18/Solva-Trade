@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { AlertTriangle, CheckCircle2, Clock3, Eye, FileText, ReceiptText, UserPlus } from "lucide-react";
 import { completeProcessAction, reverseSalesInvoiceAction } from "@/app/(app)/actions";
+import { PersistedForm } from "@/components/app/persisted-form";
 import { EmptyState, MetricCard, PageHero, PlainCard } from "@/components/ui/premium";
 import { salesSummary, salesWorkflows } from "@/lib/sales-data";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -302,7 +303,7 @@ export default async function SalesPage() {
                         Download PAID receipt
                       </a>
                     ) : (
-                      <form action={completeProcessAction} className="grid gap-2 rounded-md border border-slate-200 bg-slate-50 p-3">
+                      <PersistedForm action={completeProcessAction} draftKey={`solva-trade:payment:${invoice.id}`} className="grid gap-2 rounded-md border border-slate-200 bg-slate-50 p-3">
                         <input type="hidden" name="module" value="Sales" />
                         <input type="hidden" name="process" value="Customer Payments" />
                         <input type="hidden" name="document" value="Sales Receipt" />
@@ -340,7 +341,7 @@ export default async function SalesPage() {
                           </button>
                         </div>
                         <p className="text-xs leading-5 text-slate-500">Use the full balance for paid, or a smaller amount for part payment.</p>
-                      </form>
+                      </PersistedForm>
                     )}
                     <a href={salesDocumentHref(invoice, "Invoice")} className="inline-flex min-h-9 items-center justify-center rounded-md border border-slate-200 px-3 text-xs font-semibold text-slate-700">
                       Download invoice

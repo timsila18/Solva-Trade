@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { FileText, Printer } from "lucide-react";
 import { completeProcessAction } from "@/app/(app)/actions";
 import { MultiLineTransactionForm } from "@/components/app/multi-line-transaction-form";
+import { PersistedForm } from "@/components/app/persisted-form";
 import { WorkflowFormFields } from "@/components/app/workflow-form-fields";
 import { getSalesWorkflowLookups } from "@/lib/workflow-live-data";
 
@@ -84,7 +85,7 @@ export default async function SalesWorkflowPage({
       </div>
       <p className="mt-2 max-w-3xl text-slate-600">{config.description}</p>
 
-      <form action={completeProcessAction} className="mt-6 rounded-lg border border-slate-200 bg-white p-5">
+      <PersistedForm action={completeProcessAction} draftKey={`solva-trade:workflow-draft:sales:${workflow}`} preserveHiddenFields className="mt-6 rounded-lg border border-slate-200 bg-white p-5">
         <input type="hidden" name="module" value="Sales" />
         <input type="hidden" name="process" value={config.title} />
         <input type="hidden" name="document" value={primaryDocument[workflow] ?? config.title} />
@@ -100,7 +101,7 @@ export default async function SalesWorkflowPage({
             {workflow === "invoices" ? "Create invoice" : "Submit"}
           </button>
         </div>
-      </form>
+      </PersistedForm>
 
       <section className="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">

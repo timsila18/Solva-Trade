@@ -1,4 +1,5 @@
 import { completeProcessAction } from "@/app/(app)/actions";
+import { PersistedForm } from "@/components/app/persisted-form";
 import { supplierTypes } from "@/lib/purchasing-data";
 
 function keyFor(label: string) {
@@ -38,7 +39,18 @@ function Field({
   );
 }
 
-export default function NewSupplierPage() {
+function safeReturnTo(value: string | string[] | undefined) {
+  const resolved = Array.isArray(value) ? value[0] : value;
+  return typeof resolved === "string" && resolved.startsWith("/") && !resolved.startsWith("//") ? resolved : undefined;
+}
+
+export default async function NewSupplierPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = await searchParams;
+  const returnTo = safeReturnTo(params.returnTo) ?? "/suppliers/new";
   return (
     <div className="pb-20">
       <p className="text-sm font-semibold text-emerald-700">Supplier setup</p>
@@ -48,12 +60,12 @@ export default function NewSupplierPage() {
       </p>
 
       <div className="mt-6 grid gap-6 xl:grid-cols-[1fr_300px]">
-        <form action={completeProcessAction} className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <PersistedForm action={completeProcessAction} draftKey="solva-trade:supplier-create" className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
           <input type="hidden" name="module" value="Suppliers" />
           <input type="hidden" name="process" value="New Supplier" />
           <input type="hidden" name="document" value="Supplier Profile" />
           <input type="hidden" name="intent" value="Supplier saved" />
-          <input type="hidden" name="returnTo" value="/suppliers/new" />
+          <input type="hidden" name="returnTo" value={returnTo} />
           <input type="hidden" name="next" value="Add another supplier" />
           <input type="hidden" name="label_preferred_supplier" value="Preferred supplier" />
           <input type="hidden" name="field_preferred_supplier" value="yes" />
@@ -111,7 +123,7 @@ export default function NewSupplierPage() {
               View suppliers
             </a>
           </div>
-        </form>
+        </PersistedForm>
 
         <aside className="space-y-4">
           <section className="rounded-lg border border-cyan-100 bg-cyan-50 p-5">

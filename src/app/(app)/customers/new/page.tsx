@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ArrowLeft, Save, UserPlus } from "lucide-react";
 import { completeProcessAction } from "@/app/(app)/actions";
+import { PersistedForm } from "@/components/app/persisted-form";
 import { PageHero } from "@/components/ui/premium";
 
 const simpleFields = ["Customer name", "Phone number", "Town or area", "Delivery route"];
@@ -10,7 +11,18 @@ function fieldKey(label: string) {
   return label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || "field";
 }
 
-export default function NewCustomerPage() {
+function safeReturnTo(value: string | string[] | undefined) {
+  const resolved = Array.isArray(value) ? value[0] : value;
+  return typeof resolved === "string" && resolved.startsWith("/") && !resolved.startsWith("//") ? resolved : undefined;
+}
+
+export default async function NewCustomerPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = await searchParams;
+  const returnTo = safeReturnTo(params.returnTo) ?? "/customers/new";
   return (
     <div className="pb-24">
       <PageHero
@@ -23,12 +35,12 @@ export default function NewCustomerPage() {
       />
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_340px]">
-        <form action={completeProcessAction} className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <PersistedForm action={completeProcessAction} draftKey="solva-trade:customer-create" className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
           <input type="hidden" name="module" value="Customers" />
           <input type="hidden" name="process" value="New Customer" />
           <input type="hidden" name="document" value="Customer Profile" />
           <input type="hidden" name="intent" value="Customer saved" />
-          <input type="hidden" name="returnTo" value="/customers/new" />
+          <input type="hidden" name="returnTo" value={returnTo} />
           <input type="hidden" name="next" value="Add another customer" />
           <div className="flex items-center gap-3">
             <span className="grid h-11 w-11 place-items-center rounded-md bg-emerald-50 text-emerald-800">
@@ -103,7 +115,7 @@ export default function NewCustomerPage() {
               Back
             </Link>
           </div>
-        </form>
+        </PersistedForm>
 
         <aside className="space-y-4">
           <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">

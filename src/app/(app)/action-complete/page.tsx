@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { AlertTriangle, CheckCircle2, Download, Home, Plus, Printer } from "lucide-react";
+import { ClearFormDraft } from "@/components/app/clear-form-draft";
 
 export default async function ActionCompletePage({
   searchParams,
@@ -14,6 +15,7 @@ export default async function ActionCompletePage({
   const returnTo = String(params.returnTo ?? "/dashboard");
   const next = String(params.next ?? "Open Dashboard");
   const error = typeof params.error === "string" ? params.error : "";
+  const draftKey = typeof params.draftKey === "string" ? params.draftKey : "";
   const exportParams = new URLSearchParams({
     module: moduleName,
     process: documentName,
@@ -33,6 +35,7 @@ export default async function ActionCompletePage({
 
   return (
     <div className="mx-auto max-w-3xl pb-24">
+      {!error && draftKey ? <ClearFormDraft draftKey={draftKey} /> : null}
       <section className="rounded-lg border border-emerald-200 bg-white p-6 text-center shadow-sm">
         <div className={`mx-auto grid h-14 w-14 place-items-center rounded-full ${error ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"}`}>
           {error ? <AlertTriangle className="h-8 w-8" /> : <CheckCircle2 className="h-8 w-8" />}

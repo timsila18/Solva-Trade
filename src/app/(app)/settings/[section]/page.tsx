@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { completeProcessAction } from "@/app/(app)/actions";
+import { PersistedForm } from "@/components/app/persisted-form";
 import { WorkflowFormFields } from "@/components/app/workflow-form-fields";
 import {
   buildDocumentPreview,
@@ -257,7 +258,7 @@ export default async function SettingsSectionPage({
       </section>
 
       <section className="mt-6 grid gap-6 lg:grid-cols-[1fr_360px]">
-        <form id="configuration-fields" action={completeProcessAction} className="rounded-lg border border-slate-200 bg-white p-5">
+        <PersistedForm id="configuration-fields" action={completeProcessAction} draftKey={`solva-trade:settings:${slug}`} className="rounded-lg border border-slate-200 bg-white p-5">
           <input type="hidden" name="module" value="Settings" />
           <input type="hidden" name="process" value={section.title} />
           <input type="hidden" name="intent" value="Settings saved" />
@@ -293,7 +294,7 @@ export default async function SettingsSectionPage({
           <button className="mt-6 rounded-md bg-emerald-700 px-5 py-3 text-sm font-semibold text-white">
             Save configuration
           </button>
-        </form>
+        </PersistedForm>
 
         <aside className="space-y-4">
           <section className="rounded-lg border border-slate-200 bg-white p-5">

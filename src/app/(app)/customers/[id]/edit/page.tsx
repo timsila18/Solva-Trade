@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Save } from "lucide-react";
 import { completeProcessAction } from "@/app/(app)/actions";
+import { PersistedForm } from "@/components/app/persisted-form";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getActiveBusinessId } from "@/lib/tenant";
 
@@ -73,7 +74,7 @@ export default async function EditCustomerPage({ params }: EditCustomerPageProps
         </Link>
       </div>
 
-      <form action={completeProcessAction} className="mt-6 grid gap-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm lg:grid-cols-2">
+      <PersistedForm action={completeProcessAction} draftKey={`solva-trade:customer-edit:${id}`} className="mt-6 grid gap-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm lg:grid-cols-2">
         <input type="hidden" name="module" value="Customers" />
         <input type="hidden" name="process" value="Edit Customer" />
         <input type="hidden" name="document" value="Customer Profile" />
@@ -169,7 +170,7 @@ export default async function EditCustomerPage({ params }: EditCustomerPageProps
             Cancel
           </Link>
         </div>
-      </form>
+      </PersistedForm>
     </div>
   );
 }

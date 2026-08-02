@@ -1879,6 +1879,7 @@ export async function completeProcessAction(formData: FormData) {
   const intent = safeText(formData.get("intent"), "Completed");
   const returnTo = safeText(formData.get("returnTo"), "/dashboard");
   const next = safeText(formData.get("next"), "Open Dashboard");
+  const draftKey = safeText(formData.get("draftKey"), "");
 
   const params = new URLSearchParams({
     module: moduleName,
@@ -1888,6 +1889,7 @@ export async function completeProcessAction(formData: FormData) {
     returnTo,
     next,
   });
+  if (draftKey) params.set("draftKey", draftKey);
   const usesSavedDocumentExport =
     (moduleName === "Sales" && processName === "Invoices") ||
     (moduleName === "Purchasing" && processName === "Goods Received Notes");

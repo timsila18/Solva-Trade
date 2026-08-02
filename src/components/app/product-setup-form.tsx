@@ -1,6 +1,7 @@
 "use client";
 
 import { completeProcessAction } from "@/app/(app)/actions";
+import { PersistedForm } from "@/components/app/persisted-form";
 import { distributorQuickSetup, productTypes } from "@/lib/inventory-data";
 
 function fieldKey(label: string) {
@@ -135,18 +136,21 @@ function checked(defaults: ProductSetupDefaults, key: keyof ProductSetupDefaults
 export function ProductSetupForm({
   mode = "create",
   defaults = {},
+  returnTo,
 }: {
   mode?: "create" | "edit";
   defaults?: ProductSetupDefaults;
+  returnTo?: string;
 }) {
   const isEdit = mode === "edit";
+  const resolvedReturnTo = returnTo || (isEdit ? `/inventory/products/${defaults.id}/edit` : "/inventory/products/new");
   return (
     <div className="mt-6 grid gap-6 xl:grid-cols-[1fr_320px]">
-      <form action={completeProcessAction} className="rounded-lg border border-slate-200 bg-white p-5">
+      <PersistedForm action={completeProcessAction} draftKey={isEdit ? `solva-trade:product-edit:${defaults.id}` : "solva-trade:product-create"} className="rounded-lg border border-slate-200 bg-white p-5">
         <input type="hidden" name="module" value="Inventory" />
         <input type="hidden" name="process" value={isEdit ? "Edit Product" : "New Product"} />
         <input type="hidden" name="intent" value={isEdit ? "Product updated" : "Product saved"} />
-        <input type="hidden" name="returnTo" value={isEdit ? `/inventory/products/${defaults.id}/edit` : "/inventory/products/new"} />
+        <input type="hidden" name="returnTo" value={resolvedReturnTo} />
         <input type="hidden" name="next" value={isEdit ? "Back to products" : "Add another product"} />
         {isEdit ? <input type="hidden" name="recordId" value={String(defaults.id ?? "")} /> : null}
         <input type="hidden" name="field_track_inventory" value="yes" />
@@ -234,7 +238,7 @@ export function ProductSetupForm({
         <div className="mt-6 flex flex-wrap justify-end gap-3 border-t border-slate-100 pt-4">
           <button className="rounded-md bg-emerald-700 px-5 py-3 text-sm font-semibold text-white">{isEdit ? "Update product" : "Save product"}</button>
         </div>
-      </form>
+      </PersistedForm>
 
       <aside className="space-y-4">
         <section className="rounded-lg border border-slate-200 bg-white p-5">

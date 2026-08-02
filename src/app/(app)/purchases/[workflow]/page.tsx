@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { FileText, Printer } from "lucide-react";
 import { completeProcessAction } from "@/app/(app)/actions";
 import { MultiLineTransactionForm } from "@/components/app/multi-line-transaction-form";
+import { PersistedForm } from "@/components/app/persisted-form";
 import { WorkflowFormFields } from "@/components/app/workflow-form-fields";
 import { purchasingReports } from "@/lib/purchasing";
 import { getSalesWorkflowLookups } from "@/lib/workflow-live-data";
@@ -115,7 +116,7 @@ export default async function PurchasingWorkflowPage({
       </div>
       <p className="mt-2 max-w-3xl text-slate-600">{config.description}</p>
 
-      <form action={completeProcessAction} className="mt-6 rounded-lg border border-slate-200 bg-white p-5">
+      <PersistedForm action={completeProcessAction} draftKey={`solva-trade:workflow-draft:purchases:${workflow}`} preserveHiddenFields className="mt-6 rounded-lg border border-slate-200 bg-white p-5">
         <input type="hidden" name="module" value="Purchasing" />
         <input type="hidden" name="process" value={config.title} />
         <input type="hidden" name="document" value={primaryDocument[workflow] ?? config.title} />
@@ -131,7 +132,7 @@ export default async function PurchasingWorkflowPage({
             {workflow === "goods-received" ? "Receive stock and generate GRN" : "Submit for approval"}
           </button>
         </div>
-      </form>
+      </PersistedForm>
 
       <section className="mt-6 rounded-lg border border-slate-200 bg-white p-5">
         <h2 className="font-semibold">Ledger controls</h2>

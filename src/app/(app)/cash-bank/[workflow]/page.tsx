@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { completeProcessAction } from "@/app/(app)/actions";
+import { PersistedForm } from "@/components/app/persisted-form";
 import { WorkflowFormFields } from "@/components/app/workflow-form-fields";
 import { treasuryReports } from "@/lib/treasury";
 import { accountTypes, expenseCategories, reconciliationMatchTypes } from "@/lib/treasury-data";
@@ -163,7 +164,7 @@ export default async function CashBankWorkflowPage({
       <p className="mt-2 max-w-3xl text-slate-600">{config.description}</p>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_320px]">
-        <form action={completeProcessAction} className="rounded-lg border border-slate-200 bg-white p-5">
+        <PersistedForm action={completeProcessAction} draftKey={`solva-trade:workflow-draft:cash-bank:${workflow}`} className="rounded-lg border border-slate-200 bg-white p-5">
           <input type="hidden" name="module" value="Cash and Bank" />
           <input type="hidden" name="process" value={config.title} />
           <input type="hidden" name="returnTo" value={`/cash-bank/${workflow}`} />
@@ -172,7 +173,7 @@ export default async function CashBankWorkflowPage({
           <div className="mt-6">
             <button name="intent" value="Posted or submitted" className="inline-flex min-h-11 items-center justify-center rounded-md bg-emerald-700 px-5 py-3 text-sm font-semibold text-white">Post or submit</button>
           </div>
-        </form>
+        </PersistedForm>
 
         <aside className="rounded-lg border border-slate-200 bg-white p-5">
           <h2 className="font-semibold">{config.sideTitle}</h2>

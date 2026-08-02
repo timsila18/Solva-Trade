@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { CustomerLookup, InvoiceLookup, ProductLookup, SupplierLookup } from "@/lib/workflow-live-data";
 
 function fieldKey(label: string) {
@@ -94,6 +94,22 @@ export function WorkflowFormFields({
   }, [fields]);
   const keys = useMemo(() => normalizedFields.map((field) => ({ label: field, key: fieldKey(field), type: fieldType(field) })), [normalizedFields]);
   const [values, setValues] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    function restoreControlledValues(event: Event) {
+      const detail = (event as CustomEvent<{ values?: Record<string, string> }>).detail;
+      const restoredValues = detail?.values ?? {};
+      const nextValues: Record<string, string> = {};
+      for (const [name, value] of Object.entries(restoredValues)) {
+        if (!name.startsWith("field_")) continue;
+        nextValues[name.slice("field_".length)] = value;
+      }
+      if (Object.keys(nextValues).length) setValues((current) => ({ ...current, ...nextValues }));
+    }
+
+    window.addEventListener("solva:form-draft-restored", restoreControlledValues);
+    return () => window.removeEventListener("solva:form-draft-restored", restoreControlledValues);
+  }, []);
 
   const calculated = useMemo(() => {
     const inclusiveBase = calculationBase(values);
