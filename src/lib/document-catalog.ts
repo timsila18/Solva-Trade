@@ -230,12 +230,21 @@ export const documentCatalog: BusinessDocument[] = [
     "General Ledger",
     "Account Ledger",
     "Budget vs Actual Report",
+    "Daily Expense Report",
+    "Weekly Expense Report",
+    "Monthly Expense Report",
+    "Annual Expense Report",
+    "Office Expense Report",
     "Expense Analysis Report",
   ].map((name) => ({
     category: "Finance" as const,
     name,
-    description: "Finance and accounting document with audit-ready references, balances, journals and approvals.",
-    strategicPlacement: "Available from Cash & Bank, Accounting, Financials and the document centre.",
+    description: name.includes("Expense")
+      ? "Plain office expense report backed by posted expense rows, with amount spent, payee, paid-from source and optional input VAT."
+      : "Finance and accounting document with audit-ready references, balances, journals and approvals.",
+    strategicPlacement: name.includes("Expense")
+      ? "Available from Cash & Bank expenses and grouped by period in the central Reports Centre."
+      : "Available from Cash & Bank, Accounting, Financials and the document centre.",
     formats,
   })),
   ...[

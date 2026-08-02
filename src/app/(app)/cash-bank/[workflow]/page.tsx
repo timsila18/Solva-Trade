@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { completeProcessAction } from "@/app/(app)/actions";
+import { ExpenseEntryForm } from "@/components/app/expense-entry-form";
 import { PersistedForm } from "@/components/app/persisted-form";
 import { WorkflowFormFields } from "@/components/app/workflow-form-fields";
 import { treasuryReports } from "@/lib/treasury";
@@ -156,6 +157,67 @@ export default async function CashBankWorkflowPage({
   const { workflow } = await params;
   const config = workflows[workflow];
   if (!config) notFound();
+  const today = new Date().toISOString().slice(0, 10);
+
+  if (workflow === "expenses") {
+    const reportLinks = [
+      "Daily Expense Report",
+      "Weekly Expense Report",
+      "Monthly Expense Report",
+      "Annual Expense Report",
+      "Expense Analysis Report",
+      "Office Expense Report",
+    ];
+
+    return (
+      <div className="pb-20">
+        <p className="text-sm font-semibold text-emerald-700">Cash & Bank workflow</p>
+        <h1 className="mt-1 text-3xl font-semibold">Record office expenses</h1>
+        <p className="mt-2 max-w-3xl text-slate-600">
+          Tick what was paid, enter the amount spent, and post once. Fuel, rent, wages, utilities and other office expenses stay ready for daily, weekly, monthly and annual reports.
+        </p>
+
+        <div className="mt-6 grid gap-6 xl:grid-cols-[1fr_300px]">
+          <PersistedForm action={completeProcessAction} draftKey="solva-trade:workflow-draft:cash-bank:expenses" className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+            <input type="hidden" name="module" value="Cash and Bank" />
+            <input type="hidden" name="process" value="Expenses" />
+            <input type="hidden" name="returnTo" value="/cash-bank/expenses" />
+            <input type="hidden" name="next" value="Record more expenses" />
+            <ExpenseEntryForm categories={expenseCategories} today={today} />
+          </PersistedForm>
+
+          <aside className="space-y-4">
+            <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+              <h2 className="font-semibold">One-click expense reports</h2>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                These reports read the posted expense table directly. No spreadsheet cleanup needed.
+              </p>
+              <div className="mt-4 grid gap-2">
+                {reportLinks.map((report) => (
+                  <a
+                    key={report}
+                    href={`/api/exports?module=Finance&process=${encodeURIComponent(report)}&format=pdf`}
+                    className="inline-flex min-h-10 items-center justify-center rounded-md border border-cyan-200 bg-cyan-50 px-3 text-sm font-semibold text-[var(--solva-blue-700)]"
+                  >
+                    Generate {report.replace(" Report", "")}
+                  </a>
+                ))}
+              </div>
+            </section>
+
+            <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+              <h2 className="font-semibold">Plain terms</h2>
+              <div className="mt-3 space-y-2">
+                {["Amount spent means the money that left the business.", "Input VAT is optional and useful for VAT review.", "Paid from is the cash, bank or M-Pesa source used."].map((item) => (
+                  <p key={item} className="rounded-md bg-slate-100 px-3 py-2 text-sm text-slate-700">{item}</p>
+                ))}
+              </div>
+            </section>
+          </aside>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="pb-20">

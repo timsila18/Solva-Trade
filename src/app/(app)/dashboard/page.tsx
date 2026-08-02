@@ -79,6 +79,10 @@ function startOfYearIso(today: string) {
   return new Date(`${year}-01-01T00:00:00+03:00`).toISOString();
 }
 
+function startOfMonthDate(today: string) {
+  return `${today.slice(0, 7)}-01`;
+}
+
 function profitForPeriod(rows: ProfitAllocationRow[], startIso: string, endIso: string) {
   return rows
     .filter((row) => {
@@ -93,9 +97,18 @@ function profitForPeriod(rows: ProfitAllocationRow[], startIso: string, endIso: 
 }
 
 function profitCaption(amount: number, period: string) {
-  if (amount > 0) return `${period} is profitable from posted sales cost allocations.`;
-  if (amount < 0) return `${period} is showing a loss. Review cost, pricing and discounts.`;
-  return `No posted profit movement for ${period.toLowerCase()} yet.`;
+  if (amount > 0) return `${period} is profitable after recorded expenses.`;
+  if (amount < 0) return `${period} is showing a loss after recorded expenses. Review costs, pricing and discounts.`;
+  return `No posted net profit movement for ${period.toLowerCase()} yet.`;
+}
+
+function expenseTotalForPeriod(rows: { expense_date: string | null; total_paid: number | string | null }[], startDate: string, endDate: string) {
+  return rows
+    .filter((row) => {
+      const value = String(row.expense_date ?? "");
+      return value >= startDate && value <= endDate;
+    })
+    .reduce((sum, row) => sum + numeric(row.total_paid), 0);
 }
 
 export default async function DashboardPage() {
@@ -152,6 +165,9 @@ export default async function DashboardPage() {
   const todayStartIso = new Date(`${today}T00:00:00+03:00`).toISOString();
   const weekStartIso = startOfWeekIso(today);
   const yearStartIso = startOfYearIso(today);
+  const weekStartDate = weekStartIso.slice(0, 10);
+  const monthStartDate = startOfMonthDate(today);
+  const yearStartDate = today.slice(0, 4) + "-01-01";
   let todaySales = 0;
   let todayInvoiceCount = 0;
   let cashCollected = 0;
@@ -164,6 +180,11 @@ export default async function DashboardPage() {
   let quantityOnHand = 0;
   let stockValue = 0;
   let taxToday = 0;
+  let expensesToday = 0;
+  let expensesWeek = 0;
+  let expensesMonth = 0;
+  let expensesYear = 0;
+  let expenseCountToday = 0;
   let grnsToday = 0;
   let todayProfit = 0;
   let weekProfit = 0;
@@ -178,6 +199,7 @@ export default async function DashboardPage() {
       productsResult,
       balancesResult,
       profitAllocationsResult,
+      expensesResult,
       workflowResult,
     ] = await Promise.all([
       admin
@@ -206,6 +228,13 @@ export default async function DashboardPage() {
         .eq("business_id", businessId)
         .gte("allocated_at", yearStartIso)
         .lt("allocated_at", tomorrowIso)
+        .limit(5000),
+      admin
+        .from("expenses")
+        .select("expense_date, total_paid, amount, tax_amount, expense_category, payee, created_at")
+        .eq("business_id", businessId)
+        .gte("expense_date", yearStartDate)
+        .lte("expense_date", today)
         .limit(5000),
       admin
         .from("workflow_records")
@@ -287,9 +316,15 @@ export default async function DashboardPage() {
     }));
 
     const profitRows = (profitAllocationsResult.data ?? []) as ProfitAllocationRow[];
-    todayProfit = profitForPeriod(profitRows, todayStartIso, tomorrowIso);
-    weekProfit = profitForPeriod(profitRows, weekStartIso, tomorrowIso);
-    annualProfit = profitForPeriod(profitRows, yearStartIso, tomorrowIso);
+    const expenseRows = (expensesResult.data ?? []) as { expense_date: string | null; total_paid: number | string | null }[];
+    expensesToday = expenseTotalForPeriod(expenseRows, today, today);
+    expensesWeek = expenseTotalForPeriod(expenseRows, weekStartDate, today);
+    expensesMonth = expenseTotalForPeriod(expenseRows, monthStartDate, today);
+    expensesYear = expenseTotalForPeriod(expenseRows, yearStartDate, today);
+    expenseCountToday = expenseRows.filter((row) => String(row.expense_date ?? "") === today).length;
+    todayProfit = profitForPeriod(profitRows, todayStartIso, tomorrowIso) - expensesToday;
+    weekProfit = profitForPeriod(profitRows, weekStartIso, tomorrowIso) - expensesWeek;
+    annualProfit = profitForPeriod(profitRows, yearStartIso, tomorrowIso) - expensesYear;
   }
 
   const profitPin = businessName.toLowerCase().includes("cymereg") ? "2027" : "2027";
@@ -316,6 +351,9 @@ export default async function DashboardPage() {
     customersOwing > 0
       ? `${money(customersOwing)} is still owed by customers. Follow up ${overdueCustomers} open invoice${overdueCustomers === 1 ? "" : "s"}.`
       : "Customer follow-up list is clean.",
+    expensesToday > 0
+      ? `${money(expensesToday)} has been recorded as today's expense across ${expenseCountToday} line${expenseCountToday === 1 ? "" : "s"}.`
+      : "No office expense has been recorded today.",
   ];
 
   return (
@@ -507,6 +545,7 @@ export default async function DashboardPage() {
         <MetricCard label="Money collected today" value={money(cashCollected)} story={paymentCount > 0 ? "Updated from posted customer receipts." : "No receipts yet. Record the first payment when money lands."} />
         <MetricCard label="Money customers owe you" value={money(customersOwing)} story={customersOwing > 0 ? "Updated from open invoice balances." : "This stays clean until invoices are posted."} />
         <MetricCard label="Stock value" value={money(stockValue)} story={stockValue > 0 ? "Updated from current stock balances." : "Receive stock to begin tracking value and reorder needs."} />
+        <MetricCard label="Expenses today" value={money(expensesToday)} story={expenseCountToday > 0 ? `${expenseCountToday} posted expense line${expenseCountToday === 1 ? "" : "s"} today. Month-to-date expenses: ${money(expensesMonth)}.` : "Record fuel, wages, rent, utilities and other office expenses from Cash & Bank."} />
         <MetricCard label="Tax status" value={taxToday > 0 ? `${money(taxToday)} VAT today` : "No open filing"} story={taxToday > 0 ? "Updated from tax charged on today's invoices." : "VAT reminders will appear before due dates."} tone="good" />
       </section>
 

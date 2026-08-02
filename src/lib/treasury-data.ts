@@ -56,21 +56,32 @@ export const treasuryWorkflows = [
 
 export const expenseCategories = [
   "Rent",
+  "Wages",
+  "Salaries",
   "Electricity",
   "Water",
   "Internet",
   "Telephone",
   "Fuel",
+  "Vehicle Maintenance",
   "Vehicle Repair",
+  "Repairs and Maintenance",
   "Delivery Expense",
   "Marketing",
   "Travel",
+  "Transport",
   "Office Supplies",
+  "Office Repairs",
+  "Cleaning",
+  "Security",
   "Bank Charges",
   "M-Pesa Charges",
   "Insurance",
+  "Licences and Permits",
+  "Staff Welfare",
   "Taxes and Levies",
-  "Other",
+  "Miscellaneous",
+  "Other Office Expense",
 ];
 
 export const reconciliationMatchTypes = ["One-to-one", "One-to-many", "Many-to-one", "Partial", "Manual"];

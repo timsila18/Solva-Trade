@@ -423,6 +423,18 @@ function isKraEtrSalesReport(moduleName: string, processName: string) {
   return value.includes("kra etr sales") || value.includes("etr sales report") || value.includes("cui invoice");
 }
 
+function isExpenseOperationalReport(moduleName: string, processName: string) {
+  const value = `${moduleName} ${processName}`.toLowerCase();
+  return (
+    value.includes("daily expense report") ||
+    value.includes("weekly expense report") ||
+    value.includes("monthly expense report") ||
+    value.includes("annual expense report") ||
+    value.includes("office expense report") ||
+    value.includes("expense analysis report")
+  );
+}
+
 function isFinancialStatementReport(moduleName: string, processName: string) {
   const value = `${moduleName} ${processName}`.toLowerCase();
   return (
@@ -1151,6 +1163,106 @@ async function inventoryOperationalReportLines(processName: string): Promise<Rep
   if (lower.includes("aging")) return inventoryAgingReportLines(base);
   if (lower.includes("audit")) return inventoryAuditReportLines(base);
   return inventoryPeriodReportLines(base, processName);
+}
+
+function startOfWeekDate(today: string) {
+  const date = new Date(`${today}T00:00:00+03:00`);
+  const day = date.getUTCDay();
+  const daysFromMonday = day === 0 ? 6 : day - 1;
+  date.setUTCDate(date.getUTCDate() - daysFromMonday);
+  return date.toISOString().slice(0, 10);
+}
+
+function expenseReportPeriod(processName: string) {
+  const today = todayIsoDate();
+  const lower = processName.toLowerCase();
+  if (lower.includes("daily")) return { label: "Today", start: today, end: today };
+  if (lower.includes("weekly")) return { label: "This week", start: startOfWeekDate(today), end: today };
+  if (lower.includes("monthly") || lower.includes("analysis") || lower.includes("office")) return { label: "This month", start: `${today.slice(0, 7)}-01`, end: today };
+  return { label: "This year", start: `${today.slice(0, 4)}-01-01`, end: today };
+}
+
+function paidFromFromDescription(description: string | null | undefined) {
+  const text = String(description ?? "");
+  const match = text.match(/Paid from:\s*([^|]+)/i);
+  return match?.[1]?.trim() || "Not specified";
+}
+
+async function expenseOperationalReportLines(processName: string): Promise<ReportLine[]> {
+  const businessId = await activeReportBusinessId();
+  if (!businessId) return [];
+
+  const period = expenseReportPeriod(processName);
+  const supabase = await createSupabaseServerClient();
+  const { data } = await supabase
+    .from("expenses")
+    .select("expense_number, expense_date, expense_category, payee, amount, tax_amount, total_paid, description, approval_status, posted_status, created_at")
+    .eq("business_id", businessId)
+    .gte("expense_date", period.start)
+    .lte("expense_date", period.end)
+    .order("expense_date", { ascending: true })
+    .order("created_at", { ascending: true })
+    .limit(5000);
+
+  const rows = data ?? [];
+  if (!rows.length) {
+    return [
+      {
+        sku: "NO-EXPENSES",
+        description: "No expenses posted",
+        unit: period.label,
+        quantity: 0,
+        unitPrice: 0,
+        discount: 0,
+        taxRate: "0%",
+        taxAmount: 0,
+        lineTotal: 0,
+        warehouse: "Cash & Bank",
+        batch: processName,
+        notes: `No posted expenses were found from ${period.start} to ${period.end}.`,
+        details: {
+          Period: period.label,
+          From: period.start,
+          To: period.end,
+          "Expense type": "No expenses posted",
+          "Total paid": money(0),
+        },
+      },
+    ];
+  }
+
+  return rows.map((expense, index) => {
+    const amountSpent = Number(expense.total_paid ?? 0) || Number(expense.amount ?? 0) + Number(expense.tax_amount ?? 0);
+    const tax = Number(expense.tax_amount ?? 0);
+    const description = String(expense.description ?? "").replace(/\s*\|\s*Paid from:\s*[^|]+/i, "").trim();
+    return {
+      sku: String(expense.expense_number ?? `EXP-${index + 1}`),
+      description: String(expense.expense_category ?? "Office expense"),
+      unit: "Expense",
+      quantity: 1,
+      unitPrice: amountSpent,
+      discount: 0,
+      taxRate: tax > 0 ? "Input VAT" : "No VAT noted",
+      taxAmount: tax,
+      lineTotal: amountSpent,
+      warehouse: paidFromFromDescription(expense.description),
+      batch: String(expense.payee ?? "Not specified"),
+      notes: description || "Posted office expense.",
+      details: {
+        "Sr. no.": String(index + 1),
+        Date: String(expense.expense_date ?? ""),
+        "Expense no.": String(expense.expense_number ?? ""),
+        "Expense type": String(expense.expense_category ?? "Office expense"),
+        "Paid to": String(expense.payee ?? "Not specified"),
+        "Paid from": paidFromFromDescription(expense.description),
+        "Amount spent": money(amountSpent),
+        "Input VAT": money(tax),
+        "Total paid": money(amountSpent),
+        Status: String(expense.posted_status ?? expense.approval_status ?? "posted"),
+        Notes: description || "",
+      },
+    };
+  });
 }
 
 function sourceLabel(value: string | null | undefined) {
@@ -2313,6 +2425,96 @@ const documentBlueprints: Record<string, DocumentBlueprint> = {
     footerNote: "Supplier profiles preserve the details needed for purchasing, GRNs, supplier statements and payments.",
     emphasis: "control",
   },
+  "Daily Expense Report": {
+    accent: "#0F766E",
+    soft: "#ECFDF5",
+    label: "Daily office expense summary",
+    table: "Expenses posted today by category, payee and cash source",
+    intro: [
+      ["Period", "Shows expenses recorded for today's business activity.", "meta"],
+      ["Cash Control", "Amount spent is the actual money paid out. Input VAT is shown separately where captured.", "note"],
+      ["Owner Use", "Useful for daily cash-up, petty cash review and expense follow-up.", "party"],
+    ],
+    headers: ["Sr. no.", "Date", "Expense no.", "Expense type", "Paid to", "Paid from", "Amount spent", "Input VAT", "Total paid", "Status", "Notes"],
+    signatures: ["Prepared by", "Reviewed by", "Date"],
+    footerNote: "Use this report to confirm today's recorded office expenses before closing the day.",
+    emphasis: "report",
+  },
+  "Weekly Expense Report": {
+    accent: "#1455D9",
+    soft: "#EEF6FF",
+    label: "Weekly office expense summary",
+    table: "Expenses posted this week by category, payee and cash source",
+    intro: [
+      ["Period", "Shows expenses recorded from Monday to today.", "meta"],
+      ["Cost Review", "Helps identify fuel, wages, utilities and office costs that need attention.", "note"],
+      ["Owner Use", "Useful for weekly business review and cash planning.", "party"],
+    ],
+    headers: ["Sr. no.", "Date", "Expense no.", "Expense type", "Paid to", "Paid from", "Amount spent", "Input VAT", "Total paid", "Status", "Notes"],
+    signatures: ["Prepared by", "Reviewed by", "Date"],
+    footerNote: "Use this report to review weekly office expenses and spot unusual cost movement.",
+    emphasis: "report",
+  },
+  "Monthly Expense Report": {
+    accent: "#7C3AED",
+    soft: "#F5F3FF",
+    label: "Monthly office expense summary",
+    table: "Expenses posted this month by category, payee and cash source",
+    intro: [
+      ["Period", "Shows expenses recorded from the first day of the month to today.", "meta"],
+      ["Management Use", "Supports monthly profit review, VAT input checks and budget control.", "note"],
+      ["Accountant Use", "Gives the accountant a clean office expense schedule.", "party"],
+    ],
+    headers: ["Sr. no.", "Date", "Expense no.", "Expense type", "Paid to", "Paid from", "Amount spent", "Input VAT", "Total paid", "Status", "Notes"],
+    signatures: ["Prepared by", "Reviewed by", "Date"],
+    footerNote: "Use this report for monthly management review and accountant handover.",
+    emphasis: "report",
+  },
+  "Annual Expense Report": {
+    accent: "#92400E",
+    soft: "#FFFBEB",
+    label: "Annual office expense summary",
+    table: "Expenses posted this year by category, payee and cash source",
+    intro: [
+      ["Period", "Shows expenses recorded from January 1 to today.", "meta"],
+      ["Year Review", "Supports annual cost review, profit analysis and tax preparation.", "note"],
+      ["Owner Use", "Useful for understanding where business money has gone across the year.", "party"],
+    ],
+    headers: ["Sr. no.", "Date", "Expense no.", "Expense type", "Paid to", "Paid from", "Amount spent", "Input VAT", "Total paid", "Status", "Notes"],
+    signatures: ["Prepared by", "Reviewed by", "Date"],
+    footerNote: "Use this report to review annual operating expenses and owner profit impact.",
+    emphasis: "report",
+  },
+  "Office Expense Report": {
+    accent: "#0F766E",
+    soft: "#ECFDF5",
+    label: "Office expense schedule",
+    table: "Current month office expenses by category and payee",
+    intro: [
+      ["Scope", "Shows office expenses recorded for the current month.", "meta"],
+      ["Plain Terms", "Uses everyday categories such as fuel, rent, wages, electricity, internet and miscellaneous.", "note"],
+      ["Use", "Prepared for owners, staff and accountants who need a clean expense schedule.", "party"],
+    ],
+    headers: ["Sr. no.", "Date", "Expense no.", "Expense type", "Paid to", "Paid from", "Amount spent", "Input VAT", "Total paid", "Status", "Notes"],
+    signatures: ["Prepared by", "Reviewed by", "Date"],
+    footerNote: "Use this schedule to confirm recorded office expenses without accounting jargon.",
+    emphasis: "report",
+  },
+  "Expense Analysis Report": {
+    accent: "#0F766E",
+    soft: "#ECFDF5",
+    label: "Expense analysis",
+    table: "Current month expenses with category, payee and cash source",
+    intro: [
+      ["Scope", "Shows expenses recorded for the current month.", "meta"],
+      ["Analysis", "Useful for spotting high-cost categories and cash leaks.", "note"],
+      ["Profit Impact", "Recorded expenses reduce the private owner profit view on the dashboard.", "party"],
+    ],
+    headers: ["Sr. no.", "Date", "Expense no.", "Expense type", "Paid to", "Paid from", "Amount spent", "Input VAT", "Total paid", "Status", "Notes"],
+    signatures: ["Prepared by", "Reviewed by", "Date"],
+    footerNote: "Use this report to understand which expense categories are affecting profit.",
+    emphasis: "report",
+  },
   "Product Master Report": {
     accent: "#1455D9",
     soft: "#EEF6FF",
@@ -3366,6 +3568,8 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
           ? await financialStatementReportLines(processName)
           : isKraEtrSalesReport(moduleName, processName)
             ? await kraEtrSalesReportLines()
+            : isExpenseOperationalReport(moduleName, processName)
+              ? await expenseOperationalReportLines(processName)
             : isSalesOperationalReport(moduleName, processName)
               ? await salesOperationalReportLines(processName)
         : isProductProfileReport(moduleName, processName)
@@ -3466,6 +3670,10 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
       const period = kraEtrMonthlyWindow();
       processStatus = "Live KRA ETR sales register for VAT preparation";
       sourceAuditNote = `KRA ETR rows come from posted sales invoice items dated ${period.start} to ${period.end}, customer KRA PINs, tenant tax device settings and recorded external CUI references where available.`;
+    } else if (isExpenseOperationalReport(moduleName, processName)) {
+      const period = expenseReportPeriod(processName);
+      processStatus = "Live expense report from posted office expenses";
+      sourceAuditNote = `Expense rows come from posted expenses dated ${period.start} to ${period.end}, including amount spent, optional input VAT, payee, paid-from source and notes.`;
     } else if (isFinancialStatementReport(moduleName, processName)) {
       processStatus = "Live financial statement from posted journal account activity";
       sourceAuditNote = "Financial statement values come from posted journal account activity and statement classification mappings.";

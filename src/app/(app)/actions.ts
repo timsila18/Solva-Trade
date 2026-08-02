@@ -1521,23 +1521,64 @@ async function postFinanceWorkflow(formData: FormData, userId: string, fallbackB
   }
 
   if (lower === "expenses") {
-    const amount = getNumber(formData, "amount");
+    const expenseDate = getField(formData, "expense_date") || getField(formData, "date") || new Date().toISOString().slice(0, 10);
+    const paidFrom = getField(formData, "paid_from") || getField(formData, "account");
+    const financeAccountId = await findFinanceAccountId(admin, businessId, paidFrom);
+    const lineCount = getNumber(formData, "expense_line_count");
+    if (lineCount > 0) {
+      const batchNumber = getField(formData, "expense_batch_number") || `EXP-${Date.now().toString().slice(-8)}`;
+      const rows = Array.from({ length: lineCount }, (_, index) => {
+        const selected = getRawField(formData, `field_line_${index}_selected`);
+        const amountSpent = getRawNumber(formData, `field_line_${index}_amount`);
+        const tax = getRawNumber(formData, `field_line_${index}_tax`);
+        if ((selected !== "yes" && selected !== "on") || amountSpent <= 0) return null;
+        const category = getRawField(formData, `field_line_${index}_category`) || "Office expense";
+        const reference = getRawField(formData, `field_line_${index}_reference`);
+        const notes = getRawField(formData, `field_line_${index}_notes`);
+        const totalPaid = amountSpent;
+        const netAmount = Math.max(0, amountSpent - tax);
+        return {
+          business_id: businessId,
+          branch_id: branchId,
+          expense_number: `${batchNumber}-${String(index + 1).padStart(2, "0")}`,
+          expense_date: expenseDate,
+          expense_category: category,
+          payee: getRawField(formData, `field_line_${index}_payee`) || category,
+          finance_account_id: financeAccountId,
+          amount: netAmount,
+          tax_amount: Math.min(tax, amountSpent),
+          total_paid: totalPaid,
+          description: [notes, reference ? `Ref: ${reference}` : "", paidFrom ? `Paid from: ${paidFrom}` : ""].filter(Boolean).join(" | ") || null,
+          split_details: [{ paid_from: paidFrom || null, reference: reference || null, batch_number: batchNumber, line_number: index + 1 }],
+          approval_status: "approved",
+          posted_status: "posted",
+          created_by: userId,
+        };
+      }).filter((row): row is NonNullable<typeof row> => Boolean(row));
+
+      if (!rows.length) throw new Error("Tick at least one expense and enter the amount spent.");
+      const { error } = await admin.from("expenses").insert(rows);
+      if (error) throw new Error(error.message);
+      return batchNumber;
+    }
+
+    const amount = getNumber(formData, "amount_spent") || getNumber(formData, "amount") || getNumber(formData, "total_paid");
     if (amount <= 0) throw new Error("Enter the expense amount.");
-    const financeAccountId = await findFinanceAccountId(admin, businessId, getField(formData, "account"));
     const expenseNumber = getField(formData, "expense_number") || `EXP-${Date.now().toString().slice(-8)}`;
-    const tax = getNumber(formData, "tax");
+    const tax = getNumber(formData, "input_tax") || getNumber(formData, "tax");
+    const totalPaid = getNumber(formData, "total_paid") || amount;
     const { error } = await admin.from("expenses").insert({
       business_id: businessId,
       branch_id: branchId,
       expense_number: expenseNumber,
-      expense_date: getField(formData, "date") || new Date().toISOString().slice(0, 10),
+      expense_date: expenseDate,
       expense_category: getField(formData, "category") || "General expense",
       payee: getField(formData, "payee") || "Not specified",
       finance_account_id: financeAccountId,
-      amount,
-      tax_amount: tax,
-      total_paid: amount + tax,
-      description: getField(formData, "description") || getField(formData, "attachment") || null,
+      amount: Math.max(0, totalPaid - tax),
+      tax_amount: Math.min(tax, totalPaid),
+      total_paid: totalPaid,
+      description: getField(formData, "description") || getField(formData, "attachment") || (paidFrom ? `Paid from: ${paidFrom}` : null),
       approval_status: "approved",
       posted_status: "posted",
       created_by: userId,
