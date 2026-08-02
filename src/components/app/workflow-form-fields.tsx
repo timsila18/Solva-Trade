@@ -79,6 +79,7 @@ export function WorkflowFormFields({
   unpaidInvoices = [],
   suppliers = [],
   autoFillProductPrice = true,
+  defaultValues = {},
 }: {
   fields: string[];
   customers?: CustomerLookup[];
@@ -86,6 +87,7 @@ export function WorkflowFormFields({
   unpaidInvoices?: InvoiceLookup[];
   suppliers?: SupplierLookup[];
   autoFillProductPrice?: boolean;
+  defaultValues?: Record<string, string>;
 }) {
   const normalizedFields = useMemo(() => {
     const hasTax = fields.some((field) => fieldKey(field) === "tax");
@@ -93,7 +95,7 @@ export function WorkflowFormFields({
     return hasTax && !hasRate ? [...fields.slice(0, fields.findIndex((field) => fieldKey(field) === "tax")), "VAT rate", ...fields.slice(fields.findIndex((field) => fieldKey(field) === "tax"))] : fields;
   }, [fields]);
   const keys = useMemo(() => normalizedFields.map((field) => ({ label: field, key: fieldKey(field), type: fieldType(field) })), [normalizedFields]);
-  const [values, setValues] = useState<Record<string, string>>({});
+  const [values, setValues] = useState<Record<string, string>>(defaultValues);
 
   useEffect(() => {
     function restoreControlledValues(event: Event) {
@@ -171,7 +173,8 @@ export function WorkflowFormFields({
         const defaultCalculatedValue =
           ["vat_rate", "tax_rate"].includes(key) && !values[key] ? calculated[key as keyof typeof calculated] : undefined;
         const defaultDateValue = key === "received_date" && !values[key] ? today : undefined;
-        const value = isCalculated ? calculated[key as keyof typeof calculated] : defaultCalculatedValue ?? defaultDateValue ?? values[key] ?? "";
+        const configuredDefaultValue = defaultValues[key] && !values[key] ? defaultValues[key] : undefined;
+        const value = isCalculated ? calculated[key as keyof typeof calculated] : defaultCalculatedValue ?? defaultDateValue ?? configuredDefaultValue ?? values[key] ?? "";
         const maxStock =
           selectedProduct?.trackInventory && /^(quantity|ordered_quantity|quantity_sold)$/.test(key)
             ? String(selectedProduct.available)

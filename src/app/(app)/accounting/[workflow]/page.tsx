@@ -144,6 +144,174 @@ const workflows: Record<string, { title: string; description: string; fields: st
   },
 };
 
+function fieldKey(label: string) {
+  return label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || "field";
+}
+
+function todayDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function currentMonthBounds() {
+  const today = todayDate();
+  const year = today.slice(0, 4);
+  const month = today.slice(5, 7);
+  const end = new Date(Number(year), Number(month), 0).toISOString().slice(0, 10);
+  return {
+    name: new Intl.DateTimeFormat("en-KE", { month: "long", year: "numeric" }).format(new Date(`${today}T00:00:00`)),
+    start: `${year}-${month}-01`,
+    end,
+  };
+}
+
+function currentYearBounds() {
+  const year = todayDate().slice(0, 4);
+  return {
+    name: `FY ${year}`,
+    start: `${year}-01-01`,
+    end: `${year}-12-31`,
+  };
+}
+
+function accountingFormPlan(workflow: string, fields: string[]) {
+  const today = todayDate();
+  const month = currentMonthBounds();
+  const year = currentYearBounds();
+  const plan: { visibleFields: string[]; defaults: Record<string, string>; systemFields: Record<string, { label: string; value: string }>; button: string; note: string } = {
+    visibleFields: fields,
+    defaults: {},
+    systemFields: {},
+    button: "Save accounting record",
+    note: "Solva fills the routine accounting controls so the owner only enters the facts that matter.",
+  };
+
+  function hide(label: string, value: string) {
+    plan.systemFields[fieldKey(label)] = { label, value };
+    plan.defaults[fieldKey(label)] = value;
+  }
+
+  function prefill(label: string, value: string) {
+    plan.defaults[fieldKey(label)] = value;
+  }
+
+  if (workflow === "setup") {
+    plan.visibleFields = ["Accounting basis", "Financial year start"];
+    prefill("Accounting basis", "Accrual");
+    prefill("Financial year start", year.start);
+    hide("Default currency", "KES");
+    hide("Use recommended chart", "Yes");
+    hide("Import custom chart", "No");
+    hide("Critical mappings", "Use Solva recommended Kenyan SME mappings");
+    hide("Opening balance date", year.start);
+    hide("Activation readiness", "Ready for owner review");
+    plan.button = "Activate recommended accounting setup";
+    plan.note = "Currency, recommended chart, critical mappings and opening-balance date are prepared by the system.";
+  } else if (workflow === "chart-of-accounts") {
+    plan.visibleFields = ["Account code", "Account name", "Account class", "Account type"];
+    prefill("Account class", "Expenses");
+    prefill("Account type", "Operating expense");
+    hide("Parent account", "None");
+    hide("Normal balance", "Debit");
+    hide("Control account", "No");
+    hide("Posting account", "Yes");
+    hide("Cash-flow category", "Operations");
+    hide("Statement section", "Profit and Loss Account");
+    plan.button = "Create account";
+    plan.note = "Parent, posting, cash-flow and statement settings use safe defaults for owner-created accounts.";
+  } else if (workflow === "account-roles") {
+    plan.visibleFields = ["Role", "Mapped account"];
+    hide("Branch restriction", "All branches");
+    hide("Effective start", today);
+    hide("Effective end", "Open ended");
+    hide("System protected", "Yes");
+    hide("Status", "Active");
+    plan.button = "Save account role";
+  } else if (workflow === "account-mappings") {
+    plan.visibleFields = ["Mapping type", "Role", "Account"];
+    hide("Scope", "Business default");
+    hide("Priority", "100");
+    hide("Effective dates", `From ${today}`);
+    hide("Conflict check", "System checked on save");
+    hide("Status", "Active");
+    plan.button = "Save account mapping";
+  } else if (workflow === "financial-years") {
+    plan.visibleFields = ["Year name", "Start date", "End date"];
+    prefill("Year name", year.name);
+    prefill("Start date", year.start);
+    prefill("End date", year.end);
+    hide("Status", "Open");
+    hide("Current year", "Yes");
+    hide("Closed by", "Not closed");
+    hide("Reopen reason", "Not applicable");
+    hide("Notes", "Created from owner quick setup");
+    plan.button = "Open financial year";
+  } else if (workflow === "periods") {
+    plan.visibleFields = ["Period name", "Period type", "Start date", "End date"];
+    prefill("Period name", month.name);
+    prefill("Period type", "Monthly");
+    prefill("Start date", month.start);
+    prefill("End date", month.end);
+    hide("Sequence", "1");
+    hide("Status", "Open");
+    hide("Sales lock", "No");
+    hide("Purchasing lock", "No");
+    hide("Inventory lock", "No");
+    hide("Cash lock", "No");
+    hide("GL lock", "No");
+    plan.button = "Open accounting period";
+  } else if (workflow === "manual-journals") {
+    plan.visibleFields = ["Journal type", "Date", "Description", "Account", "Debit", "Credit"];
+    prefill("Journal type", "General journal");
+    prefill("Date", today);
+    hide("Posting date", today);
+    hide("Reference", `MJ-${Date.now().toString().slice(-8)}`);
+    hide("Customer or supplier detail", "None");
+    hide("Attachment", "Not attached");
+    plan.button = "Post journal";
+    plan.note = "Only the real journal facts are shown. Posting date and reference are filled automatically.";
+  } else if (workflow === "opening-balances") {
+    plan.visibleFields = ["Opening date", "Account", "Debit", "Credit"];
+    prefill("Opening date", year.start);
+    hide("Customer", "None");
+    hide("Supplier", "None");
+    hide("Product", "None");
+    hide("Warehouse", "Main workspace");
+    hide("Reference", `OPEN-${year.name.replace(/\D/g, "") || today.slice(0, 4)}`);
+    hide("Validation status", "Balance check required");
+    plan.button = "Save opening balance line";
+  } else if (workflow === "reversals") {
+    plan.visibleFields = ["Original journal", "Reversal date", "Reason"];
+    prefill("Reversal date", today);
+    hide("Source status", "Posted");
+    hide("Approval", "Owner review");
+    hide("Reversal journal", "System generated after save");
+    hide("Audit record", "System generated");
+    plan.button = "Prepare reversal";
+  } else if (workflow === "reports" || workflow === "general-ledger" || workflow === "trial-balance" || workflow === "journal-register") {
+    plan.visibleFields = workflow === "reports" ? ["Report", "Date range"] : ["Date range", "Account", "Search"];
+    prefill("Date range", `${month.start} to ${today}`);
+    hide("Financial year", year.name);
+    hide("Period", month.name);
+    hide("Branch", "Main workspace");
+    hide("Account class", "All");
+    hide("Source module", "All");
+    hide("Status", "Posted");
+    hide("Zero-balance suppression", "Hide zero balances");
+    hide("Adjusted view", "Unadjusted");
+    hide("Export format", "PDF");
+    plan.button = "Generate report";
+    plan.note = "Report period, branch, status and export format are prepared automatically. Change only the report or search filter when needed.";
+  } else if (workflow === "posting-queue" || workflow === "diagnostics" || workflow === "reconciliation") {
+    plan.visibleFields = fields.filter((field) => /status|source|reference|search|account|period|notes|type/i.test(field)).slice(0, 5);
+    prefill("Status", "Needs review");
+    prefill("Period", month.name);
+    hide("Branch", "Main workspace");
+    plan.button = "Review";
+  }
+
+  return plan;
+}
+
 export function generateStaticParams() {
   return Object.keys(workflows).map((workflow) => ({ workflow }));
 }
@@ -156,6 +324,7 @@ export default async function AccountingWorkflowPage({
   const { workflow } = await params;
   const config = workflows[workflow];
   if (!config) notFound();
+  const formPlan = accountingFormPlan(workflow, config.fields);
 
   return (
     <div className="pb-20">
@@ -169,9 +338,18 @@ export default async function AccountingWorkflowPage({
           <input type="hidden" name="process" value={config.title} />
           <input type="hidden" name="returnTo" value={`/accounting/${workflow}`} />
           <input type="hidden" name="next" value={`Continue ${config.title}`} />
-          <WorkflowFormFields fields={config.fields} />
+          {Object.entries(formPlan.systemFields).map(([key, field]) => (
+            <span key={key} className="hidden">
+              <input type="hidden" name={`label_${key}`} value={field.label} />
+              <input type="hidden" name={`field_${key}`} value={field.value} />
+            </span>
+          ))}
+          <div className="mb-5 rounded-lg border border-cyan-100 bg-cyan-50 p-4 text-sm leading-6 text-slate-700">
+            {formPlan.note}
+          </div>
+          <WorkflowFormFields fields={formPlan.visibleFields} defaultValues={formPlan.defaults} />
           <div className="mt-6">
-            <button name="intent" value="Submitted" className="inline-flex min-h-11 items-center justify-center rounded-md bg-emerald-700 px-5 py-3 text-sm font-semibold text-white">Submit</button>
+            <button name="intent" value={formPlan.button} className="inline-flex min-h-11 items-center justify-center rounded-md bg-emerald-700 px-5 py-3 text-sm font-semibold text-white">{formPlan.button}</button>
           </div>
         </PersistedForm>
 
