@@ -3575,7 +3575,15 @@ function drawFittedImage(canvas: PdfCanvas, image: PdfImageResource | undefined,
 }
 
 function lineHeaders(report: Report) {
+  if (isCustomerFacingInvoice(report)) {
+    return ["#", "Product or service", "SKU", "Description", "Qty", "Rate", "Amount", "Tax"];
+  }
   return blueprintFor(report).headers;
+}
+
+function isCustomerFacingInvoice(report: Report) {
+  const template = templateFor(report);
+  return isDayToDayDocument(report) && ["taxInvoice", "simplifiedInvoice", "proformaInvoice", "quotation"].includes(template);
 }
 
 function valueForHeader(report: Report, line: ReportLine, index: number, header: string) {
@@ -3727,16 +3735,21 @@ function introCards(report: Report, columns: "two-column" | "invoice-grid" | "po
     const template = templateFor(report);
     const partyTitle = template === "grn" || template === "purchaseOrder" ? "Supplier" : "Bill to";
     const shipTitle = template === "grn" || template === "purchaseOrder" ? "Receive at" : "Ship to";
+    const showShipBlock = template === "grn" || template === "purchaseOrder" || template === "deliveryNote" || template === "dispatchNote";
     return `
-      <section class="daily-document-grid">
+      <section class="daily-document-grid ${showShipBlock ? "" : "daily-document-grid-simple"}">
         <article class="box">
           <h3>${htmlEscape(partyTitle)}</h3>
           <p class="party">${htmlEscape(report.partyName)}</p>
         </article>
-        <article class="box">
+        ${
+          showShipBlock
+            ? `<article class="box">
           <h3>${htmlEscape(shipTitle)}</h3>
           <p class="party">${htmlEscape(template === "grn" || template === "purchaseOrder" ? report.businessName : report.partyName)}</p>
-        </article>
+        </article>`
+            : ""
+        }
         <article class="box">
           <h3>${htmlEscape(report.processName)} details</h3>
           ${documentMetaCard(report)}
@@ -3903,6 +3916,7 @@ function htmlDocument(report: Report, print = false) {
     .two-column, .grn-grid { grid-template-columns: 1fr 1fr; }
     .invoice-grid, .po-grid { grid-template-columns: 1fr 1fr 1fr; }
     .daily-document-grid { grid-template-columns: .9fr .9fr 1.15fr; }
+    .daily-document-grid-simple { grid-template-columns: 1fr 1fr; }
     .panel { border: 1px solid ${brand.border}; border-radius: 10px; background: ${brand.soft}; padding: 16px; }
     .box { border: 1px solid ${brand.border}; border-radius: 8px; background: white; padding: 14px; min-height: 116px; }
     .box.dark { background: ${brand.navy}; color: white; }
@@ -4095,6 +4109,7 @@ class PdfCanvas {
 }
 
 function pdfTableWidths(report: Report, headers: string[]) {
+  if (isCustomerFacingInvoice(report)) return [28, 124, 46, 124, 34, 60, 72, 42];
   if (report.processName === "Product Master Report") return [76, 154, 62, 58, 58, 72, 50];
   if (report.processName === "Product Inventory Usage Report") return [72, 154, 56, 58, 70, 54, 66];
   if (report.processName === "Inventory Aging Report") return [72, 150, 70, 58, 72, 48, 60];
@@ -5028,9 +5043,8 @@ async function pdf(report: Report) {
     canvas.wrap(`Received from: ${report.partyName}`, 250, 658, 136, 7.8, "white", false, 8.8, 2);
     canvas.text(`Date: ${report.transaction["Document date"]}`, 250, 634, 7.5, "white");
     canvas.text(`Invoice: ${report.transaction["Invoice no."] ?? report.transaction["Reference number"]}`, 404, 674, 8, "white", true);
-    canvas.text(`Sale total: ${report.totals.Total}`, 404, 658, 7.5, "white");
-    canvas.text(`Balance: ${report.totals["Balance due"]}`, 404, 644, 7.5, "white");
-    canvas.wrap(`Payment: ${report.transaction["Payment terms"]}`, 404, 632, 132, 7, "white", false, 8, 1);
+    canvas.text(`Amount: ${report.totals["Amount paid"] ?? report.totals.Total}`, 404, 658, 7.5, "white");
+    canvas.wrap(`Payment: ${report.transaction["Payment terms"]}`, 404, 644, 132, 7, "white", false, 8, 1);
     canvas.rect(48, 590, 516, 28, status.tone === "paid" ? "soft" : "surface");
     canvas.text(status.label, 66, 600, 17, status.tone === "paid" ? "blue" : "navy", true);
     canvas.wrap(status.detail, 202, 602, 330, 8, "slate", true, 9, 2);
@@ -5115,7 +5129,7 @@ async function pdf(report: Report) {
   const summaryTop = Math.max(236, Math.min(536, yAfterTable));
   const totalEntries = displayTotalEntries(report);
 
-  canvas.text("TOTALS", 384, summaryTop, 10, "blue", true);
+  canvas.text(dailyDocument ? "TOTAL" : "TOTALS", 384, summaryTop, 10, "blue", true);
   totalEntries.forEach(([label, value], index) => {
     const isGrand = label === "Total" || label === "Amount paid" || label === "Balance due" || label === "Amount due";
     const y = summaryTop - 18 - index * 16;

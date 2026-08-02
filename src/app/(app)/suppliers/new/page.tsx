@@ -38,115 +38,69 @@ function Field({
   );
 }
 
-function Checkbox({ label, defaultChecked = false }: { label: string; defaultChecked?: boolean }) {
-  const key = keyFor(label);
-  return (
-    <label className="flex items-center gap-2 rounded-md bg-slate-100 px-3 py-2 text-sm">
-      <input type="hidden" name={`label_${key}`} value={label} />
-      <input name={`field_${key}`} type="checkbox" value="yes" defaultChecked={defaultChecked} />
-      {label}
-    </label>
-  );
-}
-
 export default function NewSupplierPage() {
   return (
     <div className="pb-20">
       <p className="text-sm font-semibold text-emerald-700">Supplier setup</p>
       <h1 className="mt-1 text-3xl font-semibold">Create supplier</h1>
       <p className="mt-2 max-w-3xl text-slate-600">
-        Save the supplier once, then use them in purchases, GRNs, source-cost tracking, supplier balances and purchasing reports.
+        Save the few details needed to receive stock, create GRNs and track supplier balances.
       </p>
 
-      <div className="mt-6 grid gap-6 xl:grid-cols-[1fr_340px]">
-        <form action={completeProcessAction} className="rounded-lg border border-slate-200 bg-white p-5">
+      <div className="mt-6 grid gap-6 xl:grid-cols-[1fr_300px]">
+        <form action={completeProcessAction} className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
           <input type="hidden" name="module" value="Suppliers" />
           <input type="hidden" name="process" value="New Supplier" />
           <input type="hidden" name="document" value="Supplier Profile" />
           <input type="hidden" name="intent" value="Supplier saved" />
           <input type="hidden" name="returnTo" value="/suppliers/new" />
           <input type="hidden" name="next" value="Add another supplier" />
+          <input type="hidden" name="label_preferred_supplier" value="Preferred supplier" />
+          <input type="hidden" name="field_preferred_supplier" value="yes" />
 
-          <div className="grid gap-8">
-            <section>
-              <h2 className="text-lg font-semibold">1. Supplier identity</h2>
-              <div className="mt-5 grid gap-4 md:grid-cols-2">
-                <Field label="Legal name" required />
-                <Field label="Trading name" />
-                <Field label="Supplier code" placeholder="Leave blank to auto-generate" />
-                <Field label="KRA PIN" />
-                <Field label="Registration number" />
-                <label className="text-sm font-medium">
-                  Supplier type
-                  <input type="hidden" name="label_supplier_type" value="Supplier type" />
-                  <select
-                    name="field_supplier_type"
-                    className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
-                    defaultValue="Wholesaler"
-                  >
-                    {supplierTypes.map((type) => (
-                      <option key={type}>{type}</option>
-                    ))}
-                  </select>
-                </label>
-              </div>
+          <div className="grid gap-6">
+            <section className="grid gap-4 md:grid-cols-2">
+              <Field label="Legal name" required placeholder="Supplier business name" />
+              <Field label="Trading name" placeholder="Optional display name" />
+              <Field label="Primary phone" type="tel" required placeholder="Phone or WhatsApp number" />
+              <Field label="KRA PIN" placeholder="Optional" />
+              <label className="text-sm font-medium">
+                Supplier type
+                <input type="hidden" name="label_supplier_type" value="Supplier type" />
+                <select
+                  name="field_supplier_type"
+                  className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
+                  defaultValue="Wholesaler"
+                >
+                  {supplierTypes.map((type) => (
+                    <option key={type}>{type}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-sm font-medium">
+                Payment terms
+                <input type="hidden" name="label_payment_terms" value="Payment terms" />
+                <select
+                  name="field_payment_terms"
+                  className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
+                  defaultValue="Cash"
+                >
+                  {["Cash", "Net 7", "Net 14", "Net 30", "Net 60"].map((term) => (
+                    <option key={term}>{term}</option>
+                  ))}
+                </select>
+              </label>
+              <Field label="Supplier category" placeholder="Direct supplier, local market, spot supplier" />
+              <Field label="Opening balance" type="number" min="0" step="0.01" placeholder="0.00" />
             </section>
 
             <section>
-              <h2 className="text-lg font-semibold">2. Contact and location</h2>
-              <div className="mt-5 grid gap-4 md:grid-cols-2">
-                <Field label="Primary contact person" />
-                <Field label="Contact title" />
-                <Field label="Primary phone" type="tel" />
-                <Field label="Alternative phone" type="tel" />
-                <Field label="Email" type="email" />
-                <Field label="Website" type="url" placeholder="https://..." />
-                <Field label="Physical address" />
-                <Field label="Town" />
-                <Field label="County" />
-                <Field label="Country" placeholder="Kenya" />
-              </div>
-            </section>
-
-            <section>
-              <h2 className="text-lg font-semibold">3. Terms and source tracking</h2>
-              <div className="mt-5 grid gap-4 md:grid-cols-2">
-                <label className="text-sm font-medium">
-                  Payment terms
-                  <input type="hidden" name="label_payment_terms" value="Payment terms" />
-                  <select
-                    name="field_payment_terms"
-                    className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
-                    defaultValue="Net 30"
-                  >
-                    {["Cash", "Net 7", "Net 14", "Net 30", "Net 60", "Custom"].map((term) => (
-                      <option key={term}>{term}</option>
-                    ))}
-                  </select>
-                </label>
-                <Field label="Credit limit" type="number" min="0" step="0.01" />
-                <Field label="Opening balance" type="number" min="0" step="0.01" />
-                <Field label="Supplier category" placeholder="Direct supplier, local market, spot supplier..." />
-                <Field label="Main products" placeholder="Coke, Aquamist, Predator..." />
-                <Field label="Delivery instructions" />
-              </div>
-              <div className="mt-5 grid gap-3 md:grid-cols-2">
-                <Checkbox label="VAT registered" />
-                <Checkbox label="Preferred supplier" defaultChecked />
-                <Checkbox label="Requires purchase order" defaultChecked />
-                <Checkbox label="Bank details verified" />
-                <Checkbox label="Submit for approval" />
-              </div>
-            </section>
-
-            <section>
-              <h2 className="text-lg font-semibold">4. Notes</h2>
               <input type="hidden" name="label_notes" value="Notes" />
               <textarea
                 name="field_notes"
-                rows={4}
-                placeholder="Anything the buyer, storekeeper or accountant should know about this supplier."
-                className="mt-3 w-full rounded-md border border-slate-300 px-3 py-2 outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
+                rows={3}
+                placeholder="Optional notes: main goods supplied, delivery habit, contact person, or special buying terms."
+                className="w-full rounded-md border border-slate-300 px-3 py-2 outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
               />
             </section>
           </div>
@@ -161,17 +115,17 @@ export default function NewSupplierPage() {
 
         <aside className="space-y-4">
           <section className="rounded-lg border border-cyan-100 bg-cyan-50 p-5">
-            <h2 className="font-semibold text-slate-950">Source-cost reporting</h2>
+            <h2 className="font-semibold text-slate-950">What matters most</h2>
             <p className="mt-2 text-sm leading-6 text-slate-700">
-              Mark suppliers as direct, local market or spot suppliers in the category/notes. GRNs will capture the actual source and cost, then sales profit reports can separate those margins.
+              Name, phone, supplier type and payment terms are enough to start. You can add more supplier details later.
             </p>
           </section>
           <section className="rounded-lg border border-slate-200 bg-white p-5">
             <h2 className="font-semibold">What happens after save</h2>
             <div className="mt-4 grid gap-3 text-sm text-slate-700">
               <p className="rounded-md bg-slate-100 px-3 py-3">Supplier becomes selectable in Purchase Orders and Goods Received Notes.</p>
-              <p className="rounded-md bg-slate-100 px-3 py-3">Opening balance posts to supplier balances when entered.</p>
-              <p className="rounded-md bg-slate-100 px-3 py-3">Supplier profile is immediately downloadable from the completion screen.</p>
+              <p className="rounded-md bg-slate-100 px-3 py-3">Opening balance posts only when you enter one.</p>
+              <p className="rounded-md bg-slate-100 px-3 py-3">Source-cost reports still separate direct, local and spot suppliers.</p>
             </div>
           </section>
         </aside>
