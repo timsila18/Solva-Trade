@@ -168,7 +168,7 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
               Add missing {partyLabel.toLowerCase()}
             </Link>
           </span>
-          <select name={partyName} required className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-normal">
+          <select name={partyName} required={mode !== "sale"} className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-normal">
             <option value="">Select saved {partyLabel.toLowerCase()}</option>
             {partyOptions.map((party) => (
               <option key={party.id} value={party.id}>
@@ -176,6 +176,16 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
               </option>
             ))}
           </select>
+          {mode === "sale" ? (
+            <>
+              <input type="hidden" name="label_customer_name" value="Customer name" />
+              <input
+                name="field_customer_name"
+                placeholder="Or type new customer name and continue"
+                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-normal"
+              />
+            </>
+          ) : null}
         </label>
         <label className="grid gap-2 text-sm font-semibold">
           {sharedDateLabel}

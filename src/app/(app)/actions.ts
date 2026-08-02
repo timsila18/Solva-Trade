@@ -394,7 +394,8 @@ async function availableStock(
 async function postSalesInvoice(formData: FormData, userId: string, fallbackBusinessId?: string | null) {
   const admin = await createSupabaseServerClient();
   const { businessId, branchId, warehouseId } = await getWorkspaceContextForClient(admin, userId, fallbackBusinessId);
-  const customerId = getField(formData, "customer_id");
+  let customerId = getField(formData, "customer_id");
+  const quickCustomerName = getField(formData, "customer_name");
   const lines = salesInvoiceLinesFromForm(formData);
   const subtotal = lines.reduce((sum, line) => sum + line.lineSubtotal, 0);
   const tax = lines.reduce((sum, line) => sum + line.taxAmount, 0);
@@ -404,7 +405,28 @@ async function postSalesInvoice(formData: FormData, userId: string, fallbackBusi
   const invoiceDate = getField(formData, "invoice_date") || new Date().toISOString().slice(0, 10);
   const dueDate = getField(formData, "due_date") || invoiceDate;
 
-  if (!customerId) throw new Error("Select a saved customer before submitting the sale.");
+  if (!customerId && quickCustomerName) {
+    const customerCode = `CUS-${Date.now().toString().slice(-6)}`;
+    const { data: createdCustomer, error: customerError } = await admin
+      .from("customers")
+      .insert({
+        business_id: businessId,
+        branch_id: branchId,
+        customer_code: customerCode,
+        customer_name: quickCustomerName,
+        customer_type: "business",
+        default_payment_terms: "due_immediately",
+        active: true,
+        status: "active",
+        created_by: userId,
+      })
+      .select("id")
+      .single();
+    if (customerError || !createdCustomer) throw new Error(customerError?.message ?? "Could not save the new customer.");
+    customerId = String(createdCustomer.id);
+  }
+
+  if (!customerId) throw new Error("Select a saved customer or type the new customer name before submitting the sale.");
   if (!lines.length) throw new Error("Tick at least one product and enter the quantity sold.");
   for (const line of lines) {
     if (!line.productId || line.quantity <= 0) throw new Error("Every selected sale row needs a saved product and quantity.");

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Eye, Pencil, Phone, Search, Trash2, UserPlus } from "lucide-react";
+import { Eye, FileText, Pencil, Phone, Search, Trash2, UserPlus } from "lucide-react";
 import { deleteCustomerAction } from "@/app/(app)/actions";
 import { EmptyState, MetricCard, PageHero } from "@/components/ui/premium";
 import { customerSetupSections, salesSummary } from "@/lib/sales-data";
@@ -146,10 +146,16 @@ export default async function CustomersPage() {
               <h2 className="font-semibold">Customer list</h2>
               <p className="mt-2 text-sm text-slate-600">Your saved customers will appear here with phone, balance and last purchase.</p>
             </div>
-            <Link href="/customers/new" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-slate-950 px-4 py-3 text-sm font-semibold text-white">
-              <Phone className="h-4 w-4" />
-              Add by Phone
-            </Link>
+            <div className="flex flex-wrap gap-2">
+              <Link href="/customers/catalogue" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm font-semibold text-[var(--solva-blue-700)]">
+                <FileText className="h-4 w-4" />
+                Catalogue / Price List
+              </Link>
+              <Link href="/customers/new" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-slate-950 px-4 py-3 text-sm font-semibold text-white">
+                <Phone className="h-4 w-4" />
+                Add by Phone
+              </Link>
+            </div>
           </div>
           {customers.length > 0 ? (
             <div className="mt-5 overflow-x-auto">

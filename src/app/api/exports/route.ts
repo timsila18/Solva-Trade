@@ -485,6 +485,11 @@ function isCustomerProfileReport(moduleName: string, processName: string) {
   return value.includes("customer profile") || (moduleName.toLowerCase() === "customers" && processName.toLowerCase().includes("customer"));
 }
 
+function isCustomerPriceListReport(moduleName: string, processName: string) {
+  const value = `${moduleName} ${processName}`.toLowerCase();
+  return value.includes("customer price list") || value.includes("customer catalogue");
+}
+
 function isInventoryOperationalReport(moduleName: string, processName: string) {
   const value = `${moduleName} ${processName}`.toLowerCase();
   return (
@@ -684,6 +689,104 @@ async function productMasterReportLines(productId?: string | null): Promise<Repo
       warehouse: details["Stock location"],
       batch: details["Reorder status"],
       notes: `${details.Brand || "No brand"} - ${details.Category || "No category"} - ${details["Pack conversion"]}`,
+      details,
+    };
+  });
+}
+
+async function customerNameForReport(customerId?: string | null) {
+  const businessId = await activeReportBusinessId();
+  if (!businessId || !customerId) return "";
+  const supabase = await createSupabaseServerClient();
+  const { data } = await supabase
+    .from("customers")
+    .select("customer_name")
+    .eq("business_id", businessId)
+    .eq("id", customerId)
+    .maybeSingle();
+  return String(data?.customer_name ?? "");
+}
+
+async function customerPriceListReportLines(searchParams: URLSearchParams): Promise<ReportLine[]> {
+  const businessId = await activeReportBusinessId();
+  if (!businessId) return [];
+
+  const indexes = Array.from(
+    new Set(
+      Array.from(searchParams.keys())
+        .map((key) => /^product_id_(\d+)$/.exec(key)?.[1])
+        .filter(Boolean) as string[],
+    ),
+  )
+    .map((value) => Number(value))
+    .filter((value) => Number.isInteger(value))
+    .sort((a, b) => a - b);
+
+  const selected = indexes
+    .filter((index) => searchParams.get(`include_${index}`) === "yes")
+    .map((index) => ({
+      index,
+      productId: searchParams.get(`product_id_${index}`) ?? "",
+      price: numberValue(searchParams.get(`price_${index}`)),
+      note: String(searchParams.get(`note_${index}`) ?? "").trim(),
+    }))
+    .filter((item) => item.productId);
+
+  if (!selected.length) return [];
+
+  const supabase = await createSupabaseServerClient();
+  const productIds = selected.map((item) => item.productId);
+  const [{ data: products }, { data: balances }] = await Promise.all([
+    supabase
+      .from("products")
+      .select("id, product_name, product_code, sku, default_selling_price_placeholder, vat_status, tax_category, active, archived")
+      .eq("business_id", businessId)
+      .in("id", productIds),
+    supabase
+      .from("stock_balances")
+      .select("product_id, quantity_on_hand, available_quantity")
+      .eq("business_id", businessId)
+      .in("product_id", productIds),
+  ]);
+
+  const productMap = new Map((products ?? []).map((product) => [String(product.id), product]));
+  const balanceMap = new Map<string, number>();
+  for (const balance of balances ?? []) {
+    const key = String(balance.product_id);
+    balanceMap.set(key, (balanceMap.get(key) ?? 0) + numberValue(balance.available_quantity ?? balance.quantity_on_hand));
+  }
+
+  return selected.map((item, lineIndex) => {
+    const product = productMap.get(item.productId);
+    const price = item.price || numberValue(product?.default_selling_price_placeholder);
+    const vatTreatment = String(product?.vat_status ?? product?.tax_category ?? "VAT inclusive where applicable").replaceAll("_", " ");
+    const code = String(product?.sku ?? product?.product_code ?? `ITEM-${lineIndex + 1}`);
+    const name = String(product?.product_name ?? "Product");
+    const available = balanceMap.get(item.productId) ?? 0;
+    const details = {
+      "#": String(lineIndex + 1),
+      "Item no.": String(product?.product_code ?? code),
+      Product: name,
+      SKU: code,
+      "Customer price": money(price),
+      "VAT treatment": vatTreatment,
+      "Available quantity": available.toLocaleString("en-KE", { maximumFractionDigits: 2 }),
+      Notes: item.note || "Customer-specific price for this catalogue.",
+    };
+
+    return {
+      sku: code,
+      description: name,
+      unit: "Item",
+      quantity: 1,
+      unitPrice: price,
+      discount: 0,
+      taxRate: vatTreatment,
+      taxAmount: 0,
+      lineTotal: price,
+      warehouse: "Customer catalogue",
+      batch: "Price list",
+      notes: details.Notes,
       details,
     };
   });
@@ -2180,6 +2283,21 @@ const documentBlueprints: Record<string, DocumentBlueprint> = {
     footerNote: "Customer profiles preserve the details needed for sales, credit control, statements and follow-up.",
     emphasis: "control",
   },
+  "Customer Price List": {
+    accent: "#1455D9",
+    soft: "#EEF6FF",
+    label: "Customer catalogue and price list",
+    table: "Customer-specific product prices prepared for sharing",
+    intro: [
+      ["Customer", "Prepared for the selected customer before order confirmation.", "meta"],
+      ["Price Control", "Prices can be adjusted for this catalogue without changing the default product master price.", "note"],
+      ["VAT Basis", "Prices shown are VAT-inclusive where VAT applies, matching the way Solva Trade records selling prices.", "party"],
+    ],
+    headers: ["#", "Product", "SKU", "Customer price", "VAT treatment", "Available quantity", "Notes"],
+    signatures: ["Prepared by", "Customer", "Date"],
+    footerNote: "Prices are customer-specific for this catalogue and should be confirmed before invoicing if market prices change.",
+    emphasis: "report",
+  },
   "Supplier Profile": {
     accent: "#92400E",
     soft: "#FFFBEB",
@@ -3234,6 +3352,7 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
     searchParams.get("party") ??
     fieldValue(fields, ["customer", "supplier", "received_from", "paid_to", "payee", "owner", "driver", "employee"], tenant.businessName);
   const generatedBy = personInitials(searchParams.get("generatedBy") ?? searchParams.get("printer") ?? tenant.generatedBy);
+  const priceListCustomerName = isCustomerPriceListReport(moduleName, processName) ? await customerNameForReport(customerId) : "";
   const submittedLines = isProfileDocument(moduleName, processName) ? profileLinesFromFields(fields, processName) : reportLineFromFields(fields, processName);
   const liveSourceLines = invoiceId
     ? await salesInvoiceDocumentLines(invoiceId)
@@ -3251,6 +3370,8 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
               ? await salesOperationalReportLines(processName)
         : isProductProfileReport(moduleName, processName)
           ? await productMasterReportLines(productId)
+          : isCustomerPriceListReport(moduleName, processName)
+            ? await customerPriceListReportLines(searchParams)
           : isCustomerProfileReport(moduleName, processName)
             ? await customerProfileReportLines(customerId)
         : isProductMasterReport(moduleName, processName)
@@ -3262,7 +3383,7 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
   const lines = liveSourceLines.length ? liveSourceLines : submittedLines.length ? submittedLines : workflowLines;
   const liveInvoiceDetails = invoiceId ? lines[0]?.details ?? {} : {};
   const liveGrnDetails = grnId ? lines[0]?.details ?? {} : {};
-  const effectivePartyName = liveInvoiceDetails.Customer || liveGrnDetails.Supplier || partyName;
+  const effectivePartyName = liveInvoiceDetails.Customer || liveGrnDetails.Supplier || priceListCustomerName || partyName;
   const isValuationReport = isProductMasterReport(moduleName, processName) || isProductProfileReport(moduleName, processName) || isInventoryOperationalReport(moduleName, processName);
   const lineValueTotal = lines.reduce((sum, line) => sum + line.lineTotal, 0);
   const isLiveCustomerInvoice = Boolean(invoiceId && liveInvoiceDetails["Invoice no."]);
@@ -3329,6 +3450,9 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
     } else if (isProductMasterReport(moduleName, processName)) {
       processStatus = "Live product master from saved inventory records";
       sourceAuditNote = "Product master values come from saved products, product setup details, pack conversions, stock balances and latest purchase receipts.";
+    } else if (isCustomerPriceListReport(moduleName, processName)) {
+      processStatus = "Customer price list prepared from saved inventory records";
+      sourceAuditNote = "Catalogue values come from saved products and the customer-specific prices entered before generation.";
     } else if (isCustomerProfileReport(moduleName, processName)) {
       processStatus = "Live customer profile from saved customer records";
       sourceAuditNote = "Customer profile values come from the saved customer record, default address, branch, credit limit, balance, contact details and payment terms.";
@@ -4110,6 +4234,7 @@ class PdfCanvas {
 
 function pdfTableWidths(report: Report, headers: string[]) {
   if (isCustomerFacingInvoice(report)) return [28, 124, 46, 124, 34, 60, 72, 42];
+  if (report.processName === "Customer Price List") return [28, 156, 70, 82, 84, 58, 52];
   if (report.processName === "Product Master Report") return [76, 154, 62, 58, 58, 72, 50];
   if (report.processName === "Product Inventory Usage Report") return [72, 154, 56, 58, 70, 54, 66];
   if (report.processName === "Inventory Aging Report") return [72, 150, 70, 58, 72, 48, 60];
@@ -4131,6 +4256,7 @@ function pdfTableWidths(report: Report, headers: string[]) {
 function renderPdfTable(canvas: PdfCanvas, report: Report, startY: number) {
   const allHeaders = lineHeaders(report);
   const compactReportHeaders: Record<string, string[]> = {
+    "Customer Price List": ["#", "Product", "SKU", "Customer price", "VAT treatment", "Available quantity", "Notes"],
     "Product Master Report": ["Item no.", "Item name", "Brand", "Category", "Stock quantity", "Total value", "Reorder status"],
     "Product Inventory Usage Report": ["Item no.", "Item name", "Qty in stock", "Reorder level", "Qty above / below par", "Order qty", "Total order"],
     "Inventory Aging Report": ["Item no.", "Item name", "Age bucket", "Qty in stock", "Inventory value", "Risk level", "Recommended action"],
@@ -4260,6 +4386,7 @@ function pdfDocument(content: string, width: number, height: number, images: Pdf
 function wideReportHeaders(report: Report) {
   const allHeaders = lineHeaders(report);
   const preferred: Record<string, string[]> = {
+    "Customer Price List": ["#", "Product", "SKU", "Customer price", "VAT treatment", "Available quantity", "Notes"],
     "Product Master Report": ["Item no.", "Item name", "Brand", "Category", "Vendor", "Stock quantity", "Cost per item", "Selling price", "Total value", "Reorder status"],
     "Product Inventory Usage Report": ["Item no.", "Item name", "Vendor", "Qty in stock", "Reorder level", "Qty above / below par", "Order qty", "Total order", "Reorder required (auto-fill)"],
     "Inventory Aging Report": ["Item no.", "Item name", "Brand", "Category", "Last received", "Age bucket", "Qty in stock", "Inventory value", "Risk level", "Recommended action"],
@@ -5245,8 +5372,7 @@ async function recordDocumentGeneration(report: Report, format: string) {
   }
 }
 
-export async function GET(request: NextRequest) {
-  const { searchParams } = request.nextUrl;
+async function exportResponse(searchParams: URLSearchParams) {
   const report = await buildReport(searchParams);
   const format = searchParams.get("format") ?? "csv";
   const filename = slug(`${report.moduleName}-${report.processName}`);
@@ -5290,4 +5416,19 @@ export async function GET(request: NextRequest) {
       "Content-Disposition": `attachment; filename="${filename}.csv"`,
     },
   });
+}
+
+export async function GET(request: NextRequest) {
+  return exportResponse(request.nextUrl.searchParams);
+}
+
+export async function POST(request: NextRequest) {
+  const formData = await request.formData();
+  const searchParams = new URLSearchParams();
+  for (const [key, value] of formData.entries()) {
+    if (typeof value !== "string") continue;
+    if (key === "format") searchParams.set(key, value);
+    else searchParams.append(key, value);
+  }
+  return exportResponse(searchParams);
 }
