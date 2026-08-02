@@ -238,7 +238,7 @@ export default async function DashboardPage() {
     paymentCount = todayPayments.length;
 
     const customers = customersResult.data ?? [];
-    activeCustomers = customers.filter((customer) => customer.active !== false && customer.status !== "inactive").length;
+    activeCustomers = customers.filter((customer) => customer.active !== false && customer.status !== "archived").length;
 
     const products = productsResult.data ?? [];
     productsInCatalogue = products.filter((product) => product.active !== false).length;

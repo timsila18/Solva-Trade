@@ -1189,7 +1189,7 @@ async function updateCustomerRecord(formData: FormData, userId: string, fallback
       current_balance: getNumber(formData, "opening_balance"),
       default_payment_terms: getField(formData, "payment_agreement") || "due_immediately",
       active: getField(formData, "customer_status") !== "Inactive",
-      status: getField(formData, "customer_status") === "Inactive" ? "inactive" : "active",
+      status: getField(formData, "customer_status") === "Inactive" ? "archived" : "active",
     })
     .eq("business_id", businessId)
     .eq("id", customerId)
@@ -1361,6 +1361,99 @@ async function createSupplierRecord(formData: FormData, userId: string, fallback
       updated_at: new Date().toISOString(),
     }, { onConflict: "business_id,supplier_id,branch_id,currency" });
   }
+}
+
+async function requireSignedInBusiness() {
+  const supabase = await createSupabaseServerClient();
+  const { data } = await supabase.auth.getUser();
+  const user = data.user;
+  const businessId =
+    (await getActiveBusinessId()) ||
+    (typeof user?.app_metadata?.active_business_id === "string" ? user.app_metadata.active_business_id : null);
+  if (!user || !businessId) throw new Error("Sign in to manage this business record.");
+  return { supabase, user, businessId };
+}
+
+export async function deleteCustomerAction(formData: FormData) {
+  const customerId = safeText(formData.get("customerId"), "");
+  const params = new URLSearchParams();
+
+  try {
+    if (!customerId) throw new Error("Choose a customer to delete.");
+    const { supabase, user, businessId } = await requireSignedInBusiness();
+    const { data: customer, error: customerError } = await supabase
+      .from("customers")
+      .select("id, customer_code, customer_name, current_balance")
+      .eq("business_id", businessId)
+      .eq("id", customerId)
+      .maybeSingle();
+    if (customerError || !customer) throw new Error(customerError?.message ?? "Customer not found in this business.");
+
+    const { error } = await supabase
+      .from("customers")
+      .update({ active: false, status: "archived", updated_at: new Date().toISOString() })
+      .eq("business_id", businessId)
+      .eq("id", customerId);
+    if (error) throw new Error(error.message);
+
+    await supabase.from("audit_logs").insert({
+      business_id: businessId,
+      user_id: user.id,
+      action: "customer.archived",
+      module: "Customers",
+      entity_type: "customer",
+      entity_id: customerId,
+      previous_value: customer,
+      new_value: { active: false, status: "archived" },
+    });
+
+    params.set("deleted", "1");
+  } catch (error) {
+    params.set("error", error instanceof Error ? error.message : "The customer could not be deleted.");
+  }
+
+  redirect(`/customers?${params.toString()}`);
+}
+
+export async function deleteSupplierAction(formData: FormData) {
+  const supplierId = safeText(formData.get("supplierId"), "");
+  const params = new URLSearchParams();
+
+  try {
+    if (!supplierId) throw new Error("Choose a supplier to delete.");
+    const { supabase, user, businessId } = await requireSignedInBusiness();
+    const { data: supplier, error: supplierError } = await supabase
+      .from("suppliers")
+      .select("id, supplier_code, legal_name, trading_name, status, active")
+      .eq("business_id", businessId)
+      .eq("id", supplierId)
+      .maybeSingle();
+    if (supplierError || !supplier) throw new Error(supplierError?.message ?? "Supplier not found in this business.");
+
+    const { error } = await supabase
+      .from("suppliers")
+      .update({ active: false, status: "archived", archived_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .eq("business_id", businessId)
+      .eq("id", supplierId);
+    if (error) throw new Error(error.message);
+
+    await supabase.from("audit_logs").insert({
+      business_id: businessId,
+      user_id: user.id,
+      action: "supplier.archived",
+      module: "Suppliers",
+      entity_type: "supplier",
+      entity_id: supplierId,
+      previous_value: supplier,
+      new_value: { active: false, status: "archived" },
+    });
+
+    params.set("deleted", "1");
+  } catch (error) {
+    params.set("error", error instanceof Error ? error.message : "The supplier could not be deleted.");
+  }
+
+  redirect(`/suppliers?${params.toString()}`);
 }
 
 async function findFinanceAccountId(admin: SupabaseWorkspaceClient, businessId: string, value: string) {

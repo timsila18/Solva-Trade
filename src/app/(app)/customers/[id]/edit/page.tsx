@@ -145,7 +145,7 @@ export default async function EditCustomerPage({ params }: EditCustomerPageProps
         <label className="text-sm font-medium">
           Customer status
           <input type="hidden" name="label_customer_status" value="Customer status" />
-          <select name="field_customer_status" className="mt-2 min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 py-2" defaultValue={customer.active === false || customer.status === "inactive" ? "Inactive" : "Active"}>
+          <select name="field_customer_status" className="mt-2 min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 py-2" defaultValue={customer.active === false || customer.status === "archived" ? "Inactive" : "Active"}>
             <option>Active</option>
             <option>Inactive</option>
           </select>

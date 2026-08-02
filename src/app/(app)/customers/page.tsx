@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { Eye, Pencil, Phone, Search, UserPlus } from "lucide-react";
+import { Eye, Pencil, Phone, Search, Trash2, UserPlus } from "lucide-react";
+import { deleteCustomerAction } from "@/app/(app)/actions";
 import { EmptyState, MetricCard, PageHero } from "@/components/ui/premium";
 import { customerSetupSections, salesSummary } from "@/lib/sales-data";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -52,6 +53,8 @@ async function loadCustomers() {
     .from("customers")
     .select("id, customer_code, customer_name, phone, email, kra_pin, current_balance, credit_limit, default_payment_terms, active, status, customer_addresses(town, delivery_instructions, is_default)")
     .eq("business_id", businessId)
+    .eq("active", true)
+    .neq("status", "archived")
     .order("updated_at", { ascending: false })
     .limit(200);
 
@@ -60,7 +63,7 @@ async function loadCustomers() {
 
 export default async function CustomersPage() {
   const customers = await loadCustomers();
-  const activeCount = customers.filter((customer) => customer.active !== false && customer.status !== "inactive").length;
+  const activeCount = customers.filter((customer) => customer.active !== false && customer.status !== "archived").length;
   const customerBalance = customers.reduce((sum, customer) => sum + Math.max(0, Number(customer.current_balance ?? 0) || 0), 0);
 
   return (
@@ -173,8 +176,8 @@ export default async function CustomersPage() {
                       <span className="text-slate-700">{[address?.town, route].filter((value) => value && value !== "-").join(" / ") || "-"}</span>
                       <span>{cleanTerm(customer.default_payment_terms)}</span>
                       <span className="font-semibold">{money(customer.current_balance)}</span>
-                      <span className={`w-fit rounded-[4px] px-2 py-1 text-xs font-semibold ${customer.active !== false && customer.status !== "inactive" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
-                        {customer.active !== false && customer.status !== "inactive" ? "Active" : "Inactive"}
+                      <span className={`w-fit rounded-[4px] px-2 py-1 text-xs font-semibold ${customer.active !== false && customer.status !== "archived" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                        {customer.active !== false && customer.status !== "archived" ? "Active" : "Archived"}
                       </span>
                       <div className="flex justify-end gap-2">
                         <Link href={`/customers/${customer.id}/edit`} className="inline-flex min-h-9 items-center gap-1.5 rounded-[6px] border border-slate-300 px-3 text-xs font-semibold text-slate-700">
@@ -185,6 +188,19 @@ export default async function CustomersPage() {
                           <Eye className="h-3.5 w-3.5" />
                           PDF
                         </Link>
+                        <details className="relative">
+                          <summary className="inline-flex min-h-9 cursor-pointer list-none items-center gap-1.5 rounded-[6px] border border-red-200 px-3 text-xs font-semibold text-red-700 marker:hidden">
+                            <Trash2 className="h-3.5 w-3.5" />
+                            Delete
+                          </summary>
+                          <div className="absolute right-0 z-10 mt-2 w-64 rounded-md border border-red-100 bg-white p-3 text-left shadow-lg">
+                            <p className="text-xs leading-5 text-slate-600">Remove this customer from active use. Past invoices and reports remain intact.</p>
+                            <form action={deleteCustomerAction} className="mt-3">
+                              <input type="hidden" name="customerId" value={customer.id} />
+                              <button className="min-h-9 w-full rounded-md bg-red-600 px-3 text-xs font-semibold text-white">Confirm delete</button>
+                            </form>
+                          </div>
+                        </details>
                       </div>
                     </div>
                   );
