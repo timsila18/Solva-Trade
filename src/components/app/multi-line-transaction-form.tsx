@@ -32,6 +32,7 @@ function inclusiveTaxAmount(inclusiveAmount: number, vatRate: number) {
 
 export function MultiLineTransactionForm({ mode, customers = [], suppliers = [], products, today }: Props) {
   const [search, setSearch] = useState("");
+  const [selectedIndexes, setSelectedIndexes] = useState<Set<number>>(() => new Set());
   const pathname = usePathname();
   const containerRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -114,6 +115,20 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
         .map(({ index }) => index),
     );
   }, [products, search]);
+  const visibleIndexes = useMemo(() => {
+    return products
+      .map((_, index) => index)
+      .filter((index) => matchingIndexes.has(index) || selectedIndexes.has(index));
+  }, [matchingIndexes, products, selectedIndexes]);
+
+  function setLineSelected(index: number, selected: boolean) {
+    setSelectedIndexes((current) => {
+      const next = new Set(current);
+      if (selected) next.add(index);
+      else next.delete(index);
+      return next;
+    });
+  }
 
   useEffect(() => {
     const form = containerRef.current?.closest("form");
@@ -277,7 +292,8 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
             </tr>
           </thead>
           <tbody>
-            {products.map((product, index) => {
+            {visibleIndexes.map((index) => {
+              const product = products[index];
               const productName = product.name || "Unnamed product";
               const productCode = product.code || "";
               const defaultUnitValue = mode === "sale" && product.price > 0 ? product.price : 0;
@@ -289,15 +305,18 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
               const saleSubtotal = saleTotal - tax;
               const accepted = quantity;
               const receiptTotal = accepted * unitValue;
-              const visible = matchingIndexes.has(index);
               return (
-                <tr key={product.id || index} className={`border-b border-slate-100 odd:bg-white even:bg-slate-50 ${visible ? "" : "hidden"}`}>
+                <tr key={product.id || index} className="border-b border-slate-100 odd:bg-white even:bg-slate-50">
                   <td className="px-3 py-2 align-middle">
                     <input
                       type="checkbox"
                       name={`field_line_${index}_selected`}
                       value="yes"
-                      onChange={(event) => recalculate(event.currentTarget)}
+                      checked={selectedIndexes.has(index)}
+                      onChange={(event) => {
+                        setLineSelected(index, event.currentTarget.checked);
+                        recalculate(event.currentTarget);
+                      }}
                       className="h-4 w-4"
                     />
                     <input type="hidden" name={`field_line_${index}_product_id`} value={product.id || ""} />
@@ -325,7 +344,10 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
                         const value = event.currentTarget.value;
                         const form = event.currentTarget.form;
                         const checkbox = form?.elements.namedItem(`field_line_${index}_selected`);
-                        if (numberValue(value) > 0 && checkbox instanceof HTMLInputElement) checkbox.checked = true;
+                        if (numberValue(value) > 0 && checkbox instanceof HTMLInputElement) {
+                          checkbox.checked = true;
+                          setLineSelected(index, true);
+                        }
                         recalculate(event.currentTarget);
                       }}
                       className="w-28 rounded-md border border-slate-300 px-2 py-2"
@@ -387,7 +409,7 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
                 </tr>
               );
             })}
-            {!matchingIndexes.size ? (
+            {!visibleIndexes.length ? (
               <tr>
                 <td colSpan={8} className="bg-white px-4 py-8 text-center text-sm text-slate-600">
                   No products match that search. Clear the search or add the product first.
