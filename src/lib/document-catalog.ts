@@ -155,6 +155,7 @@ export const documentCatalog: BusinessDocument[] = [
     "Stock Variance Report",
     "Damaged Stock Report",
     "Expired Stock Report",
+    "Stock Health Report",
     "Slow-Moving Stock Report",
     "Fast-Moving Stock Report",
     "Inventory Valuation Report",
@@ -235,6 +236,7 @@ export const documentCatalog: BusinessDocument[] = [
     "Monthly Expense Report",
     "Annual Expense Report",
     "Office Expense Report",
+    "Expense Summary Report",
     "Expense Analysis Report",
   ].map((name) => ({
     category: "Finance" as const,

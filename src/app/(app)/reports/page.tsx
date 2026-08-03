@@ -1,5 +1,5 @@
-import { CalendarClock, FileText, Mail, Printer, Send } from "lucide-react";
-import { MetricCard, PageHero, PlainCard } from "@/components/ui/premium";
+import { Banknote, BarChart3, CalendarClock, FileText, Mail, PackageSearch, Printer, ReceiptText, Send, ShieldCheck, TrendingUp, Users } from "lucide-react";
+import { MetricCard, PageHero } from "@/components/ui/premium";
 import { documentCatalog, documentCategories, type BusinessDocument } from "@/lib/document-catalog";
 import {
   pinnedReports,
@@ -10,12 +10,78 @@ import {
 const categories = documentCategories;
 const standoutDocuments = documentCatalog.filter((document) => document.standout);
 
-const ownerQuestions = [
-  { title: "How is the business doing?", href: "/insights/owner", description: "Revenue, cash, profit, risks and the next actions an owner should care about." },
-  { title: "Who owes me money?", href: "/sales/debtor-ageing", description: "Customer balances, late payments and follow-up priorities in one place." },
-  { title: "What stock needs attention?", href: "/inventory/reports", description: "Low stock, expiry risk, valuation and movement reports." },
-  { title: "What tax work is due?", href: "/tax", description: "VAT, eTIMS, withholding and filing readiness." },
-];
+const ownerReportCards = [
+  {
+    question: "How is my business doing?",
+    report: "Business Health Report",
+    category: "Executive",
+    description: "Overall view of sales, cash, stock, debtors, expenses, profit and tax risk.",
+    icon: ShieldCheck,
+  },
+  {
+    question: "What happened today?",
+    report: "Morning Business Brief",
+    category: "Executive",
+    description: "Sales, collections, expenses, profit, unpaid invoices and stock alerts for today.",
+    icon: CalendarClock,
+  },
+  {
+    question: "Am I making profit?",
+    report: "Profit and Loss Report",
+    category: "Finance",
+    description: "Shows whether the business is making money after stock cost and expenses.",
+    icon: TrendingUp,
+  },
+  {
+    question: "Where is my money?",
+    report: "Cash Position Report",
+    category: "Executive",
+    description: "Cash, bank, M-Pesa, money collected, money spent and expected collections.",
+    icon: Banknote,
+  },
+  {
+    question: "Who owes me?",
+    report: "Customer Aging Report",
+    category: "Customers",
+    description: "Customers owing money, amount owed, age of debt and follow-up priority.",
+    icon: ReceiptText,
+  },
+  {
+    question: "What stock needs action?",
+    report: "Stock Health Report",
+    category: "Inventory",
+    description: "Low stock, dead stock, fast movers, slow movers, stock value and reorder risk.",
+    icon: PackageSearch,
+  },
+  {
+    question: "What is selling best?",
+    report: "Top Products Report",
+    category: "Executive",
+    description: "Products driving the most sales, movement and margin.",
+    icon: BarChart3,
+  },
+  {
+    question: "Who are my best customers?",
+    report: "Top Customers Report",
+    category: "Executive",
+    description: "Best customers, declining customers, unpaid customers and buying trends.",
+    icon: Users,
+  },
+  {
+    question: "Where is money being spent?",
+    report: "Expense Summary Report",
+    category: "Finance",
+    description: "Fuel, wages, rent, repairs, electricity, internet and miscellaneous spending.",
+    icon: Banknote,
+  },
+  {
+    question: "What do I need for VAT?",
+    report: "KRA ETR Sales Report",
+    category: "Tax",
+    description: "VAT-ready sales from the 1st to 19th for return preparation before the 20th.",
+    icon: FileText,
+  },
+] as const;
 
 const fastDownloadPairs = [
   ["Inventory", "Product Master Report"],
@@ -143,6 +209,10 @@ function exportHref(document: BusinessDocument, format: "pdf" | "excel" | "print
   return `/api/exports?module=${encodeURIComponent(document.category)}&process=${encodeURIComponent(document.name)}&format=${format}`;
 }
 
+function ownerExportHref(report: (typeof ownerReportCards)[number], format: "pdf" | "excel" | "print") {
+  return `/api/exports?module=${encodeURIComponent(report.category)}&process=${encodeURIComponent(report.report)}&format=${format}`;
+}
+
 function ReportActions({ document, compact = false }: { document: BusinessDocument; compact?: boolean }) {
   return (
     <div className={compact ? "mt-3" : "mt-4"}>
@@ -176,6 +246,56 @@ export default function ReportsPage() {
         secondaryAction={{ label: "Back to Dashboard", href: "/dashboard" }}
         insight="I will explain reports in plain language first, then let power users open the accounting detail behind the numbers."
       />
+
+      <section className="mt-6 rounded-lg border border-cyan-100 bg-white p-5 shadow-sm">
+        <div className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
+          <div>
+            <p className="text-sm font-semibold text-[var(--solva-blue-700)]">Owner Reports</p>
+            <h2 className="mt-1 text-2xl font-semibold tracking-normal text-slate-950">The reports an owner opens first.</h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
+              These are grouped by business questions so an owner can understand sales, cash, profit, stock, customers, expenses and VAT without hunting through accounting terms.
+            </p>
+          </div>
+          <a
+            href="/api/exports?module=Executive&process=Business%20Health%20Report&format=pdf"
+            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-[var(--solva-blue-700)] px-4 text-sm font-semibold text-white shadow-sm"
+          >
+            <FileText className="h-4 w-4" />
+            Business Health PDF
+          </a>
+        </div>
+        <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+          {ownerReportCards.map((report) => {
+            const Icon = report.icon;
+            return (
+              <article key={report.question} className="flex min-h-[220px] flex-col rounded-lg border border-slate-200 bg-slate-50 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <span className="grid h-10 w-10 place-items-center rounded-md bg-cyan-50 text-[var(--solva-blue-700)]">
+                    <Icon className="h-5 w-5" />
+                  </span>
+                  <span className="rounded-md bg-white px-2 py-1 text-[11px] font-semibold uppercase text-slate-500">{report.category}</span>
+                </div>
+                <h3 className="mt-4 text-base font-semibold leading-6 text-slate-950">{report.question}</h3>
+                <p className="mt-2 flex-1 text-sm leading-6 text-slate-600">{report.description}</p>
+                <a
+                  href={ownerExportHref(report, "pdf")}
+                  className="mt-4 inline-flex min-h-10 items-center justify-center rounded-md bg-[var(--solva-blue-700)] px-3 text-sm font-semibold text-white"
+                >
+                  Generate PDF
+                </a>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <a href={ownerExportHref(report, "excel")} className="inline-flex min-h-9 items-center justify-center rounded-md border border-cyan-200 bg-white px-3 text-xs font-semibold text-[var(--solva-blue-700)]">
+                    Excel
+                  </a>
+                  <a href={ownerExportHref(report, "print")} className="inline-flex min-h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700">
+                    Print
+                  </a>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      </section>
 
       <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard label="Documents available" value={documentCatalog.length.toString()} story="PDF, Excel and print-ready business documents." />
@@ -249,12 +369,6 @@ export default function ReportsPage() {
             );
           })}
         </div>
-      </section>
-
-      <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {ownerQuestions.map((question) => (
-          <PlainCard key={question.href} href={question.href} title={question.title} description={question.description} action="Answer this" />
-        ))}
       </section>
 
       <section className="mt-6 grid gap-4 lg:grid-cols-3">

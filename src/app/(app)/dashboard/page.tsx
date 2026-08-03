@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, Banknote, CreditCard, Download, Eye, PackagePlus, ReceiptText, Search, ShieldCheck, ShoppingCart, SlidersHorizontal, Users } from "lucide-react";
+import { ArrowRight, Banknote, CreditCard, Download, Eye, FileText, PackagePlus, ReceiptText, Search, ShieldCheck, ShoppingCart, SlidersHorizontal, Users } from "lucide-react";
 import { ProfitPrivacyCard } from "@/components/app/profit-privacy-card";
 import { DashboardPanel, DashboardTile, EmptyState, MetricCard, MiniBars, PageHero, PlainCard, ProgressRow } from "@/components/ui/premium";
 import {
@@ -22,6 +22,23 @@ const topActions = [
   { label: "Receive Stock", href: "/purchases/goods-received", icon: PackagePlus },
   { label: "Record Payment", href: "/cash-bank/receipts", icon: Banknote },
 ];
+
+const ownerReportShortcuts = [
+  ["How is my business doing?", "Business Health Report", "Executive"],
+  ["What happened today?", "Morning Business Brief", "Executive"],
+  ["Am I making profit?", "Profit and Loss Report", "Finance"],
+  ["Where is my money?", "Cash Position Report", "Executive"],
+  ["Who owes me?", "Customer Aging Report", "Customers"],
+  ["What stock needs action?", "Stock Health Report", "Inventory"],
+  ["What is selling best?", "Top Products Report", "Executive"],
+  ["Who are my best customers?", "Top Customers Report", "Executive"],
+  ["Where is money being spent?", "Expense Summary Report", "Finance"],
+  ["What do I need for VAT?", "KRA ETR Sales Report", "Tax"],
+] as const;
+
+function reportHref(moduleName: string, processName: string) {
+  return `/api/exports?module=${encodeURIComponent(moduleName)}&process=${encodeURIComponent(processName)}&format=pdf`;
+}
 
 function greeting() {
   const hour = Number(new Intl.DateTimeFormat("en-KE", { hour: "numeric", hour12: false, timeZone: "Africa/Nairobi" }).format(new Date()));
@@ -395,6 +412,35 @@ export default async function DashboardPage() {
             </Link>
           );
         })}
+      </section>
+
+      <section className="mt-6 rounded-lg border border-cyan-100 bg-white p-5 shadow-sm">
+        <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
+          <div>
+            <p className="text-sm font-semibold text-[var(--solva-blue-700)]">Owner Reports</p>
+            <h2 className="mt-1 text-xl font-semibold text-slate-950">Simple reports for the owner&apos;s daily decisions.</h2>
+            <p className="mt-2 text-sm leading-6 text-slate-600">Open the full owner report centre, or generate the most important reports directly from here.</p>
+          </div>
+          <Link
+            href="/reports"
+            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-[var(--solva-blue-700)] px-4 text-sm font-semibold text-white shadow-sm"
+          >
+            <FileText className="h-4 w-4" />
+            Owner Reports
+          </Link>
+        </div>
+        <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-5">
+          {ownerReportShortcuts.map(([question, process, moduleName]) => (
+            <Link
+              key={question}
+              href={reportHref(moduleName, process)}
+              className="min-h-20 rounded-md border border-slate-200 bg-slate-50 px-3 py-3 text-sm transition hover:border-cyan-300 hover:bg-white"
+            >
+              <span className="block font-semibold text-slate-950">{question}</span>
+              <span className="mt-1 block text-xs leading-5 text-slate-500">{process}</span>
+            </Link>
+          ))}
+        </div>
       </section>
 
       <section className="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
