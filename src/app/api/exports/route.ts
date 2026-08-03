@@ -4501,7 +4501,7 @@ class PdfCanvas {
 }
 
 function pdfTableWidths(report: Report, headers: string[]) {
-  if (isCustomerFacingInvoice(report)) return [26, 198, 54, 38, 64, 84, 66];
+  if (isCustomerFacingInvoice(report)) return [24, 176, 78, 36, 62, 86, 68];
   if (report.processName === "Customer Price List") return [28, 156, 70, 82, 84, 58, 52];
   if (report.processName === "Product Master Report") return [76, 154, 62, 58, 58, 72, 50];
   if (report.processName === "Product Inventory Usage Report") return [72, 154, 56, 58, 70, 54, 66];
@@ -5430,22 +5430,22 @@ function drawCustomerInvoiceHeader(
   if (contactLine) canvas.wrap(contactLine, 122, 762, 286, 7, "slate", false, 7.8, 1);
   if (report.kraPin) canvas.text(`KRA PIN: ${report.kraPin}`, 122, 746, 7.2, "slate");
 
-  canvas.wrap(title, 398, 792, 164, 17, "navy", true, 20);
-  canvas.text(`# ${report.transaction["Reference number"]}`, 400, 758, 8.5, "muted");
-  if (!drawFittedImage(canvas, solvaLogo, 478, 724, 84, 24)) {
-    canvas.text("SOLVA TRADE", 478, 732, 9.5, "blue", true);
+  canvas.wrap(title, 392, 792, 118, 17, "navy", true, 20);
+  if (!drawFittedImage(canvas, solvaLogo, 508, 784, 54, 20)) {
+    canvas.text("SOLVA", 512, 790, 8.5, "blue", true);
   }
+  canvas.text(`# ${report.transaction["Reference number"]}`, 394, 758, 8.5, "muted");
 }
 
 function drawCustomerInvoiceParties(canvas: PdfCanvas, report: Report) {
-  canvas.rect(48, 640, 250, 50, "soft");
-  canvas.rect(314, 640, 250, 50, "soft");
-  canvas.text("BILL TO", 62, 672, 8, "blue", true);
-  canvas.wrap(report.partyName, 62, 654, 218, 8.4, "navy", true, 9.4, 2);
-  canvas.text("DETAILS", 328, 672, 8, "blue", true);
-  canvas.text(`No: ${report.transaction["Reference number"]}`, 328, 654, 7.8, "navy");
-  canvas.text(`Date: ${report.transaction["Document date"]}`, 328, 641, 7.8, "navy");
-  canvas.text(`Due: ${report.transaction["Due or action date"]}`, 438, 641, 7.8, "navy");
+  canvas.rect(48, 660, 250, 50, "soft");
+  canvas.rect(314, 660, 250, 50, "soft");
+  canvas.text("BILL TO", 62, 692, 8, "blue", true);
+  canvas.wrap(report.partyName, 62, 674, 218, 8.4, "navy", true, 9.4, 2);
+  canvas.text("DETAILS", 328, 692, 8, "blue", true);
+  canvas.text(`No: ${report.transaction["Reference number"]}`, 328, 674, 7.8, "navy");
+  canvas.text(`Date: ${report.transaction["Document date"]}`, 328, 661, 7.8, "navy");
+  canvas.text(`Due: ${report.transaction["Due or action date"]}`, 438, 661, 7.8, "navy");
 }
 
 function drawCustomerInvoiceTableHeader(canvas: PdfCanvas, report: Report, y: number) {
@@ -5475,7 +5475,7 @@ async function customerInvoicePdf(report: Report) {
     drawCustomerInvoiceHeader(canvas, report, title, assets);
     if (withParties) {
       drawCustomerInvoiceParties(canvas, report);
-      y = 612;
+      y = 632;
     } else {
       y = 704;
     }
@@ -5527,9 +5527,8 @@ async function customerInvoicePdf(report: Report) {
   canvas.line(48, y + 4, 578, y + 4, "border", 0.7);
   canvas.text("NOTE TO CUSTOMER", 48, y - 22, 9, "blue", true);
   canvas.wrap("Thanks for choosing us. We appreciate your business.", 48, y - 38, 260, 8, "navy", false, 9.5, 3);
-  canvas.text("TOTAL", 384, y - 22, 10, "blue", true);
   totalEntries.forEach(([label, value], index) => {
-    const rowY = y - 42 - index * 16;
+    const rowY = y - 24 - index * 16;
     canvas.rect(384, rowY - 3, 174, 15, "surface");
     canvas.wrap(label, 392, rowY + 1, 74, 7.2, "blue", true, 8, 1);
     canvas.wrap(value, 472, rowY + 1, 78, 7.2, "blue", true, 8, 1);
