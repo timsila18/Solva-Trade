@@ -5438,14 +5438,14 @@ function drawCustomerInvoiceHeader(
 }
 
 function drawCustomerInvoiceParties(canvas: PdfCanvas, report: Report) {
-  canvas.rect(48, 660, 250, 50, "soft");
-  canvas.rect(314, 660, 250, 50, "soft");
-  canvas.text("BILL TO", 62, 692, 8, "blue", true);
-  canvas.wrap(report.partyName, 62, 674, 218, 8.4, "navy", true, 9.4, 2);
-  canvas.text("DETAILS", 328, 692, 8, "blue", true);
-  canvas.text(`No: ${report.transaction["Reference number"]}`, 328, 674, 7.8, "navy");
-  canvas.text(`Date: ${report.transaction["Document date"]}`, 328, 661, 7.8, "navy");
-  canvas.text(`Due: ${report.transaction["Due or action date"]}`, 438, 661, 7.8, "navy");
+  canvas.rect(48, 684, 250, 50, "soft");
+  canvas.rect(314, 684, 250, 50, "soft");
+  canvas.text("BILL TO", 62, 716, 8, "blue", true);
+  canvas.wrap(report.partyName, 62, 698, 218, 8.4, "navy", true, 9.4, 2);
+  canvas.text("DETAILS", 328, 716, 8, "blue", true);
+  canvas.text(`No: ${report.transaction["Reference number"]}`, 328, 698, 7.8, "navy");
+  canvas.text(`Date: ${report.transaction["Document date"]}`, 328, 685, 7.8, "navy");
+  canvas.text(`Due: ${report.transaction["Due or action date"]}`, 438, 685, 7.8, "navy");
 }
 
 function drawCustomerInvoiceTableHeader(canvas: PdfCanvas, report: Report, y: number) {
@@ -5475,7 +5475,7 @@ async function customerInvoicePdf(report: Report) {
     drawCustomerInvoiceHeader(canvas, report, title, assets);
     if (withParties) {
       drawCustomerInvoiceParties(canvas, report);
-      y = 632;
+      y = 656;
     } else {
       y = 704;
     }
