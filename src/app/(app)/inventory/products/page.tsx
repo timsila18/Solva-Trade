@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { Download, Eye, PackagePlus, Pencil, Search } from "lucide-react";
+import { Download, Eye, PackagePlus, Pencil, Search, Trash2 } from "lucide-react";
+import { deleteProductAction } from "@/app/(app)/actions";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getActiveBusinessId } from "@/lib/tenant";
 
@@ -145,6 +146,19 @@ export default async function ProductsPage() {
                       <Eye className="h-3.5 w-3.5" />
                       View
                     </Link>
+                    <details className="relative">
+                      <summary className="inline-flex min-h-9 cursor-pointer list-none items-center gap-1.5 rounded-[6px] border border-red-200 px-3 text-xs font-semibold text-red-700 marker:hidden">
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Delete
+                      </summary>
+                      <div className="absolute right-0 z-10 mt-2 w-64 rounded-md border border-red-100 bg-white p-3 text-left shadow-lg">
+                        <p className="text-xs leading-5 text-slate-600">Remove this product from active use. Past sales, GRNs and reports remain intact.</p>
+                        <form action={deleteProductAction} className="mt-3">
+                          <input type="hidden" name="productId" value={product.id} />
+                          <button className="min-h-9 w-full rounded-md bg-red-600 px-3 text-xs font-semibold text-white">Confirm delete</button>
+                        </form>
+                      </div>
+                    </details>
                   </div>
                 </div>
               );

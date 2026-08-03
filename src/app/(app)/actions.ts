@@ -1478,6 +1478,47 @@ export async function deleteSupplierAction(formData: FormData) {
   redirect(`/suppliers?${params.toString()}`);
 }
 
+export async function deleteProductAction(formData: FormData) {
+  const productId = safeText(formData.get("productId"), "");
+  const params = new URLSearchParams();
+
+  try {
+    if (!productId) throw new Error("Choose a product to delete.");
+    const { supabase, user, businessId } = await requireSignedInBusiness();
+    const { data: product, error: productError } = await supabase
+      .from("products")
+      .select("id, product_name, product_code, sku, active, archived")
+      .eq("business_id", businessId)
+      .eq("id", productId)
+      .maybeSingle();
+    if (productError || !product) throw new Error(productError?.message ?? "Product not found in this business.");
+
+    const { error } = await supabase
+      .from("products")
+      .update({ active: false, archived: true, updated_at: new Date().toISOString() })
+      .eq("business_id", businessId)
+      .eq("id", productId);
+    if (error) throw new Error(error.message);
+
+    await supabase.from("audit_logs").insert({
+      business_id: businessId,
+      user_id: user.id,
+      action: "product.archived",
+      module: "Inventory",
+      entity_type: "product",
+      entity_id: productId,
+      previous_value: product,
+      new_value: { active: false, archived: true },
+    });
+
+    params.set("deleted", "1");
+  } catch (error) {
+    params.set("error", error instanceof Error ? error.message : "The product could not be deleted.");
+  }
+
+  redirect(`/inventory/products?${params.toString()}`);
+}
+
 async function findFinanceAccountId(admin: SupabaseWorkspaceClient, businessId: string, value: string) {
   const account = value.trim();
   if (!account) return null;
