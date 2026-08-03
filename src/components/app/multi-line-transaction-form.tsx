@@ -32,6 +32,8 @@ function inclusiveTaxAmount(inclusiveAmount: number, vatRate: number) {
 
 export function MultiLineTransactionForm({ mode, customers = [], suppliers = [], products, today }: Props) {
   const [search, setSearch] = useState("");
+  const [partySearch, setPartySearch] = useState("");
+  const [selectedPartyId, setSelectedPartyId] = useState("");
   const [selectedIndexes, setSelectedIndexes] = useState<Set<number>>(() => new Set());
   const pathname = usePathname();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -103,6 +105,14 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
   const partyLabel = mode === "sale" ? "Customer" : "Supplier";
   const partyName = mode === "sale" ? "field_customer_id" : "field_supplier_id";
   const partyOptions = mode === "sale" ? customers : suppliers;
+  const filteredPartyOptions = useMemo(() => {
+    const query = partySearch.toLowerCase().trim();
+    return partyOptions.filter((party) => {
+      const isSelected = selectedPartyId && party.id === selectedPartyId;
+      if (isSelected || !query) return true;
+      return [party.name, party.code, party.phone].filter(Boolean).some((value) => String(value).toLowerCase().includes(query));
+    });
+  }, [partyOptions, partySearch, selectedPartyId]);
   const matchingIndexes = useMemo(() => {
     const query = search.toLowerCase().trim();
     return new Set(
@@ -183,9 +193,25 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
               Add missing {partyLabel.toLowerCase()}
             </Link>
           </span>
-          <select name={partyName} required={mode !== "sale"} className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-normal">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              type="search"
+              value={partySearch}
+              onChange={(event) => setPartySearch(event.currentTarget.value)}
+              placeholder={`Search saved ${partyLabel.toLowerCase()}`}
+              className="w-full rounded-md border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm font-normal"
+            />
+          </div>
+          <select
+            name={partyName}
+            required={mode !== "sale"}
+            value={selectedPartyId}
+            onChange={(event) => setSelectedPartyId(event.currentTarget.value)}
+            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-normal"
+          >
             <option value="">Select saved {partyLabel.toLowerCase()}</option>
-            {partyOptions.map((party) => (
+            {filteredPartyOptions.map((party) => (
               <option key={party.id} value={party.id}>
                 {party.name} {party.code ? `- ${party.code}` : ""}
               </option>

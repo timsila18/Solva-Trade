@@ -33,6 +33,25 @@ function cleanLabel(value: string | null | undefined, fallback = "-") {
   return text ? text.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()) : fallback;
 }
 
+function searchText(value: unknown) {
+  return String(value ?? "").toLowerCase();
+}
+
+function matchesSupplierSearch(supplier: SupplierRow, query: string) {
+  if (!query) return true;
+  const haystack = [
+    supplier.legal_name,
+    supplier.trading_name,
+    supplier.supplier_code,
+    supplier.kra_pin,
+    supplier.primary_phone,
+    supplier.email,
+    supplier.supplier_type,
+    supplier.status,
+  ].map(searchText).join(" ");
+  return haystack.includes(query);
+}
+
 async function loadSuppliers() {
   const supabase = await createSupabaseServerClient();
   const { data: userData } = await supabase.auth.getUser();
@@ -53,8 +72,14 @@ async function loadSuppliers() {
   return (data ?? []) as unknown as SupplierRow[];
 }
 
-export default async function SuppliersPage() {
-  const suppliers = await loadSuppliers();
+export default async function SuppliersPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = searchParams ? await searchParams : {};
+  const query = searchText(Array.isArray(params.q) ? params.q[0] : params.q).trim();
+  const suppliers = (await loadSuppliers()).filter((supplier) => matchesSupplierSearch(supplier, query));
   const approvedCount = suppliers.filter((supplier) => supplier.approved_supplier && !supplier.on_hold).length;
   const pendingCount = suppliers.filter((supplier) => supplier.status === "pending_approval" || supplier.status === "draft").length;
   const onHoldCount = suppliers.filter((supplier) => supplier.on_hold || supplier.status === "on_hold").length;
@@ -79,8 +104,8 @@ export default async function SuppliersPage() {
       </div>
 
       <section className="mt-6 rounded-lg border border-slate-200 bg-white p-5">
-        <div className="grid gap-3 md:grid-cols-[1fr_180px_180px_180px]">
-          <input className="rounded-md border border-slate-300 px-3 py-2 text-sm" placeholder="Search by name, code, KRA PIN, phone or email" />
+        <form className="grid gap-3 md:grid-cols-[1fr_180px_180px_180px]" action="/suppliers">
+          <input name="q" defaultValue={query} className="rounded-md border border-slate-300 px-3 py-2 text-sm" placeholder="Search by name, code, KRA PIN, phone or email" />
           <select className="rounded-md border border-slate-300 px-3 py-2 text-sm" defaultValue="all">
             <option value="all">All types</option>
             {supplierTypes.map((type) => (
@@ -98,7 +123,8 @@ export default async function SuppliersPage() {
             <option value="overdue">Overdue</option>
             <option value="advance">Advance held</option>
           </select>
-        </div>
+          <button className="sr-only">Search</button>
+        </form>
       </section>
 
       <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">

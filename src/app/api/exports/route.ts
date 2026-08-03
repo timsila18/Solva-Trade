@@ -5405,7 +5405,6 @@ function drawCustomerInvoiceHeader(
   report: Report,
   title: string,
   assets: PdfImageResource[],
-  pageNumber: number,
 ) {
   const tenantLogo = assets.find((asset) => asset.name === "TenantLogo");
   const solvaLogo = assets.find((asset) => asset.name === "SolvaLogo");
@@ -5416,27 +5415,25 @@ function drawCustomerInvoiceHeader(
   canvas.rect(408, 832, 204, 10, "gold");
   canvas.text("SOLVA TRADE", 102, 420, 58, "watermark", true);
 
-  canvas.rect(48, 760, 58, 50, "surface");
-  canvas.rect(52, 764, 50, 42, "white");
-  if (!drawFittedImage(canvas, tenantLogo, 55, 766, 44, 38)) {
-    canvas.text(initials(report.businessName), 63, 780, 15, "blue", true);
+  canvas.rect(48, 752, 62, 58, "surface");
+  canvas.rect(52, 756, 54, 50, "white");
+  if (!drawFittedImage(canvas, tenantLogo, 56, 760, 46, 42)) {
+    canvas.text(initials(report.businessName), 65, 778, 15, "blue", true);
   }
 
-  canvas.text(report.businessName, 116, 798, 17, "navy", true);
-  canvas.wrap(report.businessLocation, 116, 780, 250, 7.6, "slate", false, 8.4, 1);
+  canvas.text(report.businessName, 122, 798, 17, "navy", true);
+  canvas.wrap(report.businessLocation, 122, 780, 250, 7.6, "slate", false, 8.4, 1);
   const contactLine = [
     report.businessPhone ? `Tel: ${report.businessPhone}` : "",
     report.businessEmail ? `Email: ${report.businessEmail}` : "",
-    report.kraPin ? `KRA PIN: ${report.kraPin}` : "",
   ].filter(Boolean).join("  ");
-  canvas.wrap(contactLine, 116, 762, 280, 7, "slate", false, 7.8, 2);
+  if (contactLine) canvas.wrap(contactLine, 122, 762, 286, 7, "slate", false, 7.8, 1);
+  if (report.kraPin) canvas.text(`KRA PIN: ${report.kraPin}`, 122, 746, 7.2, "slate");
 
-  canvas.wrap(title, 386, 792, 176, 17, "navy", true, 20);
-  canvas.text(`# ${report.transaction["Reference number"]}`, 388, 752, 8.5, "muted");
-  canvas.text(`Page ${pageNumber}`, 388, 738, 8, "muted");
-  canvas.rect(442, 700, 120, 26, "navy");
-  if (!drawFittedImage(canvas, solvaLogo, 448, 704, 108, 18)) {
-    canvas.text("SOLVA TRADE", 460, 709, 11, "white", true);
+  canvas.wrap(title, 398, 792, 164, 17, "navy", true, 20);
+  canvas.text(`# ${report.transaction["Reference number"]}`, 400, 758, 8.5, "muted");
+  if (!drawFittedImage(canvas, solvaLogo, 478, 724, 84, 24)) {
+    canvas.text("SOLVA TRADE", 478, 732, 9.5, "blue", true);
   }
 }
 
@@ -5475,7 +5472,7 @@ async function customerInvoicePdf(report: Report) {
 
   const startPage = (withParties: boolean) => {
     canvas = new PdfCanvas();
-    drawCustomerInvoiceHeader(canvas, report, title, assets, pageNumber);
+    drawCustomerInvoiceHeader(canvas, report, title, assets);
     if (withParties) {
       drawCustomerInvoiceParties(canvas, report);
       y = 612;

@@ -41,6 +41,25 @@ function cleanTerm(value: string | null) {
   return (value || "Due immediately").replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+function searchText(value: unknown) {
+  return String(value ?? "").toLowerCase();
+}
+
+function matchesCustomerSearch(customer: CustomerRow, query: string) {
+  if (!query) return true;
+  const address = customer.customer_addresses?.find((item) => item.is_default) ?? customer.customer_addresses?.[0];
+  const haystack = [
+    customer.customer_name,
+    customer.customer_code,
+    customer.phone,
+    customer.email,
+    customer.kra_pin,
+    address?.town,
+    address?.delivery_instructions,
+  ].map(searchText).join(" ");
+  return haystack.includes(query);
+}
+
 async function loadCustomers() {
   const supabase = await createSupabaseServerClient();
   const { data: userData } = await supabase.auth.getUser();
@@ -61,8 +80,14 @@ async function loadCustomers() {
   return (data ?? []) as unknown as CustomerRow[];
 }
 
-export default async function CustomersPage() {
-  const customers = await loadCustomers();
+export default async function CustomersPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = searchParams ? await searchParams : {};
+  const query = searchText(Array.isArray(params.q) ? params.q[0] : params.q).trim();
+  const customers = (await loadCustomers()).filter((customer) => matchesCustomerSearch(customer, query));
   const activeCount = customers.filter((customer) => customer.active !== false && customer.status !== "archived").length;
   const customerBalance = customers.reduce((sum, customer) => sum + Math.max(0, Number(customer.current_balance ?? 0) || 0), 0);
 
@@ -111,8 +136,8 @@ export default async function CustomersPage() {
             <p className="mt-1 text-sm text-slate-600">Search by name, phone, route, town or KRA PIN.</p>
           </div>
         </div>
-        <div className="mt-5 grid gap-3 md:grid-cols-[1fr_170px_170px]">
-          <input className="min-h-11 rounded-md border border-slate-300 px-3 py-2 text-sm" placeholder="Search customer, phone, route or town" />
+        <form className="mt-5 grid gap-3 md:grid-cols-[1fr_170px_170px]" action="/customers">
+          <input name="q" defaultValue={query} className="min-h-11 rounded-md border border-slate-300 px-3 py-2 text-sm" placeholder="Search customer, phone, route or town" />
           <select className="min-h-11 rounded-md border border-slate-300 px-3 py-2 text-sm" defaultValue="all">
             <option value="all">All routes</option>
           </select>
@@ -121,7 +146,8 @@ export default async function CustomersPage() {
             <option value="overdue">Owes money</option>
             <option value="packaging">Crates owed</option>
           </select>
-        </div>
+          <button className="sr-only">Search</button>
+        </form>
       </section>
 
       <section className="mt-6 grid gap-4 lg:grid-cols-[300px_1fr]">

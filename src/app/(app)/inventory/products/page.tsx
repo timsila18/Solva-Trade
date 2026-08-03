@@ -35,6 +35,24 @@ function relationName<T extends Record<string, string | null>>(value: T[] | T | 
   return row?.[key] || "-";
 }
 
+function searchText(value: unknown) {
+  return String(value ?? "").toLowerCase();
+}
+
+function matchesProductSearch(product: ProductRow, query: string) {
+  if (!query) return true;
+  const haystack = [
+    product.product_name,
+    product.product_code,
+    product.sku,
+    product.barcode,
+    product.product_type,
+    relationName(product.product_categories, "category_name"),
+    relationName(product.brands, "brand_name"),
+  ].map(searchText).join(" ");
+  return haystack.includes(query);
+}
+
 async function loadProducts() {
   const supabase = await createSupabaseServerClient();
   const { data: userData } = await supabase.auth.getUser();
@@ -70,8 +88,15 @@ async function loadProducts() {
   return { products: (products ?? []) as unknown as ProductRow[], balances: balanceMap };
 }
 
-export default async function ProductsPage() {
-  const { products, balances } = await loadProducts();
+export default async function ProductsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = searchParams ? await searchParams : {};
+  const query = searchText(Array.isArray(params.q) ? params.q[0] : params.q).trim();
+  const { products: allProducts, balances } = await loadProducts();
+  const products = allProducts.filter((product) => matchesProductSearch(product, query));
   const filters = ["Category", "Brand", "Product type", "Stock status", "Branch", "Warehouse", "Active", "Batch tracked", "Expiry tracked"];
 
   return (
@@ -93,10 +118,11 @@ export default async function ProductsPage() {
       </div>
 
       <section className="mt-5 border border-slate-200 bg-white p-4">
-        <label className="relative block">
+        <form className="relative block" action="/inventory/products">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <input className="min-h-11 w-full rounded-[6px] border border-slate-300 px-3 py-2 pl-10 text-sm" placeholder="Search by product, SKU, barcode, category or brand" />
-        </label>
+          <input name="q" defaultValue={query} className="min-h-11 w-full rounded-[6px] border border-slate-300 px-3 py-2 pl-10 text-sm" placeholder="Search by product, SKU, barcode, category or brand" />
+          <button className="sr-only">Search</button>
+        </form>
         <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
           {filters.map((filter) => (
             <select key={filter} className="min-h-10 rounded-[6px] border border-slate-300 px-3 py-2 text-sm" defaultValue="all">
