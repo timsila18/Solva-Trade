@@ -3919,7 +3919,22 @@ function lineHeaders(report: Report) {
 
 function isCustomerFacingInvoice(report: Report) {
   const template = templateFor(report);
-  return isDayToDayDocument(report) && ["invoice", "taxInvoice", "simplifiedInvoice", "proformaInvoice", "quotation"].includes(template);
+  const value = `${report.moduleName} ${report.processName}`.toLowerCase();
+  const invoiceLike = value.includes("invoice") || value.includes("quotation") || value.includes("proforma");
+  const nonCustomerInvoice =
+    value.includes("receipt") ||
+    value.includes("statement") ||
+    value.includes("register") ||
+    value.includes("summary report") ||
+    value.includes("sales report") ||
+    value.includes("purchase report") ||
+    value.includes("supplier invoice");
+
+  return (
+    ["invoice", "taxInvoice", "simplifiedInvoice", "proformaInvoice", "quotation"].includes(template) &&
+    invoiceLike &&
+    !nonCustomerInvoice
+  );
 }
 
 function valueForHeader(report: Report, line: ReportLine, index: number, header: string) {
@@ -4573,12 +4588,6 @@ function renderPdfTable(canvas: PdfCanvas, report: Report, startY: number) {
     renderedRows += 1;
   }
 
-  if (renderedRows < rows.length) {
-    canvas.rect(x, y - 26, 530, 28, "surface");
-    canvas.text(`Showing ${renderedRows} of ${rows.length} rows in PDF. Download Excel or CSV for all columns and all rows.`, x + 12, y - 10, 8, "blue", true);
-    y -= 34;
-  }
-
   canvas.line(x, y + 6, x + 530, y + 6, "border");
   return y - 16;
 }
@@ -4725,12 +4734,6 @@ function renderLandscapePdfTable(canvas: PdfCanvas, report: Report, startY: numb
     });
     y -= height;
     renderedRows += 1;
-  }
-
-  if (renderedRows < rows.length) {
-    canvas.rect(x, y - 22, 746, 24, "surface");
-    canvas.text(`PDF shows ${renderedRows} of ${rows.length} rows for readability. Download Excel or CSV for the complete dataset.`, x + 12, y - 8, 7.5, "blue", true);
-    y -= 28;
   }
 
   canvas.line(x, y + 5, x + 746, y + 5, "border", 0.5);
