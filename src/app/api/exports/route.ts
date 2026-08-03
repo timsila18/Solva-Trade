@@ -3912,14 +3912,14 @@ function drawFittedImage(canvas: PdfCanvas, image: PdfImageResource | undefined,
 
 function lineHeaders(report: Report) {
   if (isCustomerFacingInvoice(report)) {
-    return ["#", "Product or service", "SKU", "Description", "Qty", "Rate", "Amount", "Tax"];
+    return ["#", "Product or service", "SKU", "Qty", "Rate", "Amount", "Tax"];
   }
   return blueprintFor(report).headers;
 }
 
 function isCustomerFacingInvoice(report: Report) {
   const template = templateFor(report);
-  return isDayToDayDocument(report) && ["taxInvoice", "simplifiedInvoice", "proformaInvoice", "quotation"].includes(template);
+  return isDayToDayDocument(report) && ["invoice", "taxInvoice", "simplifiedInvoice", "proformaInvoice", "quotation"].includes(template);
 }
 
 function valueForHeader(report: Report, line: ReportLine, index: number, header: string) {
@@ -4319,6 +4319,31 @@ function htmlDocument(report: Report, print = false) {
     .emphasis-receipt .totals .grand th, .emphasis-receipt .totals .grand td { background: #ecfdf5; color: #0f766e; }
     .emphasis-invoice header { border-bottom: 1px solid ${brand.border}; padding-bottom: 22px; }
     .emphasis-invoice .doc-title h2 { color: var(--doc-accent); }
+    .daily-document header { padding-bottom: 14px; }
+    .daily-document .tenant { grid-template-columns: 58px 1fr; gap: 12px; }
+    .daily-document .tenant-logo { width: 58px; height: 58px; border-radius: 8px; font-size: 18px; }
+    .daily-document .tenant-logo img { max-width: 52px; max-height: 52px; }
+    .daily-document .tenant h1 { font-size: 22px; margin-bottom: 3px; }
+    .daily-document .tenant p, .daily-document .meta p { font-size: 10.5px; line-height: 1.35; }
+    .daily-document .doc-title h2 { font-size: 26px; }
+    .daily-document .doc-title .ref { margin-top: 5px; font-size: 10.5px; }
+    .daily-document .solva-mark { margin-top: 10px; padding: 4px 8px; }
+    .daily-document .intro { margin-top: 18px; }
+    .daily-document .daily-document-grid { gap: 10px; }
+    .daily-document .box { min-height: auto; padding: 10px; }
+    .daily-document .box h3 { margin-bottom: 6px; font-size: 10.5px; }
+    .daily-document .party { margin-bottom: 2px; font-size: 12px; }
+    .daily-document .meta-card { gap: 3px; }
+    .daily-document .meta-card div { grid-template-columns: 78px 1fr; gap: 6px; padding-bottom: 2px; }
+    .daily-document dt { font-size: 8.8px; }
+    .daily-document dd { font-size: 10.5px; }
+    .daily-document .table-wrap { margin-top: 14px; border-radius: 6px; }
+    .daily-document .table-wrap caption { display: none; }
+    .daily-document th { font-size: 9px; padding: 6px 5px; }
+    .daily-document td { font-size: 9.2px; line-height: 1.15; padding: 5px; }
+    .daily-document .after-table { grid-template-columns: 1fr 240px; gap: 14px; margin-top: 14px; }
+    .daily-document .panel, .daily-document .terms, .daily-document .payment-instructions { padding: 10px; }
+    .daily-document .signatures { margin-top: 22px; gap: 14px; }
     .emphasis-operations .box { border-left: 5px solid var(--doc-accent); }
     .emphasis-ledger .table-wrap caption { background: #e2e8f0; color: ${brand.navy}; }
     .emphasis-report .page-note { display: block; }
@@ -4328,7 +4353,7 @@ function htmlDocument(report: Report, print = false) {
   </style>
 </head>
 <body>
-  <main class="page template-${template} emphasis-${style.emphasis}${catalogueDocument ? " catalogue-document" : ""}" style="--doc-accent: ${style.accent}; --doc-soft: ${style.soft};">
+  <main class="page template-${template} emphasis-${style.emphasis}${dailyDocument ? " daily-document" : ""}${catalogueDocument ? " catalogue-document" : ""}" style="--doc-accent: ${style.accent}; --doc-soft: ${style.soft};">
     <div class="accent"></div>
     <div class="watermark">SOLVA TRADE</div>
     <header>
@@ -4337,14 +4362,22 @@ function htmlDocument(report: Report, print = false) {
         <div>
           <h1>${htmlEscape(report.businessName)}</h1>
           <p>${htmlEscape(report.businessLocation)}</p>
-          ${report.businessPhone ? `<p>Phone: ${htmlEscape(report.businessPhone)}</p>` : ""}
+          ${
+            dailyDocument
+              ? `<p>${[
+                  report.businessPhone ? `Tel: ${htmlEscape(report.businessPhone)}` : "",
+                  report.businessEmail ? `Email: ${htmlEscape(report.businessEmail)}` : "",
+                  report.kraPin ? `KRA PIN: ${htmlEscape(report.kraPin)}` : "",
+                ].filter(Boolean).join(" | ")}</p>`
+              : `${report.businessPhone ? `<p>Phone: ${htmlEscape(report.businessPhone)}</p>` : ""}
           ${report.businessEmail ? `<p>Email: ${htmlEscape(report.businessEmail)}</p>` : ""}
-          ${report.kraPin ? `<p>KRA PIN: ${htmlEscape(report.kraPin)}</p>` : ""}
+          ${report.kraPin ? `<p>KRA PIN: ${htmlEscape(report.kraPin)}</p>` : ""}`
+          }
         </div>
       </section>
       <section class="doc-title">
         <h2>${htmlEscape(titleFor(report))}</h2>
-        <p class="ref">${htmlEscape(style.label)}</p>
+        ${dailyDocument ? "" : `<p class="ref">${htmlEscape(style.label)}</p>`}
         <p class="ref"># ${htmlEscape(report.transaction["Reference number"])}</p>
         <p class="ref">Generated ${htmlEscape(report.generatedAt)}</p>
         <div class="solva-mark"><img src="/solva-trade-logo.png" alt="Solva Trade" /></div>
@@ -4355,7 +4388,7 @@ function htmlDocument(report: Report, print = false) {
 
     <section class="table-wrap">
       <table>
-        <caption>${htmlEscape(style.table)}</caption>
+        ${dailyDocument ? "" : `<caption>${htmlEscape(style.table)}</caption>`}
         <thead><tr>${headers.map((header) => `<th>${htmlEscape(header)}</th>`).join("")}</tr></thead>
         <tbody>${lineRows}</tbody>
       </table>
@@ -4453,7 +4486,7 @@ class PdfCanvas {
 }
 
 function pdfTableWidths(report: Report, headers: string[]) {
-  if (isCustomerFacingInvoice(report)) return [28, 124, 46, 124, 34, 60, 72, 42];
+  if (isCustomerFacingInvoice(report)) return [26, 198, 54, 38, 64, 84, 66];
   if (report.processName === "Customer Price List") return [28, 156, 70, 82, 84, 58, 52];
   if (report.processName === "Product Master Report") return [76, 154, 62, 58, 58, 72, 50];
   if (report.processName === "Product Inventory Usage Report") return [72, 154, 56, 58, 70, 54, 66];
@@ -4522,14 +4555,18 @@ function renderPdfTable(canvas: PdfCanvas, report: Report, startY: number) {
 
   let renderedRows = 0;
   for (const [rowIndex, row] of rows.entries()) {
-    const cellLines = row.map((cell, index) => wrapLineCount(cell, (widths[index] ?? 70) - 10, 7, 4));
-    const height = Math.max(32, Math.max(...cellLines) * 10 + 16);
-    if (y - height < 260) break;
+    const compactDaily = isDayToDayDocument(report);
+    const maxLinesForCell = (index: number) => compactDaily ? (index === 1 ? 2 : 1) : 4;
+    const rowFontSize = compactDaily ? 7.4 : 10;
+    const lineHeight = compactDaily ? 6.2 : 7;
+    const cellLines = row.map((cell, index) => wrapLineCount(cell, (widths[index] ?? 70) - 10, lineHeight, maxLinesForCell(index)));
+    const height = compactDaily ? Math.max(18, Math.max(...cellLines) * 7 + 9) : Math.max(32, Math.max(...cellLines) * 10 + 16);
+    if (y - height < (compactDaily ? 210 : 260)) break;
     canvas.rect(x, y - height + 6, 530, height, rowIndex % 2 === 0 ? "white" : "soft");
     canvas.line(x, y + 6, x + 530, y + 6);
     cursor = x;
     row.forEach((cell, index) => {
-      canvas.wrap(cell || "-", cursor + 5, y - 8, (widths[index] ?? 70) - 10, 7, "navy", false, 10, 4);
+      canvas.wrap(cell || "-", cursor + 5, y - 6, (widths[index] ?? 70) - 10, lineHeight, "navy", false, rowFontSize, maxLinesForCell(index));
       cursor += widths[index] ?? 70;
     });
     y -= height;
@@ -5376,17 +5413,20 @@ function drawCustomerInvoiceHeader(
   canvas.rect(408, 832, 204, 10, "gold");
   canvas.text("SOLVA TRADE", 102, 420, 58, "watermark", true);
 
-  canvas.rect(48, 748, 70, 62, "surface");
-  canvas.rect(52, 752, 62, 54, "white");
-  if (!drawFittedImage(canvas, tenantLogo, 55, 755, 56, 48)) {
-    canvas.text(initials(report.businessName), 67, 776, 18, "blue", true);
+  canvas.rect(48, 760, 58, 50, "surface");
+  canvas.rect(52, 764, 50, 42, "white");
+  if (!drawFittedImage(canvas, tenantLogo, 55, 766, 44, 38)) {
+    canvas.text(initials(report.businessName), 63, 780, 15, "blue", true);
   }
 
-  canvas.text(report.businessName, 128, 794, 18, "navy", true);
-  canvas.wrap(report.businessLocation, 128, 776, 236, 8, "slate", false, 9, 2);
-  if (report.businessPhone) canvas.text(`Phone: ${report.businessPhone}`, 128, 746, 8, "slate");
-  if (report.businessEmail) canvas.text(`Email: ${report.businessEmail}`, 128, 734, 8, "slate");
-  if (report.kraPin) canvas.text(`KRA PIN: ${report.kraPin}`, 128, 722, 8, "slate");
+  canvas.text(report.businessName, 116, 798, 17, "navy", true);
+  canvas.wrap(report.businessLocation, 116, 780, 250, 7.6, "slate", false, 8.4, 1);
+  const contactLine = [
+    report.businessPhone ? `Tel: ${report.businessPhone}` : "",
+    report.businessEmail ? `Email: ${report.businessEmail}` : "",
+    report.kraPin ? `KRA PIN: ${report.kraPin}` : "",
+  ].filter(Boolean).join("  ");
+  canvas.wrap(contactLine, 116, 762, 280, 7, "slate", false, 7.8, 2);
 
   canvas.wrap(title, 386, 792, 176, 17, "navy", true, 20);
   canvas.text(`# ${report.transaction["Reference number"]}`, 388, 752, 8.5, "muted");
@@ -5398,23 +5438,23 @@ function drawCustomerInvoiceHeader(
 }
 
 function drawCustomerInvoiceParties(canvas: PdfCanvas, report: Report) {
-  canvas.rect(48, 628, 250, 72, "soft");
-  canvas.rect(314, 628, 250, 72, "soft");
-  canvas.text("BILL TO", 62, 676, 9, "blue", true);
-  canvas.wrap(report.partyName, 62, 656, 210, 10, "navy", true, 11, 3);
-  canvas.text("INVOICE DETAILS", 328, 676, 9, "blue", true);
-  canvas.text(`Invoice no.: ${report.transaction["Reference number"]}`, 328, 656, 8.5, "navy");
-  canvas.text(`Invoice date: ${report.transaction["Document date"]}`, 328, 642, 8.5, "navy");
-  canvas.text(`Due date: ${report.transaction["Due or action date"]}`, 328, 628, 8.5, "navy");
+  canvas.rect(48, 640, 250, 50, "soft");
+  canvas.rect(314, 640, 250, 50, "soft");
+  canvas.text("BILL TO", 62, 672, 8, "blue", true);
+  canvas.wrap(report.partyName, 62, 654, 218, 8.4, "navy", true, 9.4, 2);
+  canvas.text("DETAILS", 328, 672, 8, "blue", true);
+  canvas.text(`No: ${report.transaction["Reference number"]}`, 328, 654, 7.8, "navy");
+  canvas.text(`Date: ${report.transaction["Document date"]}`, 328, 641, 7.8, "navy");
+  canvas.text(`Due: ${report.transaction["Due or action date"]}`, 438, 641, 7.8, "navy");
 }
 
 function drawCustomerInvoiceTableHeader(canvas: PdfCanvas, report: Report, y: number) {
   const headers = lineHeaders(report);
   const widths = pdfTableWidths(report, headers);
   let cursor = 48;
-  canvas.rect(48, y - 20, 530, 24, "navy");
+  canvas.rect(48, y - 16, 530, 20, "navy");
   headers.forEach((header, index) => {
-    canvas.wrap(header, cursor + 4, y - 6, (widths[index] ?? 64) - 8, 6.6, "white", true, 8, 2);
+    canvas.wrap(header, cursor + 4, y - 4, (widths[index] ?? 64) - 8, 6.2, "white", true, 7.4, 1);
     cursor += widths[index] ?? 64;
   });
 }
@@ -5428,21 +5468,19 @@ async function customerInvoicePdf(report: Report) {
   const pages: string[] = [];
   let pageNumber = 1;
   let canvas = new PdfCanvas();
-  let y = 594;
+  let y = 612;
 
   const startPage = (withParties: boolean) => {
     canvas = new PdfCanvas();
     drawCustomerInvoiceHeader(canvas, report, title, assets, pageNumber);
     if (withParties) {
       drawCustomerInvoiceParties(canvas, report);
-      canvas.text("ITEMS SOLD", 48, 594, 10, "blue", true);
-      y = 568;
+      y = 612;
     } else {
-      canvas.text("ITEMS SOLD - CONTINUED", 48, 664, 10, "blue", true);
-      y = 638;
+      y = 704;
     }
     drawCustomerInvoiceTableHeader(canvas, report, y);
-    y -= 28;
+    y -= 22;
   };
 
   const finishPage = () => {
@@ -5461,8 +5499,8 @@ async function customerInvoicePdf(report: Report) {
   }
 
   rowValues.forEach((row, rowIndex) => {
-    const lineCounts = row.map((cell, index) => wrapLineCount(cell, (widths[index] ?? 64) - 8, 6.3, 3));
-    const height = Math.max(20, Math.max(...lineCounts) * 8 + 10);
+    const lineCounts = row.map((cell, index) => wrapLineCount(cell, (widths[index] ?? 64) - 8, 5.8, index === 1 ? 2 : 1));
+    const height = Math.max(17, Math.max(...lineCounts) * 7 + 8);
     if (y - height < 126) {
       finishPage();
       startPage(false);
@@ -5472,7 +5510,7 @@ async function customerInvoicePdf(report: Report) {
     let cursor = 48;
     row.forEach((cell, index) => {
       const numeric = index >= headers.length - 4;
-      canvas.wrap(cell || "-", cursor + 4, y - 6, (widths[index] ?? 64) - 8, 6.3, "navy", false, 8, 3);
+      canvas.wrap(cell || "-", cursor + 4, y - 4, (widths[index] ?? 64) - 8, 5.8, "navy", false, 7.2, index === 1 ? 2 : 1);
       if (numeric) canvas.line(cursor, y - height + 5, cursor, y + 5, "border", 0.4);
       cursor += widths[index] ?? 64;
     });
@@ -5566,8 +5604,7 @@ async function pdf(report: Report) {
     canvas.rect(48, 590, 516, 28, status.tone === "paid" ? "soft" : "surface");
     canvas.text(status.label, 66, 600, 17, status.tone === "paid" ? "blue" : "navy", true);
     canvas.wrap(status.detail, 202, 602, 330, 8, "slate", true, 9, 2);
-    canvas.text("PAYMENT LINE ITEMS", 48, 572, 11, "blue", true);
-    tableStart = 550;
+    tableStart = 572;
   } else if (template === "grn") {
     canvas.rect(48, 628, 250, 72, "soft");
     canvas.rect(314, 628, 250, 72, "soft");
@@ -5577,7 +5614,7 @@ async function pdf(report: Report) {
     canvas.text(`GRN No: ${report.transaction["Reference number"]}`, 328, 656, 8.5, "navy");
     canvas.text(`PO No: ${report.transaction["Reference number"].replace("GOO", "PO")}`, 328, 642, 8.5, "navy");
     canvas.text(`Receiving branch: ${report.transaction.Branch}`, 328, 628, 8.5, "navy");
-    canvas.text("GOODS RECEIVED", 48, 594, 11, "blue", true);
+    tableStart = 594;
   } else if (template === "purchaseOrder") {
     canvas.rect(48, 646, 160, 54, "navy");
     canvas.rect(220, 646, 160, 54, "surface");
@@ -5588,8 +5625,7 @@ async function pdf(report: Report) {
     canvas.wrap(report.businessName, 234, 662, 128, 9, "navy", true);
     canvas.text("P.O DETAILS", 406, 678, 8, "blue", true);
     canvas.text(report.transaction["Reference number"], 406, 662, 8.5, "navy", true);
-    canvas.text("ORDER ITEMS", 48, 614, 11, "blue", true);
-    tableStart = 592;
+    tableStart = 614;
   } else if (template === "deliveryNote" || template === "dispatchNote") {
     canvas.rect(48, 628, 250, 72, "soft");
     canvas.rect(314, 628, 250, 72, "soft");
@@ -5598,7 +5634,7 @@ async function pdf(report: Report) {
     canvas.text(template === "dispatchNote" ? "DISPATCH CONTROL" : "DELIVERY DETAILS", 328, 676, 9, "blue", true);
     canvas.text(`Doc No: ${report.transaction["Reference number"]}`, 328, 656, 8.5, "navy");
     canvas.text(`Branch: ${report.transaction.Branch}`, 328, 642, 8.5, "navy");
-    canvas.text(style.table.toUpperCase(), 48, 594, 11, "blue", true);
+    tableStart = 594;
   } else if (template === "statement" || template === "finance" || template === "cashbook" || template === "paymentVoucher" || template === "report" || template === "inventoryReport" || template === "stockMovement" || template === "executiveReport") {
     const labels = template === "report" || template === "executiveReport" ? ["Health", "Cash / Value", "Risk"] : ["Opening", "Movements", "Closing"];
     [48, 224, 400].forEach((x, index) => {
@@ -5606,8 +5642,7 @@ async function pdf(report: Report) {
       canvas.text(labels[index], x + 14, 676, 8, "blue", true);
       canvas.text(index === 0 ? "Ready" : index === 1 ? report.totals.Total : report.totals["Balance due"], x + 14, 654, 16, "navy", true);
     });
-    canvas.text(style.table.toUpperCase(), 48, 614, 11, "blue", true);
-    tableStart = 592;
+    tableStart = 614;
   } else if (template === "creditNote" || template === "debitNote") {
     canvas.rect(48, 628, 250, 72, "soft");
     canvas.rect(314, 628, 250, 72, "soft");
@@ -5616,7 +5651,7 @@ async function pdf(report: Report) {
     canvas.text("ADJUSTMENT DETAILS", 328, 676, 9, "blue", true);
     canvas.text(`Original Ref: ${report.transaction["Reference number"]}`, 328, 656, 8.5, "navy");
     canvas.text("Reason: approved adjustment", 328, 642, 8.5, "navy");
-    canvas.text(style.table.toUpperCase(), 48, 594, 11, "blue", true);
+    tableStart = 594;
   } else {
     if (dailyDocument) {
       canvas.rect(48, 628, 250, 72, "soft");
@@ -5639,7 +5674,7 @@ async function pdf(report: Report) {
       canvas.text(`Date: ${report.transaction["Document date"]}`, 414, 656, 8.5, "navy");
       canvas.text(`Due: ${report.transaction["Due or action date"]}`, 414, 642, 8.5, "navy");
     }
-    canvas.text(style.table.toUpperCase(), 48, 594, 11, "blue", true);
+    tableStart = 594;
   }
 
   const yAfterTable = renderPdfTable(canvas, report, tableStart);
