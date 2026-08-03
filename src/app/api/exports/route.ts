@@ -4552,12 +4552,19 @@ function isLandscapePdfReport(report: Report) {
 }
 
 function pdfDocument(content: string, width: number, height: number, images: PdfImageResource[] = []) {
-  const imageStartObject = 6;
-  const contentObject = imageStartObject + images.length;
+  return pdfDocumentPages([content], width, height, images);
+}
+
+function pdfDocumentPages(contents: string[], width: number, height: number, images: PdfImageResource[] = []) {
+  const pageCount = Math.max(1, contents.length);
+  const fontRegularObject = 3;
+  const fontBoldObject = 4;
+  const imageStartObject = 5;
+  const pageStartObject = imageStartObject + images.length;
+  const contentStartObject = pageStartObject + pageCount;
   const xobjectResources = images.length
     ? ` /XObject << ${images.map((image, index) => `/${image.name} ${imageStartObject + index} 0 R`).join(" ")} >>`
     : "";
-  const contentBuffer = Buffer.from(content, "utf8");
   const imageObjects = images.map((image) =>
     Buffer.concat([
       Buffer.from(
@@ -4568,14 +4575,22 @@ function pdfDocument(content: string, width: number, height: number, images: Pdf
       Buffer.from("\nendstream", "utf8"),
     ]),
   );
+  const pageObjects = contents.map((_, index) => {
+    const contentObject = contentStartObject + index;
+    return `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${width} ${height}] /Resources << /Font << /F1 ${fontRegularObject} 0 R /F2 ${fontBoldObject} 0 R >>${xobjectResources} >> /Contents ${contentObject} 0 R >>`;
+  });
+  const contentObjects = contents.map((content) => {
+    const contentBuffer = Buffer.from(content, "utf8");
+    return Buffer.concat([Buffer.from(`<< /Length ${contentBuffer.length} >>\nstream\n`, "utf8"), contentBuffer, Buffer.from("\nendstream", "utf8")]);
+  });
   const objects: Array<string | Buffer> = [
     "<< /Type /Catalog /Pages 2 0 R >>",
-    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${width} ${height}] /Resources << /Font << /F1 4 0 R /F2 5 0 R >>${xobjectResources} >> /Contents ${contentObject} 0 R >>`,
+    `<< /Type /Pages /Kids [${contents.map((_, index) => `${pageStartObject + index} 0 R`).join(" ")}] /Count ${pageCount} >>`,
     "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
     "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>",
     ...imageObjects,
-    Buffer.concat([Buffer.from(`<< /Length ${contentBuffer.length} >>\nstream\n`, "utf8"), contentBuffer, Buffer.from("\nendstream", "utf8")]),
+    ...pageObjects,
+    ...contentObjects,
   ];
   const chunks: Buffer[] = [Buffer.from("%PDF-1.4\n", "utf8")];
   const offsets = [0];
@@ -5345,6 +5360,147 @@ async function landscapePdf(report: Report) {
   return pdfDocument(canvas.output(), 842, 595, assets);
 }
 
+function drawCustomerInvoiceHeader(
+  canvas: PdfCanvas,
+  report: Report,
+  title: string,
+  assets: PdfImageResource[],
+  pageNumber: number,
+) {
+  const tenantLogo = assets.find((asset) => asset.name === "TenantLogo");
+  const solvaLogo = assets.find((asset) => asset.name === "SolvaLogo");
+
+  canvas.rect(0, 0, 612, 842, "white");
+  canvas.rect(0, 832, 612, 10, "blue");
+  canvas.rect(204, 832, 204, 10, "cyan");
+  canvas.rect(408, 832, 204, 10, "gold");
+  canvas.text("SOLVA TRADE", 102, 420, 58, "watermark", true);
+
+  canvas.rect(48, 748, 70, 62, "surface");
+  canvas.rect(52, 752, 62, 54, "white");
+  if (!drawFittedImage(canvas, tenantLogo, 55, 755, 56, 48)) {
+    canvas.text(initials(report.businessName), 67, 776, 18, "blue", true);
+  }
+
+  canvas.text(report.businessName, 128, 794, 18, "navy", true);
+  canvas.wrap(report.businessLocation, 128, 776, 236, 8, "slate", false, 9, 2);
+  if (report.businessPhone) canvas.text(`Phone: ${report.businessPhone}`, 128, 746, 8, "slate");
+  if (report.businessEmail) canvas.text(`Email: ${report.businessEmail}`, 128, 734, 8, "slate");
+  if (report.kraPin) canvas.text(`KRA PIN: ${report.kraPin}`, 128, 722, 8, "slate");
+
+  canvas.wrap(title, 386, 792, 176, 17, "navy", true, 20);
+  canvas.text(`# ${report.transaction["Reference number"]}`, 388, 752, 8.5, "muted");
+  canvas.text(`Page ${pageNumber}`, 388, 738, 8, "muted");
+  canvas.rect(442, 700, 120, 26, "navy");
+  if (!drawFittedImage(canvas, solvaLogo, 448, 704, 108, 18)) {
+    canvas.text("SOLVA TRADE", 460, 709, 11, "white", true);
+  }
+}
+
+function drawCustomerInvoiceParties(canvas: PdfCanvas, report: Report) {
+  canvas.rect(48, 628, 250, 72, "soft");
+  canvas.rect(314, 628, 250, 72, "soft");
+  canvas.text("BILL TO", 62, 676, 9, "blue", true);
+  canvas.wrap(report.partyName, 62, 656, 210, 10, "navy", true, 11, 3);
+  canvas.text("INVOICE DETAILS", 328, 676, 9, "blue", true);
+  canvas.text(`Invoice no.: ${report.transaction["Reference number"]}`, 328, 656, 8.5, "navy");
+  canvas.text(`Invoice date: ${report.transaction["Document date"]}`, 328, 642, 8.5, "navy");
+  canvas.text(`Due date: ${report.transaction["Due or action date"]}`, 328, 628, 8.5, "navy");
+}
+
+function drawCustomerInvoiceTableHeader(canvas: PdfCanvas, report: Report, y: number) {
+  const headers = lineHeaders(report);
+  const widths = pdfTableWidths(report, headers);
+  let cursor = 48;
+  canvas.rect(48, y - 20, 530, 24, "navy");
+  headers.forEach((header, index) => {
+    canvas.wrap(header, cursor + 4, y - 6, (widths[index] ?? 64) - 8, 6.6, "white", true, 8, 2);
+    cursor += widths[index] ?? 64;
+  });
+}
+
+async function customerInvoicePdf(report: Report) {
+  const title = titleFor(report);
+  const assets = await pdfAssets(report, "portrait");
+  const headers = lineHeaders(report);
+  const widths = pdfTableWidths(report, headers);
+  const rowValues = report.lines.map((line, index) => lineCells(report, line, index));
+  const pages: string[] = [];
+  let pageNumber = 1;
+  let canvas = new PdfCanvas();
+  let y = 594;
+
+  const startPage = (withParties: boolean) => {
+    canvas = new PdfCanvas();
+    drawCustomerInvoiceHeader(canvas, report, title, assets, pageNumber);
+    if (withParties) {
+      drawCustomerInvoiceParties(canvas, report);
+      canvas.text("ITEMS SOLD", 48, 594, 10, "blue", true);
+      y = 568;
+    } else {
+      canvas.text("ITEMS SOLD - CONTINUED", 48, 664, 10, "blue", true);
+      y = 638;
+    }
+    drawCustomerInvoiceTableHeader(canvas, report, y);
+    y -= 28;
+  };
+
+  const finishPage = () => {
+    canvas.line(48, 58, 564, 58, "border");
+    canvas.text(`${report.businessName} invoice generated by Solva Trade on ${report.generatedAt}`, 76, 42, 7.2, "muted");
+    pages.push(canvas.output());
+    pageNumber += 1;
+  };
+
+  startPage(true);
+
+  if (!rowValues.length) {
+    canvas.rect(48, y - 30, 530, 34, "soft");
+    canvas.text("No line items found for this invoice.", 210, y - 10, 8, "muted");
+    y -= 42;
+  }
+
+  rowValues.forEach((row, rowIndex) => {
+    const lineCounts = row.map((cell, index) => wrapLineCount(cell, (widths[index] ?? 64) - 8, 6.3, 3));
+    const height = Math.max(20, Math.max(...lineCounts) * 8 + 10);
+    if (y - height < 126) {
+      finishPage();
+      startPage(false);
+    }
+    canvas.rect(48, y - height + 5, 530, height, rowIndex % 2 === 0 ? "white" : "soft");
+    canvas.line(48, y + 5, 578, y + 5, "border", 0.5);
+    let cursor = 48;
+    row.forEach((cell, index) => {
+      const numeric = index >= headers.length - 4;
+      canvas.wrap(cell || "-", cursor + 4, y - 6, (widths[index] ?? 64) - 8, 6.3, "navy", false, 8, 3);
+      if (numeric) canvas.line(cursor, y - height + 5, cursor, y + 5, "border", 0.4);
+      cursor += widths[index] ?? 64;
+    });
+    y -= height;
+  });
+
+  const totalEntries = displayTotalEntries(report);
+  const summaryHeight = 56 + totalEntries.length * 16;
+  if (y - summaryHeight < 96) {
+    finishPage();
+    startPage(false);
+  }
+
+  canvas.line(48, y + 4, 578, y + 4, "border", 0.7);
+  canvas.text("NOTE TO CUSTOMER", 48, y - 22, 9, "blue", true);
+  canvas.wrap("Thanks for choosing us. We appreciate your business.", 48, y - 38, 260, 8, "navy", false, 9.5, 3);
+  canvas.text("TOTAL", 384, y - 22, 10, "blue", true);
+  totalEntries.forEach(([label, value], index) => {
+    const rowY = y - 42 - index * 16;
+    canvas.rect(384, rowY - 3, 174, 15, "surface");
+    canvas.wrap(label, 392, rowY + 1, 74, 7.2, "blue", true, 8, 1);
+    canvas.wrap(value, 472, rowY + 1, 78, 7.2, "blue", true, 8, 1);
+  });
+
+  finishPage();
+  return pdfDocumentPages(pages, 612, 842, assets);
+}
+
 async function pdf(report: Report) {
   if (isProfitAndLossReport(report)) return profitAndLossPdf(report);
   if (isTrialBalanceReport(report)) return trialBalancePdf(report);
@@ -5353,6 +5509,7 @@ async function pdf(report: Report) {
   if (isGeneralLedgerReport(report)) return generalLedgerPdf(report);
   if (isBankReconciliationReport(report)) return bankReconciliationPdf(report);
   if (isLandscapePdfReport(report)) return landscapePdf(report);
+  if (isCustomerFacingInvoice(report)) return customerInvoicePdf(report);
 
   const canvas = new PdfCanvas();
   const title = titleFor(report);
