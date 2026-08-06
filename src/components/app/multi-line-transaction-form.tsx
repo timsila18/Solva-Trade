@@ -30,10 +30,28 @@ function inclusiveTaxAmount(inclusiveAmount: number, vatRate: number) {
   return inclusiveAmount * (vatRate / (100 + vatRate));
 }
 
+function normalizeSearch(value: unknown) {
+  return String(value ?? "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function matchesSearch(values: unknown[], query: string) {
+  const tokens = normalizeSearch(query).split(/\s+/).filter(Boolean);
+  if (!tokens.length) return true;
+  const haystack = values.map(normalizeSearch);
+  return tokens.every((token) => haystack.some((value) => value.includes(token)));
+}
+
 export function MultiLineTransactionForm({ mode, customers = [], suppliers = [], products, today }: Props) {
   const [search, setSearch] = useState("");
   const [partySearch, setPartySearch] = useState("");
   const [selectedPartyId, setSelectedPartyId] = useState("");
+  const [saleSourceSearch, setSaleSourceSearch] = useState("");
+  const [saleSourceSupplierId, setSaleSourceSupplierId] = useState("");
   const [selectedIndexes, setSelectedIndexes] = useState<Set<number>>(() => new Set());
   const pathname = usePathname();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -106,22 +124,24 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
   const partyName = mode === "sale" ? "field_customer_id" : "field_supplier_id";
   const partyOptions = mode === "sale" ? customers : suppliers;
   const filteredPartyOptions = useMemo(() => {
-    const query = partySearch.toLowerCase().trim();
     return partyOptions.filter((party) => {
       const isSelected = selectedPartyId && party.id === selectedPartyId;
-      if (isSelected || !query) return true;
-      return [party.name, party.code, party.phone].filter(Boolean).some((value) => String(value).toLowerCase().includes(query));
+      if (isSelected) return true;
+      return matchesSearch([party.name, party.code, party.phone], partySearch);
     });
   }, [partyOptions, partySearch, selectedPartyId]);
+  const filteredSaleSourceSuppliers = useMemo(() => {
+    return suppliers.filter((supplier) => {
+      const isSelected = saleSourceSupplierId && supplier.id === saleSourceSupplierId;
+      if (isSelected) return true;
+      return matchesSearch([supplier.name, supplier.code, supplier.phone, supplier.type], saleSourceSearch);
+    });
+  }, [saleSourceSearch, saleSourceSupplierId, suppliers]);
   const matchingIndexes = useMemo(() => {
-    const query = search.toLowerCase().trim();
     return new Set(
       products
         .map((product, index) => ({ product, index }))
-        .filter(({ product }) => {
-          if (!query) return true;
-          return [product.name, product.code, product.vatCode].filter(Boolean).some((value) => String(value).toLowerCase().includes(query));
-        })
+        .filter(({ product }) => matchesSearch([product.name, product.code, product.vatCode], search))
         .map(({ index }) => index),
     );
   }, [products, search]);
@@ -217,6 +237,30 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
               </option>
             ))}
           </select>
+          {partySearch.trim() ? (
+            <div className="max-h-44 overflow-y-auto rounded-md border border-slate-200 bg-white p-1 shadow-sm">
+              {filteredPartyOptions.slice(0, 8).map((party) => (
+                <button
+                  key={party.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedPartyId(party.id);
+                    setPartySearch(party.name);
+                  }}
+                  className="flex w-full items-center justify-between gap-3 rounded px-3 py-2 text-left text-sm font-normal hover:bg-cyan-50"
+                >
+                  <span>
+                    <span className="block font-semibold text-slate-900">{party.name}</span>
+                    <span className="text-xs text-slate-500">{[party.code, party.phone].filter(Boolean).join(" - ") || "Saved record"}</span>
+                  </span>
+                  <span className="text-xs font-semibold text-[var(--solva-blue-700)]">Use</span>
+                </button>
+              ))}
+              {!filteredPartyOptions.length ? (
+                <p className="px-3 py-2 text-xs font-normal text-slate-500">No saved {partyLabel.toLowerCase()} matches. Type the new customer name below or add one.</p>
+              ) : null}
+            </div>
+          ) : null}
           {mode === "sale" ? (
             <>
               <input type="hidden" name="label_customer_name" value="Customer name" />
@@ -250,6 +294,70 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
             <input type="hidden" name="label_source_type" value="Purchase source" />
           </label>
         )}
+        {mode === "sale" ? (
+          <>
+            <label className="grid gap-2 text-sm font-semibold lg:col-span-2">
+              Profit source
+              <select name="field_sale_source_type" defaultValue="auto_fifo" className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-normal">
+                <option value="auto_fifo">Auto from received stock</option>
+                <option value="direct_supplier">Direct supplier</option>
+                <option value="local_market">Local market</option>
+                <option value="spot_purchase">Spot purchase</option>
+                <option value="alternative_supplier">Alternative supplier</option>
+                <option value="emergency_purchase">Emergency purchase</option>
+              </select>
+              <input type="hidden" name="label_sale_source_type" value="Profit source" />
+            </label>
+            <label className="grid gap-2 text-sm font-semibold lg:col-span-2">
+              Source supplier override
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="search"
+                  value={saleSourceSearch}
+                  onChange={(event) => setSaleSourceSearch(event.currentTarget.value)}
+                  placeholder="Optional: search supplier if this sale should be tagged"
+                  className="w-full rounded-md border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm font-normal"
+                />
+              </div>
+              <select
+                name="field_sale_source_supplier_id"
+                value={saleSourceSupplierId}
+                onChange={(event) => setSaleSourceSupplierId(event.currentTarget.value)}
+                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-normal"
+              >
+                <option value="">Use FIFO supplier automatically</option>
+                {filteredSaleSourceSuppliers.map((supplier) => (
+                  <option key={supplier.id} value={supplier.id}>
+                    {supplier.name} {supplier.code ? `- ${supplier.code}` : ""}
+                  </option>
+                ))}
+              </select>
+              <input type="hidden" name="label_sale_source_supplier_id" value="Source supplier override" />
+              {saleSourceSearch.trim() ? (
+                <div className="max-h-36 overflow-y-auto rounded-md border border-slate-200 bg-white p-1 shadow-sm">
+                  {filteredSaleSourceSuppliers.slice(0, 6).map((supplier) => (
+                    <button
+                      key={supplier.id}
+                      type="button"
+                      onClick={() => {
+                        setSaleSourceSupplierId(supplier.id);
+                        setSaleSourceSearch(supplier.name);
+                      }}
+                      className="flex w-full items-center justify-between gap-3 rounded px-3 py-2 text-left text-sm font-normal hover:bg-cyan-50"
+                    >
+                      <span>
+                        <span className="block font-semibold text-slate-900">{supplier.name}</span>
+                        <span className="text-xs text-slate-500">{[supplier.code, supplier.type].filter(Boolean).join(" - ") || "Saved supplier"}</span>
+                      </span>
+                      <span className="text-xs font-semibold text-[var(--solva-blue-700)]">Tag</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </label>
+          </>
+        ) : null}
         {mode === "goods-received" ? (
           <>
             <label className="grid gap-2 text-sm font-semibold lg:col-span-2">

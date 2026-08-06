@@ -92,7 +92,7 @@ export default async function SalesWorkflowPage({
         <input type="hidden" name="returnTo" value={`/sales/${workflow}`} />
         <input type="hidden" name="next" value={`Continue ${config.title}`} />
         {workflow === "invoices" ? (
-          <MultiLineTransactionForm mode="sale" customers={lookups.customers} products={lookups.products} today={today} />
+          <MultiLineTransactionForm mode="sale" customers={lookups.customers} suppliers={lookups.suppliers} products={lookups.products} today={today} />
         ) : (
           <WorkflowFormFields fields={config.fields} customers={lookups.customers} products={lookups.products} unpaidInvoices={lookups.unpaidInvoices} />
         )}

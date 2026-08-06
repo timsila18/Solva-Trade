@@ -227,29 +227,32 @@ export function WorkflowFormFields({
             <label key={label} className="text-sm font-medium">
               {label}
               <input type="hidden" name={`label_${key}`} value={label} />
-              <input type="hidden" name={`field_${key}`} value={selectedSupplier?.name ?? ""} />
+              <input type="hidden" name={`field_${supplierIdKey}`} value={selectedSupplier?.id ?? ""} />
               <input type="hidden" name={`label_${supplierIdKey}`} value="Supplier ID" />
-              <select
-                name={`field_${supplierIdKey}`}
+              <input
+                name={`field_${key}`}
+                list={`${key}-supplier-options`}
                 required={key === "supplier"}
-                value={values[supplierIdKey] ?? ""}
+                value={values[key] ?? ""}
                 onChange={(event) => {
-                  const supplier = suppliers.find((item) => item.id === event.target.value);
+                  const next = event.target.value;
+                  const supplier = suppliers.find((item) => item.name === next || item.code === next || item.phone === next);
                   setValues((current) => ({
                     ...current,
-                    [key]: supplier?.name ?? "",
+                    [key]: next,
                     [supplierIdKey]: supplier?.id ?? "",
                   }));
                 }}
-                className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2"
-              >
-                <option value="">Select saved supplier</option>
+                className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2"
+                placeholder="Search supplier by name, code or phone"
+              />
+              <datalist id={`${key}-supplier-options`}>
                 {suppliers.map((supplier) => (
-                  <option key={supplier.id} value={supplier.id}>
+                  <option key={supplier.id} value={supplier.name}>
                     {supplier.name} - {supplier.code}{supplier.phone ? ` - ${supplier.phone}` : ""}
                   </option>
                 ))}
-              </select>
+              </datalist>
               {helper ? <span className="mt-1 block text-xs text-slate-500">{helper}</span> : null}
             </label>
           );
@@ -288,16 +291,18 @@ export function WorkflowFormFields({
               <input type="hidden" name="label_product_available_stock" value="Available stock" />
               <input type="hidden" name="field_tax_code" value={selectedProduct?.vatCode ?? values.tax_code ?? ""} />
               <input type="hidden" name="label_tax_code" value="Tax code" />
-              <input type="hidden" name={`field_${key}`} value={selectedProduct?.name ?? ""} />
-              <select
-                name="field_product_id"
+              <input type="hidden" name="field_product_id" value={selectedProduct?.id ?? ""} />
+              <input
+                name={`field_${key}`}
+                list="product-options"
                 required
-                value={values.product_id ?? ""}
+                value={values[key] ?? ""}
                 onChange={(event) => {
-                  const product = products.find((item) => item.id === event.target.value);
+                  const next = event.target.value;
+                  const product = products.find((item) => item.name === next || item.code === next);
                   setValues((current) => ({
                     ...current,
-                    [key]: product?.name ?? "",
+                    [key]: next,
                     product_id: product?.id ?? "",
                     unit_price: autoFillProductPrice && product?.price ? String(product.price) : current.unit_price,
                     price: autoFillProductPrice && product?.price ? String(product.price) : current.price,
@@ -305,15 +310,16 @@ export function WorkflowFormFields({
                     tax_code: product?.vatCode ?? current.tax_code,
                   }));
                 }}
-                className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2"
-              >
-                <option value="">Select saved product</option>
+                className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2"
+                placeholder="Search product by name, SKU or code"
+              />
+              <datalist id="product-options">
                 {products.map((product) => (
-                  <option key={product.id} value={product.id}>
+                  <option key={product.id} value={product.name}>
                     {product.name} - {product.code} - Stock {product.available} - VAT {product.vatRate}%
                   </option>
                 ))}
-              </select>
+              </datalist>
               {helper ? <span className={`mt-1 block text-xs ${selectedProduct?.trackInventory && selectedProduct.available <= 0 ? "text-red-600" : "text-slate-500"}`}>{helper}</span> : null}
             </label>
           );

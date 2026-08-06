@@ -404,6 +404,10 @@ async function postSalesInvoice(formData: FormData, userId: string, fallbackBusi
   const invoiceNumber = getField(formData, "invoice_number") || `INV-${Date.now().toString().slice(-8)}`;
   const invoiceDate = getField(formData, "invoice_date") || new Date().toISOString().slice(0, 10);
   const dueDate = getField(formData, "due_date") || invoiceDate;
+  const saleSourceRaw = getField(formData, "sale_source_type");
+  const saleSourceOverride = saleSourceRaw && saleSourceRaw !== "auto_fifo" ? sourceTypeValue(saleSourceRaw) : "";
+  const saleSourceSupplierId = getField(formData, "sale_source_supplier_id") || null;
+  let saleSourceSupplierName: string | null = null;
 
   if (!customerId && quickCustomerName) {
     const customerCode = `CUS-${Date.now().toString().slice(-6)}`;
@@ -447,6 +451,17 @@ async function postSalesInvoice(formData: FormData, userId: string, fallbackBusi
       const available = await availableStock(admin, businessId, branchId, warehouseId, line.productId);
       if (available < line.quantity) throw new Error(`Insufficient stock for ${product.product_name}. Available: ${available}.`);
     }
+  }
+
+  if (saleSourceSupplierId) {
+    const { data: sourceSupplier } = await admin
+      .from("suppliers")
+      .select("legal_name, trading_name")
+      .eq("business_id", businessId)
+      .eq("id", saleSourceSupplierId)
+      .maybeSingle();
+    if (!sourceSupplier) throw new Error("Selected sale source supplier was not found.");
+    saleSourceSupplierName = String(sourceSupplier.trading_name || sourceSupplier.legal_name || "");
   }
 
   const { data: invoice, error: invoiceError } = await admin
@@ -505,6 +520,9 @@ async function postSalesInvoice(formData: FormData, userId: string, fallbackBusi
       reference_document_id: invoice.id,
       reference_number: invoiceNumber,
       reason: "Sale submitted from Solva Trade workflow",
+      source_type: saleSourceOverride || null,
+      source_supplier_id: saleSourceSupplierId,
+      source_supplier_name: saleSourceSupplierName,
       created_by: userId,
     }).select("id").single();
     if (movementError || !movement) throw new Error(movementError?.message ?? "Could not post stock movement.");
@@ -523,6 +541,19 @@ async function postSalesInvoice(formData: FormData, userId: string, fallbackBusi
       target_sale_unit_price: line.quantity > 0 ? line.lineSubtotal / line.quantity : 0,
     });
     if (allocationError) throw new Error(allocationError.message);
+    if (saleSourceOverride || saleSourceSupplierId) {
+      const { error: allocationSourceError } = await admin
+        .from("sales_source_allocations")
+        .update({
+          source_type: saleSourceOverride || "unspecified",
+          source_supplier_id: saleSourceSupplierId,
+          source_supplier_name: saleSourceSupplierName,
+        })
+        .eq("business_id", businessId)
+        .eq("sales_invoice_id", invoice.id)
+        .eq("sales_invoice_item_id", invoiceItem.id);
+      if (allocationSourceError) throw new Error(allocationSourceError.message);
+    }
   }
 
   const payment = paid > 0 ? await postCustomerPayment(formData, userId, fallbackBusinessId, invoice.id, paid) : null;

@@ -32,6 +32,8 @@ const ownerReportShortcuts = [
   ["What stock needs action?", "Stock Health Report", "Inventory"],
   ["What is selling best?", "Top Products Report", "Executive"],
   ["Who are my best customers?", "Top Customers Report", "Executive"],
+  ["Which customers make profit?", "Profit by Customer Report", "Sales"],
+  ["Which suppliers give profit?", "Profit by Supplier and Source Report", "Sales"],
   ["Where is money being spent?", "Expense Summary Report", "Finance"],
   ["What do I need for VAT?", "KRA ETR Sales Report", "Tax"],
 ] as const;

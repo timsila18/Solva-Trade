@@ -390,6 +390,10 @@ function isSalesSourceReport(processName: string) {
   const value = processName.toLowerCase();
   return (
     value.includes("sale source profitability") ||
+    value.includes("profit by customer") ||
+    value.includes("customer profit") ||
+    value.includes("profit by supplier") ||
+    value.includes("supplier source profit") ||
     value.includes("source profit by sale") ||
     value.includes("fifo profit") ||
     value.includes("profit by purchase source") ||
@@ -1419,6 +1423,135 @@ async function salesSourceReportLines(processName: string): Promise<ReportLine[]
         : "Loss-making source allocation; review buying price, selling price or urgency.",
     };
   });
+}
+
+async function profitByCustomerReportLines(): Promise<ReportLine[]> {
+  const businessId = await activeReportBusinessId();
+  if (!businessId) return [];
+
+  const supabase = await createSupabaseServerClient();
+  const { data } = await supabase
+    .from("sales_source_allocations")
+    .select("quantity, total_cost, sale_value, gross_profit, sales_invoices(invoice_number, invoice_date, customers(customer_name, customer_code, kra_pin))")
+    .eq("business_id", businessId)
+    .limit(5000);
+
+  const grouped = new Map<string, { customer: string; code: string; kraPin: string; invoices: Set<string>; units: number; revenue: number; cost: number; profit: number }>();
+  for (const row of data ?? []) {
+    const invoiceRecord = Array.isArray(row.sales_invoices) ? row.sales_invoices[0] : row.sales_invoices;
+    const customerRecord = Array.isArray(invoiceRecord?.customers) ? invoiceRecord?.customers[0] : invoiceRecord?.customers;
+    const customer = customerRecord as { customer_name?: string | null; customer_code?: string | null; kra_pin?: string | null } | null;
+    const name = String(customer?.customer_name ?? "Customer not recorded");
+    const current = grouped.get(name) ?? {
+      customer: name,
+      code: String(customer?.customer_code ?? ""),
+      kraPin: String(customer?.kra_pin ?? ""),
+      invoices: new Set<string>(),
+      units: 0,
+      revenue: 0,
+      cost: 0,
+      profit: 0,
+    };
+    if (invoiceRecord?.invoice_number) current.invoices.add(String(invoiceRecord.invoice_number));
+    current.units += numberValue(row.quantity);
+    current.revenue += numberValue(row.sale_value);
+    current.cost += numberValue(row.total_cost);
+    current.profit += numberValue(row.gross_profit);
+    grouped.set(name, current);
+  }
+
+  return Array.from(grouped.values())
+    .sort((a, b) => b.profit - a.profit)
+    .map((row, index) => {
+      const margin = row.revenue ? (row.profit / row.revenue) * 100 : 0;
+      return {
+        sku: row.code || String(index + 1).padStart(3, "0"),
+        description: row.customer,
+        unit: "Customer",
+        quantity: row.units,
+        unitPrice: row.cost,
+        discount: row.revenue,
+        taxRate: `${margin.toFixed(1)}% margin`,
+        taxAmount: row.cost,
+        lineTotal: row.profit,
+        warehouse: "Customer profit",
+        batch: `${row.invoices.size} invoice${row.invoices.size === 1 ? "" : "s"}`,
+        notes: row.profit >= 0 ? "Profitable customer after FIFO/source costs." : "Loss-making customer; review prices, discounts or cost source.",
+        details: {
+          "#": String(index + 1),
+          Customer: row.customer,
+          "Customer code": row.code || "-",
+          "KRA PIN": row.kraPin || "-",
+          Invoices: row.invoices.size.toString(),
+          "Units sold": row.units.toLocaleString("en-KE", { maximumFractionDigits: 2 }),
+          Revenue: money(row.revenue),
+          "FIFO cost": money(row.cost),
+          "Gross profit": money(row.profit),
+          Margin: `${margin.toFixed(1)}%`,
+        },
+      };
+    });
+}
+
+async function profitBySupplierSourceReportLines(): Promise<ReportLine[]> {
+  const businessId = await activeReportBusinessId();
+  if (!businessId) return [];
+
+  const supabase = await createSupabaseServerClient();
+  const { data } = await supabase
+    .from("sales_source_allocations")
+    .select("source_type, source_supplier_name, quantity, total_cost, sale_value, gross_profit, products(product_name, sku, product_code)")
+    .eq("business_id", businessId)
+    .limit(5000);
+
+  const grouped = new Map<string, { source: string; supplier: string; products: Set<string>; units: number; revenue: number; cost: number; profit: number }>();
+  for (const row of data ?? []) {
+    const productRecord = Array.isArray(row.products) ? row.products[0] : row.products;
+    const product = productRecord as { product_name?: string | null; sku?: string | null; product_code?: string | null } | null;
+    const source = sourceLabel(String(row.source_type ?? "unspecified"));
+    const supplier = String(row.source_supplier_name ?? "Supplier/source not recorded");
+    const key = `${source}::${supplier}`;
+    const current = grouped.get(key) ?? { source, supplier, products: new Set<string>(), units: 0, revenue: 0, cost: 0, profit: 0 };
+    if (product?.product_name || product?.sku || product?.product_code) {
+      current.products.add(String(product.product_name ?? product.sku ?? product.product_code));
+    }
+    current.units += numberValue(row.quantity);
+    current.revenue += numberValue(row.sale_value);
+    current.cost += numberValue(row.total_cost);
+    current.profit += numberValue(row.gross_profit);
+    grouped.set(key, current);
+  }
+
+  return Array.from(grouped.values())
+    .sort((a, b) => b.profit - a.profit)
+    .map((row, index) => {
+      const margin = row.revenue ? (row.profit / row.revenue) * 100 : 0;
+      return {
+        sku: String(index + 1).padStart(3, "0"),
+        description: row.supplier,
+        unit: row.source,
+        quantity: row.units,
+        unitPrice: row.cost,
+        discount: row.revenue,
+        taxRate: `${margin.toFixed(1)}% margin`,
+        taxAmount: row.cost,
+        lineTotal: row.profit,
+        warehouse: row.supplier,
+        batch: row.source,
+        notes: row.profit >= 0 ? "This source/supplier is generating positive gross profit." : "This source/supplier is generating a loss; review buying and selling prices.",
+        details: {
+          "#": String(index + 1),
+          Source: row.source,
+          Supplier: row.supplier,
+          Products: row.products.size.toString(),
+          "Units sold": row.units.toLocaleString("en-KE", { maximumFractionDigits: 2 }),
+          Revenue: money(row.revenue),
+          "FIFO cost": money(row.cost),
+          "Gross profit": money(row.profit),
+          Margin: `${margin.toFixed(1)}%`,
+        },
+      };
+    });
 }
 
 type FinancialActivityRow = {
@@ -3149,6 +3282,32 @@ function blueprintFromTerms(report: Report): DocumentBlueprint {
       emphasis: "report",
     };
   }
+  if (value.includes("profit by customer") || value.includes("customer profit")) {
+    return {
+      ...base,
+      accent: "#1455D9",
+      soft: "#EEF6FF",
+      label: "Customer profitability",
+      table: "Customer revenue, FIFO cost, gross profit and margin",
+      headers: ["#", "Customer", "Invoices", "Units sold", "Revenue", "FIFO cost", "Gross profit", "Margin"],
+      signatures: ["Prepared by", "Owner review", "Pricing action"],
+      footerNote: "Profit by customer helps owners identify the customers creating the best margin after stock cost.",
+      emphasis: "report",
+    };
+  }
+  if (value.includes("profit by supplier") || value.includes("supplier source profit")) {
+    return {
+      ...base,
+      accent: "#047857",
+      soft: "#ECFDF5",
+      label: "Supplier/source profitability",
+      table: "Source supplier, stock source, revenue, FIFO cost, gross profit and margin",
+      headers: ["#", "Source", "Supplier", "Products", "Units sold", "Revenue", "FIFO cost", "Gross profit", "Margin"],
+      signatures: ["Prepared by", "Owner review", "Buying decision"],
+      footerNote: "Supplier/source profit shows which purchase channels and suppliers produce the strongest sales margin.",
+      emphasis: "report",
+    };
+  }
   if (value.includes("sale source profitability") || value.includes("source profit by sale") || value.includes("fifo profit") || value.includes("profit by purchase source") || value.includes("direct supplier stock profit") || value.includes("local market stock profit")) {
     return {
       ...base,
@@ -3566,6 +3725,10 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
       ? await goodsReceivedDocumentLines(grnId)
       : isPurchaseSourceReport(processName)
         ? await purchaseSourceReportLines(processName)
+        : processName.toLowerCase().includes("profit by customer") || processName.toLowerCase().includes("customer profit")
+          ? await profitByCustomerReportLines()
+        : processName.toLowerCase().includes("profit by supplier") || processName.toLowerCase().includes("supplier source profit")
+          ? await profitBySupplierSourceReportLines()
         : isSalesSourceReport(processName)
           ? await salesSourceReportLines(processName)
           : isFinancialStatementReport(moduleName, processName)

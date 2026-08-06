@@ -93,6 +93,20 @@ export function ProfitPrivacyCard({
             <FileText className="h-4 w-4 text-[var(--solva-blue-700)]" />
             Profit & Loss PDF
           </Link>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <Link
+              href="/api/exports?module=Sales&process=Profit%20by%20Customer%20Report&format=pdf"
+              className="inline-flex min-h-9 items-center justify-center rounded-md border border-cyan-200 px-2 text-center text-[11px] font-semibold text-[var(--solva-blue-700)]"
+            >
+              Customer profit
+            </Link>
+            <Link
+              href="/api/exports?module=Sales&process=Profit%20by%20Supplier%20and%20Source%20Report&format=pdf"
+              className="inline-flex min-h-9 items-center justify-center rounded-md border border-cyan-200 px-2 text-center text-[11px] font-semibold text-[var(--solva-blue-700)]"
+            >
+              Supplier profit
+            </Link>
+          </div>
         </div>
       ) : (
         <div className="mt-3">
