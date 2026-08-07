@@ -1,8 +1,11 @@
 import Link from "next/link";
 import { Download, Eye, PackagePlus, Pencil, Search, Trash2 } from "lucide-react";
 import { deleteProductAction } from "@/app/(app)/actions";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getActiveBusinessId } from "@/lib/tenant";
+
+export const dynamic = "force-dynamic";
 
 type ProductRow = {
   id: string;
@@ -16,6 +19,12 @@ type ProductRow = {
   standard_cost: number | string | null;
   product_categories?: { category_name: string | null }[] | { category_name: string | null } | null;
   brands?: { brand_name: string | null }[] | { brand_name: string | null } | null;
+};
+
+type ProductLoadResult = {
+  products: ProductRow[];
+  balances: Map<string, { quantity: number; value: number }>;
+  error?: string;
 };
 
 function money(value: number) {
@@ -53,30 +62,51 @@ function matchesProductSearch(product: ProductRow, query: string) {
   return haystack.includes(query);
 }
 
-async function loadProducts() {
+async function loadProducts(): Promise<ProductLoadResult> {
   const supabase = await createSupabaseServerClient();
+  const admin = createSupabaseAdminClient();
   const { data: userData } = await supabase.auth.getUser();
-  const businessId =
+  let businessId =
     (await getActiveBusinessId()) ||
     (typeof userData.user?.app_metadata?.active_business_id === "string" ? userData.user.app_metadata.active_business_id : null);
 
-  if (!businessId) return { products: [] as ProductRow[], balances: new Map<string, { quantity: number; value: number }>() };
+  if (!businessId && userData.user) {
+    const { data: membership } = await admin
+      .from("business_memberships")
+      .select("business_id")
+      .eq("user_id", userData.user.id)
+      .eq("active", true)
+      .limit(1)
+      .maybeSingle();
+    businessId = membership?.business_id ?? null;
+  }
 
-  const [{ data: products }, { data: balances }] = await Promise.all([
-    supabase
+  if (!businessId) return { products: [], balances: new Map<string, { quantity: number; value: number }>() };
+
+  const [productsResult, balancesResult] = await Promise.all([
+    admin
       .from("products")
       .select("id, product_name, product_code, sku, barcode, product_type, active, default_selling_price_placeholder, standard_cost, product_categories(category_name), brands(brand_name)")
       .eq("business_id", businessId)
-      .eq("archived", false)
-      .order("updated_at", { ascending: false }),
-    supabase
+      .or("archived.is.null,archived.eq.false")
+      .order("product_name", { ascending: true })
+      .limit(5000),
+    admin
       .from("stock_balances")
       .select("product_id, available_quantity, total_inventory_value")
       .eq("business_id", businessId),
   ]);
 
+  if (productsResult.error) {
+    return {
+      products: [],
+      balances: new Map<string, { quantity: number; value: number }>(),
+      error: productsResult.error.message,
+    };
+  }
+
   const balanceMap = new Map<string, { quantity: number; value: number }>();
-  for (const row of balances ?? []) {
+  for (const row of balancesResult.data ?? []) {
     const productId = String(row.product_id ?? "");
     if (!productId) continue;
     const current = balanceMap.get(productId) ?? { quantity: 0, value: 0 };
@@ -85,7 +115,11 @@ async function loadProducts() {
     balanceMap.set(productId, current);
   }
 
-  return { products: (products ?? []) as unknown as ProductRow[], balances: balanceMap };
+  return {
+    products: (productsResult.data ?? []) as unknown as ProductRow[],
+    balances: balanceMap,
+    error: balancesResult.error?.message,
+  };
 }
 
 export default async function ProductsPage({
@@ -95,7 +129,7 @@ export default async function ProductsPage({
 }) {
   const params = searchParams ? await searchParams : {};
   const query = searchText(Array.isArray(params.q) ? params.q[0] : params.q).trim();
-  const { products: allProducts, balances } = await loadProducts();
+  const { products: allProducts, balances, error } = await loadProducts();
   const products = allProducts.filter((product) => matchesProductSearch(product, query));
   const filters = ["Category", "Brand", "Product type", "Stock status", "Branch", "Warehouse", "Active", "Batch tracked", "Expiry tracked"];
 
@@ -118,10 +152,12 @@ export default async function ProductsPage({
       </div>
 
       <section className="mt-5 border border-slate-200 bg-white p-4">
-        <form className="relative block" action="/inventory/products">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <input name="q" defaultValue={query} className="min-h-11 w-full rounded-[6px] border border-slate-300 px-3 py-2 pl-10 text-sm" placeholder="Search by product, SKU, barcode, category or brand" />
-          <button className="sr-only">Search</button>
+        <form className="flex flex-col gap-3 md:flex-row" action="/inventory/products">
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input name="q" defaultValue={query} className="min-h-11 w-full rounded-[6px] border border-slate-300 px-3 py-2 pl-10 text-sm" placeholder="Search by product, SKU, barcode, category or brand" />
+          </div>
+          <button className="inline-flex min-h-11 items-center justify-center rounded-[6px] bg-slate-950 px-5 text-sm font-semibold text-white">Search</button>
         </form>
         <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
           {filters.map((filter) => (
@@ -145,7 +181,12 @@ export default async function ProductsPage({
             <span>Status</span>
             <span className="text-right">Actions</span>
           </div>
-          {products.length > 0 ? (
+          {error ? (
+            <div className="px-4 py-12 text-center">
+              <h2 className="text-lg font-semibold text-red-700">Products could not load</h2>
+              <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-slate-600">{error}</p>
+            </div>
+          ) : products.length > 0 ? (
             products.map((product) => {
               const balance = balances.get(product.id) ?? { quantity: 0, value: 0 };
               return (
