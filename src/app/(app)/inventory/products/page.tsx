@@ -66,19 +66,24 @@ async function loadProducts(): Promise<ProductLoadResult> {
   const supabase = await createSupabaseServerClient();
   const admin = createSupabaseAdminClient();
   const { data: userData } = await supabase.auth.getUser();
-  let businessId =
-    (await getActiveBusinessId()) ||
-    (typeof userData.user?.app_metadata?.active_business_id === "string" ? userData.user.app_metadata.active_business_id : null);
+  const cookieBusinessId = await getActiveBusinessId();
+  const metadataBusinessId =
+    typeof userData.user?.app_metadata?.active_business_id === "string" ? userData.user.app_metadata.active_business_id : null;
+  let businessId: string | null = null;
 
-  if (!businessId && userData.user) {
-    const { data: membership } = await admin
+  if (userData.user) {
+    const { data: memberships } = await admin
       .from("business_memberships")
       .select("business_id")
       .eq("user_id", userData.user.id)
       .eq("active", true)
-      .limit(1)
-      .maybeSingle();
-    businessId = membership?.business_id ?? null;
+      .order("created_at", { ascending: false });
+    const membershipBusinessIds = (memberships ?? []).map((membership) => String(membership.business_id));
+    businessId =
+      (cookieBusinessId && membershipBusinessIds.includes(cookieBusinessId) ? cookieBusinessId : null) ||
+      (metadataBusinessId && membershipBusinessIds.includes(metadataBusinessId) ? metadataBusinessId : null) ||
+      membershipBusinessIds[0] ||
+      null;
   }
 
   if (!businessId) return { products: [], balances: new Map<string, { quantity: number; value: number }>() };
