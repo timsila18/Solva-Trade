@@ -1774,6 +1774,7 @@ type SalesInvoiceRow = {
 };
 
 type SalesItemRow = {
+  id?: string | null;
   invoice_id?: string | null;
   product_id?: string | null;
   invoice_quantity?: number | string | null;
@@ -1864,12 +1865,14 @@ function relatedOne<T>(value: T | T[] | null | undefined) {
 
 type SalesSourceAllocationRow = {
   sales_invoice_id?: string | null;
+  sales_invoice_item_id?: string | null;
   product_id?: string | null;
   source_type?: string | null;
   source_supplier_name?: string | null;
   gross_profit?: number | string | null;
   total_cost?: number | string | null;
   sale_value?: number | string | null;
+  unit_cost?: number | string | null;
   quantity?: number | string | null;
 };
 
@@ -1899,13 +1902,13 @@ async function salesOperationalData(searchParams?: URLSearchParams) {
   const [{ data: items }, { data: allocations }] = await Promise.all([
     supabase
       .from("sales_invoice_items")
-      .select("invoice_id, product_id, invoice_quantity, unit_price, tax_amount, line_total, products(product_name, product_code, sku, standard_cost)")
+      .select("id, invoice_id, product_id, invoice_quantity, unit_price, tax_amount, line_total, products(product_name, product_code, sku, standard_cost)")
       .eq("business_id", businessId)
       .in("invoice_id", invoiceIds)
       .limit(10000),
     supabase
       .from("sales_source_allocations")
-      .select("sales_invoice_id, product_id, source_type, source_supplier_name, quantity, total_cost, sale_value, gross_profit")
+      .select("sales_invoice_id, sales_invoice_item_id, product_id, source_type, source_supplier_name, quantity, unit_cost, total_cost, sale_value, gross_profit")
       .eq("business_id", businessId)
       .in("sales_invoice_id", invoiceIds)
       .limit(10000),
@@ -2306,10 +2309,10 @@ function productSalesTrackingLines(items: SalesItemRow[], invoicesById: Map<stri
   for (const allocation of allocations) {
     const key = String(allocation.product_id ?? "unknown");
     const current = profitByProduct.get(key) ?? { profit: 0, cost: 0, saleValue: 0, qty: 0 };
-    current.profit += numberValue(allocation.gross_profit);
     current.cost += numberValue(allocation.total_cost);
     current.saleValue += numberValue(allocation.sale_value);
     current.qty += numberValue(allocation.quantity);
+    current.profit = current.saleValue - current.cost;
     profitByProduct.set(key, current);
   }
 
@@ -2331,7 +2334,7 @@ function productSalesTrackingLines(items: SalesItemRow[], invoicesById: Map<stri
     current.tax += numberValue(item.tax_amount);
     const allocation = profitByProduct.get(String(item.product_id ?? ""));
     current.cost = allocation?.cost ?? current.cost + numberValue(product?.standard_cost) * numberValue(item.invoice_quantity);
-    current.profit = allocation?.profit ?? current.revenue - current.tax - current.cost;
+    current.profit = current.revenue - current.cost;
     grouped.set(key, current);
   }
 
@@ -2374,16 +2377,58 @@ function customerSalesAndProfitLines(
   allocations: SalesSourceAllocationRow[],
   periodLabel: string,
 ): ReportLine[] {
-  const allocationByInvoiceProduct = new Map<string, { cost: number; profit: number; saleValue: number; source: string; supplier: string }>();
+  type AllocationSummary = { cost: number; quantity: number; source: string; supplier: string };
+  type AllocationChunk = AllocationSummary & { remainingQuantity: number; remainingCost: number };
+
+  const itemCountByInvoiceProduct = new Map<string, number>();
+  for (const item of items) {
+    const key = `${item.invoice_id ?? ""}::${item.product_id ?? ""}`;
+    itemCountByInvoiceProduct.set(key, (itemCountByInvoiceProduct.get(key) ?? 0) + 1);
+  }
+
+  const allocationByItem = new Map<string, AllocationSummary>();
+  const allocationQueuesByInvoiceProduct = new Map<string, AllocationChunk[]>();
   for (const allocation of allocations) {
-    const key = `${allocation.sales_invoice_id ?? ""}::${allocation.product_id ?? ""}`;
-    const current = allocationByInvoiceProduct.get(key) ?? { cost: 0, profit: 0, saleValue: 0, source: "", supplier: "" };
-    current.cost += numberValue(allocation.total_cost);
-    current.profit += numberValue(allocation.gross_profit);
-    current.saleValue += numberValue(allocation.sale_value);
-    current.source = sourceLabel(allocation.source_type) || current.source;
-    current.supplier = String(allocation.source_supplier_name ?? current.supplier ?? "");
-    allocationByInvoiceProduct.set(key, current);
+    const invoiceProductKey = `${allocation.sales_invoice_id ?? ""}::${allocation.product_id ?? ""}`;
+    const quantity = numberValue(allocation.quantity);
+    const cost = numberValue(allocation.total_cost);
+    const source = sourceLabel(allocation.source_type);
+    const supplier = String(allocation.source_supplier_name ?? "");
+
+    if (allocation.sales_invoice_item_id) {
+      const current = allocationByItem.get(allocation.sales_invoice_item_id) ?? { cost: 0, quantity: 0, source: "", supplier: "" };
+      current.cost += cost;
+      current.quantity += quantity;
+      current.source = source || current.source;
+      current.supplier = supplier || current.supplier;
+      allocationByItem.set(allocation.sales_invoice_item_id, current);
+    }
+
+    const queue = allocationQueuesByInvoiceProduct.get(invoiceProductKey) ?? [];
+    queue.push({ cost, quantity, source, supplier, remainingQuantity: quantity, remainingCost: cost });
+    allocationQueuesByInvoiceProduct.set(invoiceProductKey, queue);
+  }
+
+  function consumeAllocation(invoiceProductKey: string, requestedQuantity: number): AllocationSummary | undefined {
+    const queue = allocationQueuesByInvoiceProduct.get(invoiceProductKey);
+    if (!queue?.length) return undefined;
+    let remaining = requestedQuantity;
+    const summary: AllocationSummary = { cost: 0, quantity: 0, source: "", supplier: "" };
+    for (const chunk of queue) {
+      if (remaining <= 0) break;
+      if (chunk.remainingQuantity <= 0) continue;
+      const take = Math.min(remaining, chunk.remainingQuantity);
+      const unitCost = chunk.remainingQuantity ? chunk.remainingCost / chunk.remainingQuantity : 0;
+      const takeCost = take * unitCost;
+      summary.cost += takeCost;
+      summary.quantity += take;
+      summary.source = chunk.source || summary.source;
+      summary.supplier = chunk.supplier || summary.supplier;
+      chunk.remainingQuantity -= take;
+      chunk.remainingCost -= takeCost;
+      remaining -= take;
+    }
+    return summary.quantity > 0 ? summary : undefined;
   }
 
   return items.map((item, index) => {
@@ -2391,9 +2436,14 @@ function customerSalesAndProfitLines(
     const product = relatedOne(item.products);
     const quantity = numberValue(item.invoice_quantity);
     const revenue = numberValue(item.line_total);
-    const allocation = allocationByInvoiceProduct.get(`${item.invoice_id ?? ""}::${item.product_id ?? ""}`);
+    const invoiceProductKey = `${item.invoice_id ?? ""}::${item.product_id ?? ""}`;
+    const hasRepeatedProductOnInvoice = (itemCountByInvoiceProduct.get(invoiceProductKey) ?? 0) > 1;
+    const allocation =
+      !hasRepeatedProductOnInvoice && item.id && allocationByItem.has(item.id)
+        ? allocationByItem.get(item.id)
+        : consumeAllocation(invoiceProductKey, quantity);
     const cost = allocation?.cost ?? 0;
-    const profit = allocation?.profit ?? revenue - cost;
+    const profit = revenue - cost;
     const margin = revenue ? (profit / revenue) * 100 : 0;
     return {
       sku: String(invoice?.invoice_number ?? `SALE-${index + 1}`),

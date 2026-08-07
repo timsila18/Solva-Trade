@@ -6,7 +6,6 @@ import { EmptyState, MetricCard, PageHero, PlainCard } from "@/components/ui/pre
 import { salesSummary, salesWorkflows } from "@/lib/sales-data";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getActiveBusinessId } from "@/lib/tenant";
-import { getSalesWorkflowLookups } from "@/lib/workflow-live-data";
 
 export const dynamic = "force-dynamic";
 
@@ -48,34 +47,34 @@ const storyCards = [
 const plainWorkflows = salesWorkflows.map((workflow) => {
   const labels: Record<string, { title: string; description: string; action: string }> = {
     Quotations: {
-      title: "Prepare a Price Offer",
-      description: "Send a customer a clear offer before it becomes a sale.",
-      action: "Create offer",
+      title: "Make quotation",
+      description: "",
+      action: "",
     },
     "Sales orders": {
-      title: "Confirm What a Customer Wants",
-      description: "Approve demand before stock is picked or delivered.",
-      action: "Open orders",
+      title: "Sales orders",
+      description: "",
+      action: "",
     },
     Invoices: {
-      title: "Make a Sale",
-      description: "Issue an invoice and start tracking what the customer should pay.",
-      action: "New sale",
+      title: "Make sale",
+      description: "",
+      action: "",
     },
     "Customer payments": {
-      title: "Record Money In",
-      description: "Capture cash, bank or M-Pesa collections against customer balances.",
-      action: "Record payment",
+      title: "Record payment",
+      description: "",
+      action: "",
     },
     "Customer returns": {
-      title: "Handle Returned Goods",
-      description: "Track goods a customer returns and keep balances correct.",
-      action: "Open returns",
+      title: "Returns",
+      description: "",
+      action: "",
     },
     "Debtor ageing": {
-      title: "Customers Who Are Late",
-      description: "See who owes you money and how long it has been outstanding.",
-      action: "Review late payments",
+      title: "Late payments",
+      description: "",
+      action: "",
     },
   };
   return { ...workflow, ...labels[workflow.title] };
@@ -92,17 +91,6 @@ const salesReportCards = [
 
 function exportHref(process: string, format: "pdf" | "excel" | "print") {
   return `/api/exports?module=Sales&process=${encodeURIComponent(process)}&format=${format}`;
-}
-
-function quickSalesReportHref(customerId: string, period: string, format: "pdf" | "excel" | "print") {
-  const params = new URLSearchParams({
-    module: "Sales",
-    process: "Customer Sales and Profit Report",
-    format,
-    customerId,
-    period,
-  });
-  return `/api/exports?${params.toString()}`;
 }
 
 function money(value: number) {
@@ -196,7 +184,7 @@ async function recentSales() {
 }
 
 export default async function SalesPage() {
-  const [invoices, lookups] = await Promise.all([recentSales(), getSalesWorkflowLookups()]);
+  const invoices = await recentSales();
   const invoicesNeedingFollowUp = invoices.filter((invoice) => asNumber(invoice.balance_due) > 0);
   const orderedInvoices = [...invoices].sort((a, b) => {
     const aOpen = asNumber(a.balance_due) > 0 ? 0 : 1;
@@ -237,37 +225,21 @@ export default async function SalesPage() {
       </section>
 
       <section className="mt-6 rounded-lg border border-cyan-100 bg-white p-5 shadow-sm">
-        <div className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
+        <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
           <div>
-            <p className="text-sm font-semibold text-[var(--solva-blue-700)]">Quick sales report</p>
-            <h2 className="mt-1 text-xl font-semibold text-slate-950">Customer sales, paid status and profit</h2>
-            <p className="mt-2 text-sm leading-6 text-slate-600">Pick a customer and period, then download a clean report showing all items sold and profit from received-stock costs.</p>
+            <p className="text-sm font-semibold text-[var(--solva-blue-700)]">Sales History</p>
+            <h2 className="mt-1 text-xl font-semibold text-slate-950">View invoices, payments, balances and receipts</h2>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              Open one clear history list for all posted sales, paid receipts, part payments and follow-ups.
+            </p>
           </div>
-          <Link href="/reports" className="text-sm font-semibold text-[var(--solva-blue-700)]">Full report centre</Link>
-        </div>
-        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          {lookups.customers.slice(0, 8).map((customer) => (
-            <article key={customer.id} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-              <h3 className="font-semibold text-slate-950">{customer.name}</h3>
-              <p className="mt-1 text-xs text-slate-500">{customer.code || customer.phone || "Saved customer"}</p>
-              <div className="mt-4 grid grid-cols-2 gap-2">
-                {(["daily", "weekly", "monthly", "annual"] as const).map((period) => (
-                  <a
-                    key={period}
-                    href={quickSalesReportHref(customer.id, period, "pdf")}
-                    className="inline-flex min-h-9 items-center justify-center rounded-md bg-white px-3 text-xs font-semibold text-slate-800 ring-1 ring-slate-200 hover:bg-cyan-50"
-                  >
-                    {period[0].toUpperCase() + period.slice(1)}
-                  </a>
-                ))}
-              </div>
-            </article>
-          ))}
-          {!lookups.customers.length ? (
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-              Add customers first, then their one-click sales reports will appear here.
-            </div>
-          ) : null}
+          <a
+            href="#invoice-history"
+            className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-md bg-[var(--solva-blue-700)] px-5 text-sm font-semibold text-white shadow-sm hover:bg-[var(--solva-blue-800)]"
+          >
+            <FileText className="h-4 w-4" />
+            Sales History
+          </a>
         </div>
       </section>
 

@@ -608,7 +608,7 @@ async function postSalesInvoice(formData: FormData, userId: string, fallbackBusi
       target_branch_id: branchId,
       target_warehouse_id: warehouseId,
       target_quantity: line.quantity,
-      target_sale_unit_price: line.quantity > 0 ? line.lineSubtotal / line.quantity : 0,
+      target_sale_unit_price: line.quantity > 0 ? line.lineTotal / line.quantity : 0,
     });
     if (allocationError) throw new Error(allocationError.message);
     if (lineSource.sourceType || lineSource.supplierId) {
