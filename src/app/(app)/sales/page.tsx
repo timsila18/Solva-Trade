@@ -150,6 +150,12 @@ function isReversedSale(invoice: SalesInvoiceRow) {
   return status === "reversed" || status === "cancelled";
 }
 
+function newestInvoiceFirst(a: SalesInvoiceRow, b: SalesInvoiceRow) {
+  const aTime = new Date(a.created_at || a.invoice_date || 0).getTime();
+  const bTime = new Date(b.created_at || b.invoice_date || 0).getTime();
+  return bTime - aTime;
+}
+
 function receiptHref(invoice: SalesInvoiceRow) {
   return salesDocumentHref(invoice, "Sales Receipt");
 }
@@ -278,15 +284,9 @@ export default async function SalesPage() {
   const today = todayIsoDate();
   const monthStart = `${today.slice(0, 7)}-01`;
   const kraWindow = kraEtrWindowLabel(today);
-  const invoicesNeedingFollowUp = invoices.filter((invoice) => asNumber(invoice.balance_due) > 0);
-  const orderedInvoices = [...invoices].sort((a, b) => {
-    const aOpen = asNumber(a.balance_due) > 0 ? 0 : 1;
-    const bOpen = asNumber(b.balance_due) > 0 ? 0 : 1;
-    if (aOpen !== bOpen) return aOpen - bOpen;
-    const aTime = new Date(a.created_at || a.invoice_date || 0).getTime();
-    const bTime = new Date(b.created_at || b.invoice_date || 0).getTime();
-    return bTime - aTime;
-  });
+  const activeInvoices = invoices.filter((invoice) => !isReversedSale(invoice));
+  const invoicesNeedingFollowUp = activeInvoices.filter((invoice) => asNumber(invoice.balance_due) > 0).sort(newestInvoiceFirst);
+  const completedInvoices = activeInvoices.filter((invoice) => asNumber(invoice.balance_due) <= 0).sort(newestInvoiceFirst);
 
   return (
     <div className="pb-24">
@@ -323,15 +323,50 @@ export default async function SalesPage() {
             <p className="text-sm font-semibold text-[var(--solva-blue-700)]">Sales History</p>
             <h2 className="mt-1 text-xl font-semibold text-slate-950">View invoices, payments, balances and receipts</h2>
             <p className="mt-2 text-sm leading-6 text-slate-600">
-              Open one clear history list for all posted sales, paid receipts, part payments and follow-ups.
+              Paid and concluded sales stay here. Only invoices still waiting for payment remain in the follow-up list below.
             </p>
-            <a
-              href="#invoice-history"
-              className="mt-4 inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-md bg-[var(--solva-blue-700)] px-5 text-sm font-semibold text-white shadow-sm hover:bg-[var(--solva-blue-800)]"
-            >
-              <FileText className="h-4 w-4" />
-              Sales History
-            </a>
+            <details className="mt-4 rounded-md border border-slate-200 bg-white">
+              <summary className="flex min-h-11 cursor-pointer items-center justify-between gap-3 rounded-md bg-[var(--solva-blue-700)] px-4 text-sm font-semibold text-white shadow-sm hover:bg-[var(--solva-blue-800)]">
+                <span className="inline-flex items-center gap-2">
+                  <FileText className="h-4 w-4" />
+                  Sales History
+                </span>
+                <span className="rounded-full bg-white/15 px-2 py-1 text-xs">{completedInvoices.length}</span>
+              </summary>
+              <div className="max-h-80 overflow-auto p-3">
+                {completedInvoices.length ? (
+                  <div className="grid gap-2">
+                    {completedInvoices.slice(0, 30).map((invoice) => (
+                      <div key={invoice.id} className="grid gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <p className="font-semibold text-slate-950">{invoice.invoice_number || "Sale without number"}</p>
+                            <p className="text-xs text-slate-500">{customerName(invoice)} - {invoice.invoice_date || "not dated"}</p>
+                          </div>
+                          <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-black text-emerald-800">PAID</span>
+                        </div>
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="font-semibold text-slate-800">{money(asNumber(invoice.total_amount))}</p>
+                          <div className="flex flex-wrap gap-2">
+                            <a href={salesDocumentHref(invoice, "Invoice")} className="inline-flex min-h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700">
+                              Invoice
+                            </a>
+                            <a href={receiptHref(invoice)} className="inline-flex min-h-9 items-center justify-center rounded-md bg-emerald-700 px-3 text-xs font-semibold text-white">
+                              Receipt
+                            </a>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    {completedInvoices.length > 30 ? (
+                      <p className="text-xs font-semibold text-slate-500">Showing latest 30 paid sales. Use reports for the full archive.</p>
+                    ) : null}
+                  </div>
+                ) : (
+                  <p className="rounded-md bg-slate-50 p-3 text-sm text-slate-600">No paid sales are archived yet.</p>
+                )}
+              </div>
+            </details>
           </div>
           <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
             <p className="text-sm font-semibold text-emerald-700">Customer Sales Reports</p>
@@ -478,9 +513,9 @@ export default async function SalesPage() {
         <div className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
           <div>
             <p className="text-sm font-semibold text-emerald-700">Sales and payments</p>
-            <h2 className="mt-1 text-xl font-semibold text-slate-950">All sales, invoices, balances and receipts</h2>
+            <h2 className="mt-1 text-xl font-semibold text-slate-950">Payment confirmation queue</h2>
             <p className="mt-2 text-sm leading-6 text-slate-600">
-              Every new sale appears here as an invoice first. Confirm payment from this list to generate the receipt instantly; unpaid or part-paid sales stay visible with the balance.
+              Only unpaid and part-paid invoices appear here. Once payment is confirmed, the sale moves into the Sales History card above.
             </p>
           </div>
           {invoicesNeedingFollowUp.length ? (
@@ -496,9 +531,9 @@ export default async function SalesPage() {
           )}
         </div>
 
-        {invoices.length ? (
+        {invoicesNeedingFollowUp.length ? (
           <div className="mt-4 divide-y divide-slate-200 overflow-hidden rounded-lg border border-slate-200">
-            {orderedInvoices.map((invoice) => {
+            {invoicesNeedingFollowUp.map((invoice) => {
               const total = asNumber(invoice.total_amount);
               const paid = asNumber(invoice.amount_paid);
               const balance = asNumber(invoice.balance_due);
@@ -649,8 +684,8 @@ export default async function SalesPage() {
         ) : (
           <div className="mt-4">
             <EmptyState
-              title="No sales have been posted yet"
-              description="Once a sale is submitted, it will appear here with paid, part-paid or unpaid status and instant receipt actions."
+              title="No sales need payment confirmation"
+              description="Paid sales are kept in Sales History. New unpaid or part-paid invoices will appear here for follow-up."
               action={{ label: "Create First Sale", href: "/sales/invoices" }}
             />
           </div>
