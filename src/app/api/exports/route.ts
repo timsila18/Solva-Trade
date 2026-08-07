@@ -1427,20 +1427,25 @@ async function salesSourceReportLines(processName: string): Promise<ReportLine[]
   });
 }
 
-async function profitByCustomerReportLines(): Promise<ReportLine[]> {
+async function profitByCustomerReportLines(searchParams?: URLSearchParams): Promise<ReportLine[]> {
   const businessId = await activeReportBusinessId();
   if (!businessId) return [];
 
   const supabase = await createSupabaseServerClient();
+  const period = salesPeriodWindow(searchParams?.get("period") ?? null, searchParams);
+  const requestedCustomerId = searchParams?.get("customerId");
   const { data } = await supabase
     .from("sales_source_allocations")
-    .select("quantity, total_cost, sale_value, gross_profit, sales_invoices(invoice_number, invoice_date, customers(customer_name, customer_code, kra_pin))")
+    .select("quantity, total_cost, sale_value, gross_profit, allocated_at, sales_invoices(invoice_number, invoice_date, customer_id, customers(customer_name, customer_code, kra_pin))")
     .eq("business_id", businessId)
+    .gte("allocated_at", `${period.start}T00:00:00`)
+    .lte("allocated_at", `${period.end}T23:59:59`)
     .limit(5000);
 
   const grouped = new Map<string, { customer: string; code: string; kraPin: string; invoices: Set<string>; units: number; revenue: number; cost: number; profit: number }>();
   for (const row of data ?? []) {
     const invoiceRecord = Array.isArray(row.sales_invoices) ? row.sales_invoices[0] : row.sales_invoices;
+    if (requestedCustomerId && requestedCustomerId !== "all" && String(invoiceRecord?.customer_id ?? "") !== requestedCustomerId) continue;
     const customerRecord = Array.isArray(invoiceRecord?.customers) ? invoiceRecord?.customers[0] : invoiceRecord?.customers;
     const customer = customerRecord as { customer_name?: string | null; customer_code?: string | null; kra_pin?: string | null } | null;
     const name = String(customer?.customer_name ?? "Customer not recorded");
@@ -1478,16 +1483,16 @@ async function profitByCustomerReportLines(): Promise<ReportLine[]> {
         lineTotal: row.profit,
         warehouse: "Customer profit",
         batch: `${row.invoices.size} invoice${row.invoices.size === 1 ? "" : "s"}`,
-        notes: row.profit >= 0 ? "Profitable customer after FIFO/source costs." : "Loss-making customer; review prices, discounts or cost source.",
+        notes: `${period.label}. ${row.profit >= 0 ? "Profitable customer after received-stock costs." : "Loss-making customer; review prices, discounts or buying cost."}`,
         details: {
           "#": String(index + 1),
           Customer: row.customer,
+          Period: period.label,
           "Customer code": row.code || "-",
-          "KRA PIN": row.kraPin || "-",
           Invoices: row.invoices.size.toString(),
           "Units sold": row.units.toLocaleString("en-KE", { maximumFractionDigits: 2 }),
-          Revenue: money(row.revenue),
-          "FIFO cost": money(row.cost),
+          Sales: money(row.revenue),
+          "Supply cost": money(row.cost),
           "Gross profit": money(row.profit),
           Margin: `${margin.toFixed(1)}%`,
         },
@@ -1555,8 +1560,8 @@ async function profitBySupplierSourceReportLines(searchParams?: URLSearchParams)
           Period: period.label,
           Products: row.products.size.toString(),
           "Units sold": row.units.toLocaleString("en-KE", { maximumFractionDigits: 2 }),
-          Revenue: money(row.revenue),
-          "FIFO cost": money(row.cost),
+          Sales: money(row.revenue),
+          "Supply cost": money(row.cost),
           "Gross profit": money(row.profit),
           Margin: `${margin.toFixed(1)}%`,
         },
@@ -3901,8 +3906,11 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
       ? await goodsReceivedDocumentLines(grnId)
       : isPurchaseSourceReport(processName)
         ? await purchaseSourceReportLines(processName)
-        : processName.toLowerCase().includes("profit by customer") || processName.toLowerCase().includes("customer profit")
-          ? await profitByCustomerReportLines()
+        : processName.toLowerCase().includes("customer sales and profit") ||
+            processName.toLowerCase().includes("sales generation per customer") ||
+            processName.toLowerCase().includes("profit by customer") ||
+            processName.toLowerCase().includes("customer profit")
+          ? await profitByCustomerReportLines(searchParams)
         : processName.toLowerCase().includes("profit by supplier") || processName.toLowerCase().includes("supplier source profit")
           ? await profitBySupplierSourceReportLines(searchParams)
         : isSalesSourceReport(processName)
@@ -4268,10 +4276,10 @@ function lineHeaders(report: Report) {
   }
   const value = `${report.moduleName} ${report.processName}`.toLowerCase();
   if (value.includes("customer sales and profit") || value.includes("sales generation per customer")) {
-    return ["#", "Date", "Customer", "Invoice no.", "Product", "Qty", "Revenue", "Received stock cost", "Gross profit", "Source", "Supplier"];
+    return ["#", "Customer", "Period", "Invoices", "Units sold", "Sales", "Supply cost", "Gross profit", "Margin"];
   }
   if (value.includes("profit by supplier") || value.includes("supplier source profit")) {
-    return ["#", "Source", "Supplier", "Products", "Units sold", "Revenue", "FIFO cost", "Gross profit", "Margin"];
+    return ["#", "Source", "Supplier", "Period", "Products", "Units sold", "Sales", "Supply cost", "Gross profit", "Margin"];
   }
   return blueprintFor(report).headers;
 }
@@ -5044,8 +5052,8 @@ function wideReportHeaders(report: Report) {
     "Inventory Discrepancy Report": ["Item no.", "Item name", "Vendor", "On-hand quantity", "Actual item count", "Inventory discrepancy (auto-fill)", "Reorder level", "Item discontinued?"],
     "Inventory Damage Report": ["Item no.", "Name", "Vendor", "Condition", "Damage report", "Quantity", "Asset value", "Total value"],
     "Sales Tracking Report": ["Product name", "Cost per item", "Markup percentage", "Total sold", "Total revenue", "Profit per item", "Total income"],
-    "Customer Sales and Profit Report": ["#", "Date", "Customer", "Invoice no.", "Product", "Qty", "Revenue", "Received stock cost", "Gross profit", "Source", "Supplier"],
-    "Profit by Supplier and Source Report": ["#", "Source", "Supplier", "Products", "Units sold", "Revenue", "FIFO cost", "Gross profit", "Margin"],
+    "Customer Sales and Profit Report": ["#", "Customer", "Period", "Invoices", "Units sold", "Sales", "Supply cost", "Gross profit", "Margin"],
+    "Profit by Supplier and Source Report": ["#", "Source", "Supplier", "Period", "Products", "Units sold", "Sales", "Supply cost", "Gross profit", "Margin"],
     "KRA ETR Sales Report": ["Sr. No", "Customer KRA PIN", "Customer Name", "KRA Device No.", "Invoice Date", "CUI Invoice No.", "Item Description", "Exclusive Amount", "VAT", "Inclusive Amount"],
   };
   const requested = preferred[report.processName] ?? ["Period", "Item no.", "Item name", "Name", "Customer", "Vendor", "Revenue (KES)", "Stock quantity", "Total value", "Status", "Notes"];
