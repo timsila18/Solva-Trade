@@ -4298,7 +4298,12 @@ function isCustomerFacingInvoice(report: Report) {
 
 function isCustomerSalesProfitReport(moduleName: string, processName: string) {
   const value = `${moduleName} ${processName}`.toLowerCase();
-  return value.includes("customer sales and profit") || value.includes("sales generation per customer");
+  return (
+    value.includes("customer sales and profit") ||
+    value.includes("sales generation per customer") ||
+    value.includes("profit by supplier") ||
+    value.includes("supplier source profit")
+  );
 }
 
 function valueForHeader(report: Report, line: ReportLine, index: number, header: string) {
