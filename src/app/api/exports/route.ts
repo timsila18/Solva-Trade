@@ -413,6 +413,8 @@ function isSalesOperationalReport(moduleName: string, processName: string) {
     value.includes("weekly sales call report") ||
     value.includes("weekly route sales report") ||
     value.includes("sales tracking report") ||
+    value.includes("customer sales and profit report") ||
+    value.includes("sales generation per customer") ||
     value.includes("deal loss reasons report") ||
     value.includes("monthly retail sales summary report") ||
     value.includes("monthly sales report dashboard") ||
@@ -1847,38 +1849,73 @@ function hourKey(value: string | null | undefined) {
   return new Intl.DateTimeFormat("en-KE", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Africa/Nairobi" }).format(date).slice(0, 2) + ":00";
 }
 
+function salesPeriodWindow(period: string | null) {
+  const today = todayIsoDate();
+  const lower = String(period ?? "").toLowerCase();
+  if (lower.includes("annual") || lower.includes("year")) return { label: "This year", start: `${today.slice(0, 4)}-01-01`, end: today };
+  if (lower.includes("month")) return { label: "This month", start: `${today.slice(0, 7)}-01`, end: today };
+  if (lower.includes("week")) return { label: "This week", start: startOfWeekDate(today), end: today };
+  return { label: "Today", start: today, end: today };
+}
+
 function relatedOne<T>(value: T | T[] | null | undefined) {
   return Array.isArray(value) ? value[0] : value ?? null;
 }
 
-async function salesOperationalData() {
+type SalesSourceAllocationRow = {
+  sales_invoice_id?: string | null;
+  product_id?: string | null;
+  source_type?: string | null;
+  source_supplier_name?: string | null;
+  gross_profit?: number | string | null;
+  total_cost?: number | string | null;
+  sale_value?: number | string | null;
+  quantity?: number | string | null;
+};
+
+async function salesOperationalData(searchParams?: URLSearchParams) {
   const businessId = await activeReportBusinessId();
-  if (!businessId) return { invoices: [] as SalesInvoiceRow[], items: [] as SalesItemRow[], allocations: [] as { product_id?: string | null; gross_profit?: number | string | null; total_cost?: number | string | null; sale_value?: number | string | null; quantity?: number | string | null }[] };
+  if (!businessId) return { invoices: [] as SalesInvoiceRow[], items: [] as SalesItemRow[], allocations: [] as SalesSourceAllocationRow[], period: salesPeriodWindow(searchParams?.get("period") ?? null) };
 
   const supabase = await createSupabaseServerClient();
-  const [{ data: invoices }, { data: items }, { data: allocations }] = await Promise.all([
-    supabase
+  const period = salesPeriodWindow(searchParams?.get("period") ?? null);
+  const requestedCustomerId = searchParams?.get("customerId");
+  let invoiceQuery = supabase
       .from("sales_invoices")
       .select("id, invoice_number, invoice_date, subtotal, tax_total, total_amount, amount_paid, balance_due, status, delivery_status, created_at, customers(customer_name, customer_code), branches(branch_name, branch_code)")
       .eq("business_id", businessId)
+      .neq("status", "reversed")
+      .gte("invoice_date", period.start)
+      .lte("invoice_date", period.end)
       .order("invoice_date", { ascending: true })
-      .limit(1000),
+      .limit(3000);
+  if (requestedCustomerId) invoiceQuery = invoiceQuery.eq("customer_id", requestedCustomerId);
+
+  const { data: invoices } = await invoiceQuery;
+  const invoiceRows = (invoices ?? []) as SalesInvoiceRow[];
+  const invoiceIds = invoiceRows.map((invoice) => invoice.id).filter(Boolean) as string[];
+  if (!invoiceIds.length) return { invoices: invoiceRows, items: [] as SalesItemRow[], allocations: [] as SalesSourceAllocationRow[], period };
+
+  const [{ data: items }, { data: allocations }] = await Promise.all([
     supabase
       .from("sales_invoice_items")
       .select("invoice_id, product_id, invoice_quantity, unit_price, tax_amount, line_total, products(product_name, product_code, sku, standard_cost)")
       .eq("business_id", businessId)
-      .limit(2000),
+      .in("invoice_id", invoiceIds)
+      .limit(10000),
     supabase
       .from("sales_source_allocations")
-      .select("product_id, quantity, total_cost, sale_value, gross_profit")
+      .select("sales_invoice_id, product_id, source_type, source_supplier_name, quantity, total_cost, sale_value, gross_profit")
       .eq("business_id", businessId)
-      .limit(2000),
+      .in("sales_invoice_id", invoiceIds)
+      .limit(10000),
   ]);
 
   return {
-    invoices: (invoices ?? []) as SalesInvoiceRow[],
+    invoices: invoiceRows,
     items: (items ?? []) as SalesItemRow[],
-    allocations: (allocations ?? []) as { product_id?: string | null; gross_profit?: number | string | null; total_cost?: number | string | null; sale_value?: number | string | null; quantity?: number | string | null }[],
+    allocations: (allocations ?? []) as SalesSourceAllocationRow[],
+    period,
   };
 }
 
@@ -2264,7 +2301,7 @@ function groupedSalesLines(invoices: SalesInvoiceRow[], groupBy: "day" | "hour" 
   });
 }
 
-function productSalesTrackingLines(items: SalesItemRow[], invoicesById: Map<string, SalesInvoiceRow>, allocations: { product_id?: string | null; gross_profit?: number | string | null; total_cost?: number | string | null; sale_value?: number | string | null; quantity?: number | string | null }[]): ReportLine[] {
+function productSalesTrackingLines(items: SalesItemRow[], invoicesById: Map<string, SalesInvoiceRow>, allocations: SalesSourceAllocationRow[]): ReportLine[] {
   const profitByProduct = new Map<string, { profit: number; cost: number; saleValue: number; qty: number }>();
   for (const allocation of allocations) {
     const key = String(allocation.product_id ?? "unknown");
@@ -2331,11 +2368,74 @@ function productSalesTrackingLines(items: SalesItemRow[], invoicesById: Map<stri
   });
 }
 
-async function salesOperationalReportLines(processName: string): Promise<ReportLine[]> {
-  const { invoices, items, allocations } = await salesOperationalData();
+function customerSalesAndProfitLines(
+  items: SalesItemRow[],
+  invoicesById: Map<string, SalesInvoiceRow>,
+  allocations: SalesSourceAllocationRow[],
+  periodLabel: string,
+): ReportLine[] {
+  const allocationByInvoiceProduct = new Map<string, { cost: number; profit: number; saleValue: number; source: string; supplier: string }>();
+  for (const allocation of allocations) {
+    const key = `${allocation.sales_invoice_id ?? ""}::${allocation.product_id ?? ""}`;
+    const current = allocationByInvoiceProduct.get(key) ?? { cost: 0, profit: 0, saleValue: 0, source: "", supplier: "" };
+    current.cost += numberValue(allocation.total_cost);
+    current.profit += numberValue(allocation.gross_profit);
+    current.saleValue += numberValue(allocation.sale_value);
+    current.source = sourceLabel(allocation.source_type) || current.source;
+    current.supplier = String(allocation.source_supplier_name ?? current.supplier ?? "");
+    allocationByInvoiceProduct.set(key, current);
+  }
+
+  return items.map((item, index) => {
+    const invoice = invoicesById.get(String(item.invoice_id));
+    const product = relatedOne(item.products);
+    const quantity = numberValue(item.invoice_quantity);
+    const revenue = numberValue(item.line_total);
+    const allocation = allocationByInvoiceProduct.get(`${item.invoice_id ?? ""}::${item.product_id ?? ""}`);
+    const cost = allocation?.cost ?? 0;
+    const profit = allocation?.profit ?? revenue - cost;
+    const margin = revenue ? (profit / revenue) * 100 : 0;
+    return {
+      sku: String(invoice?.invoice_number ?? `SALE-${index + 1}`),
+      description: String(product?.product_name ?? "Sold item"),
+      unit: "Sale line",
+      quantity,
+      unitPrice: numberValue(item.unit_price),
+      discount: cost,
+      taxRate: `${margin.toFixed(1)}% margin`,
+      taxAmount: numberValue(item.tax_amount),
+      lineTotal: profit,
+      warehouse: String(relatedOne(invoice?.customers)?.customer_name ?? "Walk-in customer"),
+      batch: allocation?.source || "FIFO source",
+      notes: `${periodLabel}. Invoice ${String(invoice?.invoice_number ?? "not recorded")}. Supplier/source: ${allocation?.supplier || "from FIFO receipt"}.`,
+      details: {
+        "#": String(index + 1),
+        Date: invoice ? dateKey(invoice.invoice_date) : todayIsoDate(),
+        Customer: String(relatedOne(invoice?.customers)?.customer_name ?? "Walk-in customer"),
+        "Invoice no.": String(invoice?.invoice_number ?? ""),
+        Product: String(product?.product_name ?? "Sold item"),
+        SKU: String(product?.sku ?? product?.product_code ?? ""),
+        Qty: quantity.toLocaleString("en-KE", { maximumFractionDigits: 2 }),
+        "Selling price": money(numberValue(item.unit_price)),
+        Revenue: money(revenue),
+        "Received stock cost": money(cost),
+        "Gross profit": money(profit),
+        Margin: `${margin.toFixed(1)}%`,
+        Source: allocation?.source || "FIFO receipt",
+        Supplier: allocation?.supplier || "Supplier from received stock",
+        "Payment status": String(invoice?.status ?? "posted"),
+        "Balance due": money(numberValue(invoice?.balance_due)),
+      },
+    };
+  });
+}
+
+async function salesOperationalReportLines(processName: string, searchParams?: URLSearchParams): Promise<ReportLine[]> {
+  const { invoices, items, allocations, period } = await salesOperationalData(searchParams);
   const invoicesById = new Map(invoices.map((invoice) => [String(invoice.id), invoice]));
   const lower = processName.toLowerCase();
 
+  if (lower.includes("customer sales") || lower.includes("sales generation per customer")) return customerSalesAndProfitLines(items, invoicesById, allocations, period.label);
   if (lower.includes("tracking")) return productSalesTrackingLines(items, invoicesById, allocations);
   if (lower.includes("hourly")) return groupedSalesLines(invoices, "hour");
   if (lower.includes("daily sales kpi")) return groupedSalesLines(invoices, "day");
@@ -3738,7 +3838,7 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
             : isExpenseOperationalReport(moduleName, processName)
               ? await expenseOperationalReportLines(processName)
             : isSalesOperationalReport(moduleName, processName)
-              ? await salesOperationalReportLines(processName)
+              ? await salesOperationalReportLines(processName, searchParams)
         : isProductProfileReport(moduleName, processName)
           ? await productMasterReportLines(productId)
           : isCustomerPriceListReport(moduleName, processName)
@@ -4076,6 +4176,13 @@ function drawFittedImage(canvas: PdfCanvas, image: PdfImageResource | undefined,
 function lineHeaders(report: Report) {
   if (isCustomerFacingInvoice(report)) {
     return ["#", "Product or service", "SKU", "Qty", "Rate", "Amount", "Tax"];
+  }
+  const value = `${report.moduleName} ${report.processName}`.toLowerCase();
+  if (value.includes("customer sales and profit") || value.includes("sales generation per customer")) {
+    return ["#", "Date", "Customer", "Invoice no.", "Product", "Qty", "Revenue", "Received stock cost", "Gross profit", "Source", "Supplier"];
+  }
+  if (value.includes("profit by supplier") || value.includes("supplier source profit")) {
+    return ["#", "Source", "Supplier", "Products", "Units sold", "Revenue", "FIFO cost", "Gross profit", "Margin"];
   }
   return blueprintFor(report).headers;
 }
@@ -4838,6 +4945,8 @@ function wideReportHeaders(report: Report) {
     "Inventory Discrepancy Report": ["Item no.", "Item name", "Vendor", "On-hand quantity", "Actual item count", "Inventory discrepancy (auto-fill)", "Reorder level", "Item discontinued?"],
     "Inventory Damage Report": ["Item no.", "Name", "Vendor", "Condition", "Damage report", "Quantity", "Asset value", "Total value"],
     "Sales Tracking Report": ["Product name", "Cost per item", "Markup percentage", "Total sold", "Total revenue", "Profit per item", "Total income"],
+    "Customer Sales and Profit Report": ["#", "Date", "Customer", "Invoice no.", "Product", "Qty", "Revenue", "Received stock cost", "Gross profit", "Source", "Supplier"],
+    "Profit by Supplier and Source Report": ["#", "Source", "Supplier", "Products", "Units sold", "Revenue", "FIFO cost", "Gross profit", "Margin"],
     "KRA ETR Sales Report": ["Sr. No", "Customer KRA PIN", "Customer Name", "KRA Device No.", "Invoice Date", "CUI Invoice No.", "Item Description", "Exclusive Amount", "VAT", "Inclusive Amount"],
   };
   const requested = preferred[report.processName] ?? ["Period", "Item no.", "Item name", "Name", "Customer", "Vendor", "Revenue (KES)", "Stock quantity", "Total value", "Status", "Notes"];
@@ -4901,6 +5010,53 @@ function renderLandscapePdfTable(canvas: PdfCanvas, report: Report, startY: numb
 
   canvas.line(x, y + 5, x + 746, y + 5, "border", 0.5);
   return y - 12;
+}
+
+function renderLandscapePdfTablePage(
+  canvas: PdfCanvas,
+  headers: string[],
+  widths: number[],
+  rows: string[][],
+  startRow: number,
+  startY: number,
+  bottomY = 70,
+) {
+  const x = 48;
+  let y = startY;
+  let cursor = x;
+
+  canvas.rect(x, y - 18, 746, 24, "navy");
+  headers.forEach((header, index) => {
+    canvas.wrap(header, cursor + 5, y - 4, widths[index] - 10, 7, "white", true, 8);
+    cursor += widths[index];
+  });
+  y -= 28;
+
+  if (!rows.length) {
+    canvas.rect(x, y - 34, 746, 40, "soft");
+    canvas.text("No posted records found for this report yet.", x + 284, y - 12, 8, "muted");
+    return { nextRow: rows.length, y: y - 48 };
+  }
+
+  let rowIndex = startRow;
+  while (rowIndex < rows.length) {
+    const row = rows[rowIndex];
+    const cellLines = row.map((cell, index) => wrapLineCount(cell, widths[index] - 10, 6.4, 4));
+    const height = Math.max(26, Math.max(...cellLines) * 8.5 + 13);
+    if (y - height < bottomY) break;
+    canvas.rect(x, y - height + 5, 746, height, rowIndex % 2 === 0 ? "white" : "soft");
+    canvas.line(x, y + 5, x + 746, y + 5, "border", 0.5);
+    cursor = x;
+    row.forEach((cell, index) => {
+      canvas.wrap(cell || "-", cursor + 5, y - 7, widths[index] - 10, 6.4, "navy", false, 8.2, 4);
+      cursor += widths[index];
+    });
+    y -= height;
+    rowIndex += 1;
+  }
+
+  canvas.line(x, y + 5, x + 746, y + 5, "border", 0.5);
+  return { nextRow: rowIndex, y: y - 12 };
 }
 
 function profitLossAmount(line: ReportLine) {
@@ -5474,7 +5630,7 @@ async function bankReconciliationPdf(report: Report) {
 }
 
 async function landscapePdf(report: Report) {
-  const canvas = new PdfCanvas();
+  let canvas = new PdfCanvas();
   const style = blueprintFor(report);
   const title = titleFor(report);
   const recordCount = report.lines.length.toLocaleString("en-KE");
@@ -5482,29 +5638,38 @@ async function landscapePdf(report: Report) {
   const assets = await pdfAssets(report, "landscape");
   const tenantLogo = assets.find((asset) => asset.name === "TenantLogo");
   const solvaLogo = assets.find((asset) => asset.name === "SolvaLogo");
+  const headers = wideReportHeaders(report);
+  const rows = report.lines.map((line, index) => headers.map((header) => valueForHeader(report, line, index, header)));
+  const widths = wideTableWidths(headers);
+  const pages: string[] = [];
 
-  canvas.rect(0, 0, 842, 595, "white");
-  canvas.rect(0, 586, 842, 9, "navy");
-  canvas.rect(0, 586, 280, 9, "blue");
-  canvas.rect(280, 586, 280, 9, "cyan");
-  canvas.rect(560, 586, 282, 9, "gold");
-  canvas.text("SOLVA TRADE", 214, 300, 54, "watermark", true);
-  canvas.text("Run. Grow. Lead.", 332, 280, 15, "watermark");
+  const drawChrome = (pageNumber: number, compact = false) => {
+    canvas.rect(0, 0, 842, 595, "white");
+    canvas.rect(0, 586, 842, 9, "navy");
+    canvas.rect(0, 586, 280, 9, "blue");
+    canvas.rect(280, 586, 280, 9, "cyan");
+    canvas.rect(560, 586, 282, 9, "gold");
+    canvas.text("SOLVA TRADE", 214, 300, 54, "watermark", true);
+    canvas.text("Run. Grow. Lead.", 332, 280, 15, "watermark");
 
-  canvas.rect(48, 500, 54, 50, "surface");
-  if (!drawFittedImage(canvas, tenantLogo, 52, 504, 46, 42)) {
-    canvas.text(initials(report.businessName), 61, 520, 17, "blue", true);
-  }
-  canvas.text(report.businessName, 118, 538, 17, "navy", true);
-  canvas.wrap(`${report.businessLocation}${report.kraPin ? ` | KRA PIN: ${report.kraPin}` : ""}`, 118, 518, 330, 8, "slate");
-  canvas.text(title, 482, 538, 18, "navy", true);
-  canvas.text(style.label, 484, 518, 8, "blue", true);
-  canvas.text(`Reference: ${report.transaction["Reference number"]}`, 484, 504, 8, "muted");
-  canvas.rect(700, 506, 94, 28, "navy");
-  if (!drawFittedImage(canvas, solvaLogo, 704, 509, 86, 22)) {
-    canvas.text("SOLVA", 714, 518, 12, "white", true);
-    canvas.text("TRADE", 760, 518, 9, "cyan", true);
-  }
+    canvas.rect(48, compact ? 520 : 500, compact ? 42 : 54, compact ? 38 : 50, "surface");
+    if (!drawFittedImage(canvas, tenantLogo, 52, compact ? 524 : 504, compact ? 34 : 46, compact ? 30 : 42)) {
+      canvas.text(initials(report.businessName), compact ? 59 : 61, compact ? 536 : 520, compact ? 13 : 17, "blue", true);
+    }
+    canvas.text(report.businessName, compact ? 104 : 118, compact ? 548 : 538, compact ? 13 : 17, "navy", true);
+    canvas.wrap(`${report.businessLocation}${report.kraPin ? ` | KRA PIN: ${report.kraPin}` : ""}`, compact ? 104 : 118, compact ? 532 : 518, compact ? 330 : 330, 8, "slate");
+    canvas.text(title, 482, compact ? 548 : 538, compact ? 15 : 18, "navy", true);
+    canvas.text(style.label, 484, compact ? 530 : 518, 8, "blue", true);
+    canvas.text(`Reference: ${report.transaction["Reference number"]}`, 484, compact ? 516 : 504, 8, "muted");
+    canvas.rect(700, compact ? 522 : 506, 94, 28, "navy");
+    if (!drawFittedImage(canvas, solvaLogo, 704, compact ? 525 : 509, 86, 22)) {
+      canvas.text("SOLVA", 714, compact ? 534 : 518, 12, "white", true);
+      canvas.text("TRADE", 760, compact ? 534 : 518, 9, "cyan", true);
+    }
+    canvas.text(`Page ${pageNumber}`, 744, 494, 7.2, "muted");
+  };
+
+  drawChrome(1);
 
   canvas.rect(48, 444, 746, 42, "soft");
   const detailCards = catalogueDocument
@@ -5552,15 +5717,26 @@ async function landscapePdf(report: Report) {
   }
 
   canvas.text(catalogueDocument ? "PRICE LIST" : "REPORT DETAILS", 48, tableTitleY, 9, "blue", true);
-  const yAfterTable = renderLandscapePdfTable(canvas, report, tableStartY);
+  let pageNumber = 1;
+  let rendered = renderLandscapePdfTablePage(canvas, headers, widths, rows, 0, tableStartY, 52);
+  while (rendered.nextRow < rows.length) {
+    canvas.line(48, 40, 794, 40, "border", 0.5);
+    canvas.text(`${report.businessName} | ${report.processName}`, 48, 24, 7.2, "muted");
+    canvas.text(`Generated by Solva Trade on ${report.generatedAt}`, 318, 24, 7.2, "muted");
+    pages.push(canvas.output());
+    pageNumber += 1;
+    canvas = new PdfCanvas();
+    drawChrome(pageNumber, true);
+    rendered = renderLandscapePdfTablePage(canvas, headers, widths, rows, rendered.nextRow, 470, 52);
+  }
 
-  const footerY = Math.max(36, Math.min(84, yAfterTable));
+  const footerY = Math.max(36, Math.min(84, rendered.y));
   canvas.line(48, footerY, 794, footerY, "border", 0.5);
   canvas.text(`${report.businessName} | ${report.processName}`, 48, footerY - 16, 7.2, "muted");
   canvas.text(`Generated by Solva Trade on ${report.generatedAt}`, 318, footerY - 16, 7.2, "muted");
-  canvas.text("Page 1 of 1", 746, footerY - 16, 7.2, "muted");
+  pages.push(canvas.output());
 
-  return pdfDocument(canvas.output(), 842, 595, assets);
+  return pdfDocumentPages(pages, 842, 595, assets);
 }
 
 function drawCustomerInvoiceHeader(

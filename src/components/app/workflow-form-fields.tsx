@@ -51,6 +51,31 @@ function parseNumber(value: string | undefined) {
   return Number.isFinite(number) ? number : 0;
 }
 
+function normalizeSearch(value: unknown) {
+  return String(value ?? "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function searchScore(values: unknown[], query: string) {
+  const tokens = normalizeSearch(query).split(/\s+/).filter(Boolean);
+  if (!tokens.length) return 0;
+  const haystack = values.map(normalizeSearch);
+  if (!tokens.every((token) => haystack.some((value) => value.includes(token)))) return -1;
+  return tokens.every((token) => haystack.some((value) => value.startsWith(token))) ? 2 : 1;
+}
+
+function rankedOptions<T>(items: T[], query: string, values: (item: T) => unknown[], label: (item: T) => string) {
+  return items
+    .map((item) => ({ item, score: searchScore(values(item), query) }))
+    .filter(({ score }) => score >= 0)
+    .sort((a, b) => b.score - a.score || label(a.item).localeCompare(label(b.item)))
+    .map(({ item }) => item);
+}
+
 function defaultVatRate(values: Record<string, string>) {
   const rateValue = values.vat_rate ?? values.tax_rate;
   if (typeof rateValue === "string" && rateValue.trim() !== "") return parseNumber(rateValue);
@@ -163,6 +188,9 @@ export function WorkflowFormFields({
         const isInvoiceField = key === "invoice";
         const supplierIdKey = key === "preferred_supplier" ? "preferred_supplier_id" : "supplier_id";
         const selectedSupplier = suppliers.find((supplier) => supplier.id === values[supplierIdKey] || supplier.name === values[key]);
+        const customerOptions = rankedOptions(customers, values[key] ?? "", (customer) => [customer.name, customer.code, customer.phone], (customer) => customer.name);
+        const supplierOptions = rankedOptions(suppliers, values[key] ?? "", (supplier) => [supplier.name, supplier.code, supplier.phone, supplier.type], (supplier) => supplier.name);
+        const productOptions = rankedOptions(products, values[key] ?? "", (product) => [product.name, product.code, product.vatCode], (product) => product.name);
         const resolvedType =
           type === "text" && /^(subtotal|total|tax|amount|balance_due|discount|price|unit_price|quantity)$/.test(key) ? "number" : type;
         const isCalculated =
@@ -211,7 +239,7 @@ export function WorkflowFormFields({
                 placeholder="Search customer by name, code or phone"
               />
               <datalist id="customer-options">
-                {customers.map((customer) => (
+                {customerOptions.map((customer) => (
                   <option key={customer.id} value={customer.name}>
                     {customer.code} {customer.phone ? `- ${customer.phone}` : ""}
                   </option>
@@ -247,7 +275,7 @@ export function WorkflowFormFields({
                 placeholder="Search supplier by name, code or phone"
               />
               <datalist id={`${key}-supplier-options`}>
-                {suppliers.map((supplier) => (
+                {supplierOptions.map((supplier) => (
                   <option key={supplier.id} value={supplier.name}>
                     {supplier.name} - {supplier.code}{supplier.phone ? ` - ${supplier.phone}` : ""}
                   </option>
@@ -272,6 +300,7 @@ export function WorkflowFormFields({
               >
                 <option value="direct_supplier">Direct supplier</option>
                 <option value="local_market">Local market supplier</option>
+                <option value="tz_supplier">Tanzania Supplier</option>
                 <option value="spot_purchase">Spot purchase</option>
                 <option value="alternative_supplier">Alternative supplier</option>
                 <option value="emergency_purchase">Emergency purchase</option>
@@ -314,7 +343,7 @@ export function WorkflowFormFields({
                 placeholder="Search product by name, SKU or code"
               />
               <datalist id="product-options">
-                {products.map((product) => (
+                {productOptions.map((product) => (
                   <option key={product.id} value={product.name}>
                     {product.name} - {product.code} - Stock {product.available} - VAT {product.vatRate}%
                   </option>

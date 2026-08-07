@@ -40,10 +40,15 @@ function normalizeSearch(value: unknown) {
 }
 
 function matchesSearch(values: unknown[], query: string) {
+  return searchScore(values, query) >= 0;
+}
+
+function searchScore(values: unknown[], query: string) {
   const tokens = normalizeSearch(query).split(/\s+/).filter(Boolean);
-  if (!tokens.length) return true;
+  if (!tokens.length) return 0;
   const haystack = values.map(normalizeSearch);
-  return tokens.every((token) => haystack.some((value) => value.includes(token)));
+  if (!tokens.every((token) => haystack.some((value) => value.includes(token)))) return -1;
+  return tokens.every((token) => haystack.some((value) => value.startsWith(token))) ? 2 : 1;
 }
 
 export function MultiLineTransactionForm({ mode, customers = [], suppliers = [], products, today }: Props) {
@@ -52,6 +57,7 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
   const [selectedPartyId, setSelectedPartyId] = useState("");
   const [saleSourceSearch, setSaleSourceSearch] = useState("");
   const [saleSourceSupplierId, setSaleSourceSupplierId] = useState("");
+  const [showPreview, setShowPreview] = useState(false);
   const [selectedIndexes, setSelectedIndexes] = useState<Set<number>>(() => new Set());
   const pathname = usePathname();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -124,24 +130,31 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
   const partyName = mode === "sale" ? "field_customer_id" : "field_supplier_id";
   const partyOptions = mode === "sale" ? customers : suppliers;
   const filteredPartyOptions = useMemo(() => {
-    return partyOptions.filter((party) => {
-      const isSelected = selectedPartyId && party.id === selectedPartyId;
-      if (isSelected) return true;
-      return matchesSearch([party.name, party.code, party.phone], partySearch);
-    });
+    return partyOptions
+      .map((party) => ({
+        party,
+        score: selectedPartyId && party.id === selectedPartyId ? 3 : searchScore([party.name, party.code, party.phone], partySearch),
+      }))
+      .filter(({ score }) => score >= 0)
+      .sort((a, b) => b.score - a.score || a.party.name.localeCompare(b.party.name))
+      .map(({ party }) => party);
   }, [partyOptions, partySearch, selectedPartyId]);
   const filteredSaleSourceSuppliers = useMemo(() => {
-    return suppliers.filter((supplier) => {
-      const isSelected = saleSourceSupplierId && supplier.id === saleSourceSupplierId;
-      if (isSelected) return true;
-      return matchesSearch([supplier.name, supplier.code, supplier.phone, supplier.type], saleSourceSearch);
-    });
+    return suppliers
+      .map((supplier) => ({
+        supplier,
+        score: saleSourceSupplierId && supplier.id === saleSourceSupplierId ? 3 : searchScore([supplier.name, supplier.code, supplier.phone, supplier.type], saleSourceSearch),
+      }))
+      .filter(({ score }) => score >= 0)
+      .sort((a, b) => b.score - a.score || a.supplier.name.localeCompare(b.supplier.name))
+      .map(({ supplier }) => supplier);
   }, [saleSourceSearch, saleSourceSupplierId, suppliers]);
   const matchingIndexes = useMemo(() => {
     return new Set(
       products
         .map((product, index) => ({ product, index }))
-        .filter(({ product }) => matchesSearch([product.name, product.code, product.vatCode], search))
+        .filter(({ product }) => searchScore([product.name, product.code, product.vatCode], search) >= 0)
+        .sort((a, b) => searchScore([b.product.name, b.product.code, b.product.vatCode], search) - searchScore([a.product.name, a.product.code, a.product.vatCode], search))
         .map(({ index }) => index),
     );
   }, [products, search]);
@@ -159,6 +172,13 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
       return next;
     });
   }
+
+  const previewLines = useMemo(() => {
+    return Array.from(selectedIndexes)
+      .sort((a, b) => a - b)
+      .map((index) => products[index])
+      .filter(Boolean);
+  }, [products, selectedIndexes]);
 
   useEffect(() => {
     const form = containerRef.current?.closest("form");
@@ -297,16 +317,17 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
         {mode === "sale" ? (
           <>
             <label className="grid gap-2 text-sm font-semibold lg:col-span-2">
-              Profit source
+              Default profit source
               <select name="field_sale_source_type" defaultValue="auto_fifo" className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-normal">
                 <option value="auto_fifo">Auto from received stock</option>
                 <option value="direct_supplier">Direct supplier</option>
                 <option value="local_market">Local market</option>
+                <option value="tz_supplier">Tanzania Supplier</option>
                 <option value="spot_purchase">Spot purchase</option>
                 <option value="alternative_supplier">Alternative supplier</option>
                 <option value="emergency_purchase">Emergency purchase</option>
               </select>
-              <input type="hidden" name="label_sale_source_type" value="Profit source" />
+              <input type="hidden" name="label_sale_source_type" value="Default profit source" />
             </label>
             <label className="grid gap-2 text-sm font-semibold lg:col-span-2">
               Source supplier override
@@ -412,7 +433,7 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
       </section>
 
       <section className="overflow-x-auto rounded-md border border-slate-200">
-        <table className="min-w-[980px] w-full border-collapse text-sm">
+        <table className={`w-full border-collapse text-sm ${mode === "sale" ? "min-w-[1180px]" : "min-w-[980px]"}`}>
           <thead className="bg-slate-950 text-left text-xs uppercase tracking-wide text-white">
             <tr>
               <th className="w-12 px-3 py-3">Use</th>
@@ -422,6 +443,7 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
               <th className="px-3 py-3">{mode === "sale" ? "Selling price (VAT included)" : "Unit cost"}</th>
               {mode === "sale" ? <th className="px-3 py-3">Discount</th> : <th className="px-3 py-3">Rejected</th>}
               <th className="px-3 py-3">{mode === "sale" ? "VAT basis" : "Batch"}</th>
+              {mode === "sale" ? <th className="px-3 py-3">Source</th> : null}
               <th className="px-3 py-3">{mode === "sale" ? "Line total" : "Expiry"}</th>
             </tr>
           </thead>
@@ -534,6 +556,20 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
                     </td>
                   )}
                   {mode === "sale" ? (
+                    <td className="px-3 py-2 align-middle">
+                      <select
+                        name={`field_line_${index}_source_choice`}
+                        defaultValue="auto_fifo"
+                        className="w-40 rounded-md border border-slate-300 bg-white px-2 py-2 text-xs"
+                      >
+                        <option value="auto_fifo">Auto/FIFO</option>
+                        <option value="direct_supplier">Direct supplier</option>
+                        <option value="local_market">Local market</option>
+                        <option value="tz_supplier">Tanzania Supplier</option>
+                      </select>
+                    </td>
+                  ) : null}
+                  {mode === "sale" ? (
                     <td className="px-3 py-2 align-middle font-semibold"><span data-line-total={index}>{money(saleTotal)}</span></td>
                   ) : (
                     <td className="px-3 py-2 align-middle">
@@ -545,7 +581,7 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
             })}
             {!visibleIndexes.length ? (
               <tr>
-                <td colSpan={8} className="bg-white px-4 py-8 text-center text-sm text-slate-600">
+                <td colSpan={mode === "sale" ? 9 : 8} className="bg-white px-4 py-8 text-center text-sm text-slate-600">
                   No products match that search. Clear the search or add the product first.
                 </td>
               </tr>
@@ -553,6 +589,59 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
           </tbody>
         </table>
       </section>
+
+      {mode === "sale" ? (
+        <section className="rounded-md border border-slate-200 bg-white p-4">
+          <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
+            <div>
+              <p className="text-sm font-semibold text-slate-950">Preview before posting</p>
+              <p className="text-xs leading-5 text-slate-500">Check selected products, quantities and prices before clicking Create invoice.</p>
+            </div>
+            <button
+              type="button"
+              onClick={(event) => {
+                recalculate(event.currentTarget);
+                setShowPreview((current) => !current);
+              }}
+              className="inline-flex min-h-10 items-center justify-center rounded-md border border-slate-200 bg-slate-50 px-4 text-sm font-semibold text-slate-800"
+            >
+              {showPreview ? "Hide preview" : "Preview sale"}
+            </button>
+          </div>
+          {showPreview ? (
+            <div className="mt-3 overflow-x-auto rounded-md border border-slate-200">
+              <table className="min-w-[720px] w-full border-collapse text-sm">
+                <thead className="bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-600">
+                  <tr>
+                    <th className="px-3 py-2">#</th>
+                    <th className="px-3 py-2">Product</th>
+                    <th className="px-3 py-2">Code</th>
+                    <th className="px-3 py-2">VAT</th>
+                    <th className="px-3 py-2">Available</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {previewLines.length ? (
+                    previewLines.map((product, index) => (
+                      <tr key={product.id} className="border-t border-slate-200">
+                        <td className="px-3 py-2">{index + 1}</td>
+                        <td className="px-3 py-2 font-semibold text-slate-950">{product.name}</td>
+                        <td className="px-3 py-2 text-slate-600">{product.code || "-"}</td>
+                        <td className="px-3 py-2 text-slate-600">{product.vatCode || "VAT inclusive where applicable"}</td>
+                        <td className="px-3 py-2 text-slate-600">{product.trackInventory ? money(product.available) : "Service"}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={5} className="px-3 py-5 text-center text-sm text-slate-500">Tick products to preview the sale.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
       <section className="grid gap-3 rounded-md border border-cyan-100 bg-cyan-50 p-4 text-sm md:grid-cols-4">
         <div>

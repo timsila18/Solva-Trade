@@ -114,6 +114,7 @@ type SalesInvoiceLineInput = {
   taxAmount: number;
   lineSubtotal: number;
   lineTotal: number;
+  sourceChoice: string;
 };
 
 function salesInvoiceLinesFromForm(formData: FormData): SalesInvoiceLineInput[] {
@@ -138,6 +139,7 @@ function salesInvoiceLinesFromForm(formData: FormData): SalesInvoiceLineInput[] 
         taxAmount,
         lineSubtotal,
         lineTotal,
+        sourceChoice: getRawField(formData, `field_line_${index}_source_choice`) || "auto_fifo",
       };
     });
   }
@@ -159,6 +161,7 @@ function salesInvoiceLinesFromForm(formData: FormData): SalesInvoiceLineInput[] 
     taxAmount,
     lineSubtotal,
     lineTotal,
+    sourceChoice: getField(formData, "sale_source_type") || "auto_fifo",
   }];
 }
 
@@ -284,12 +287,78 @@ function sourceTypeValue(value: string) {
     spot_purchase: "spot_purchase",
     "alternative supplier": "alternative_supplier",
     alternative_supplier: "alternative_supplier",
+    "tanzania supplier": "alternative_supplier",
+    "tz supplier": "alternative_supplier",
+    tz_supplier: "alternative_supplier",
     "emergency purchase": "emergency_purchase",
     emergency_purchase: "emergency_purchase",
     "opening stock": "opening_stock",
     opening_stock: "opening_stock",
   };
   return sourceMap[value.trim().toLowerCase()] ?? "direct_supplier";
+}
+
+async function findSupplierByName(admin: SupabaseWorkspaceClient, businessId: string, supplierName: string) {
+  const code = supplierName.toLowerCase().includes("tz") || supplierName.toLowerCase().includes("tanzania") ? "TZ-SUP" : "";
+  if (code) {
+    const { data: byCode } = await admin
+      .from("suppliers")
+      .select("id, legal_name, trading_name")
+      .eq("business_id", businessId)
+      .eq("supplier_code", code)
+      .limit(1)
+      .maybeSingle();
+    if (byCode) {
+      return {
+        id: String(byCode.id),
+        name: String(byCode.trading_name || byCode.legal_name || supplierName),
+      };
+    }
+  }
+
+  const { data } = await admin
+    .from("suppliers")
+    .select("id, legal_name, trading_name")
+    .eq("business_id", businessId)
+    .eq("legal_name", supplierName)
+    .limit(1)
+    .maybeSingle();
+  return data
+    ? {
+        id: String(data.id),
+        name: String(data.trading_name || data.legal_name || supplierName),
+      }
+    : null;
+}
+
+async function sourceOverrideForSaleLine(
+  admin: SupabaseWorkspaceClient,
+  businessId: string,
+  lineChoice: string,
+  defaultSourceOverride: string,
+  defaultSupplierId: string | null,
+  defaultSupplierName: string | null,
+) {
+  const choice = lineChoice && lineChoice !== "auto_fifo" ? lineChoice : defaultSourceOverride;
+  if (!choice || choice === "auto_fifo") {
+    return { sourceType: "", supplierId: null as string | null, supplierName: null as string | null };
+  }
+
+  if (choice === "tz_supplier") {
+    const supplier = await findSupplierByName(admin, businessId, "TZ Supplier");
+    return {
+      sourceType: "alternative_supplier",
+      supplierId: supplier?.id ?? defaultSupplierId,
+      supplierName: supplier?.name ?? defaultSupplierName ?? "TZ Supplier",
+    };
+  }
+
+  const sourceType = sourceTypeValue(choice);
+  return {
+    sourceType,
+    supplierId: defaultSupplierId,
+    supplierName: defaultSupplierName,
+  };
 }
 
 function supplierTypeValue(value: string) {
@@ -504,6 +573,7 @@ async function postSalesInvoice(formData: FormData, userId: string, fallbackBusi
     const product = productsById.get(line.productId);
     if (!product?.track_inventory) continue;
     const unitCost = Number(product.standard_cost ?? 0);
+    const lineSource = await sourceOverrideForSaleLine(admin, businessId, line.sourceChoice, saleSourceOverride, saleSourceSupplierId, saleSourceSupplierName);
     const { data: movement, error: movementError } = await admin.from("stock_movements").insert({
       business_id: businessId,
       branch_id: branchId,
@@ -520,9 +590,9 @@ async function postSalesInvoice(formData: FormData, userId: string, fallbackBusi
       reference_document_id: invoice.id,
       reference_number: invoiceNumber,
       reason: "Sale submitted from Solva Trade workflow",
-      source_type: saleSourceOverride || null,
-      source_supplier_id: saleSourceSupplierId,
-      source_supplier_name: saleSourceSupplierName,
+      source_type: lineSource.sourceType || null,
+      source_supplier_id: lineSource.supplierId,
+      source_supplier_name: lineSource.supplierName,
       created_by: userId,
     }).select("id").single();
     if (movementError || !movement) throw new Error(movementError?.message ?? "Could not post stock movement.");
@@ -541,13 +611,13 @@ async function postSalesInvoice(formData: FormData, userId: string, fallbackBusi
       target_sale_unit_price: line.quantity > 0 ? line.lineSubtotal / line.quantity : 0,
     });
     if (allocationError) throw new Error(allocationError.message);
-    if (saleSourceOverride || saleSourceSupplierId) {
+    if (lineSource.sourceType || lineSource.supplierId) {
       const { error: allocationSourceError } = await admin
         .from("sales_source_allocations")
         .update({
-          source_type: saleSourceOverride || "unspecified",
-          source_supplier_id: saleSourceSupplierId,
-          source_supplier_name: saleSourceSupplierName,
+          source_type: lineSource.sourceType || "unspecified",
+          source_supplier_id: lineSource.supplierId,
+          source_supplier_name: lineSource.supplierName,
         })
         .eq("business_id", businessId)
         .eq("sales_invoice_id", invoice.id)
