@@ -1977,13 +1977,16 @@ async function kraEtrSalesReportLines(): Promise<ReportLine[]> {
       .limit(1),
   ]);
 
-  const invoiceRows = (invoices ?? []) as KraEtrInvoiceRow[];
+  const invoiceRows = ((invoices ?? []) as KraEtrInvoiceRow[]).filter((invoice) => {
+    const customer = relatedOne(invoice.customers) as { kra_pin?: string | null } | null;
+    return Boolean(String(customer?.kra_pin ?? "").trim());
+  });
   const invoiceIds = invoiceRows.map((invoice) => invoice.id).filter(Boolean);
   if (!invoiceIds.length) {
     return [
       {
         sku: "KRA-ETR",
-        description: `No posted sales found for ${period.label}.`,
+        description: `No posted KRA PIN customer sales found for ${period.label}.`,
         unit: "Monthly VAT prep",
         quantity: 0,
         unitPrice: 0,
@@ -1993,15 +1996,15 @@ async function kraEtrSalesReportLines(): Promise<ReportLine[]> {
         lineTotal: 0,
         warehouse: "Tax workspace",
         batch: period.label,
-        notes: "Post sales invoices dated within the 1st to 19th VAT-preparation window to populate this report.",
+        notes: "Post sales invoices for customers with KRA PINs dated within the 1st to 19th VAT-preparation window to populate this report.",
         details: {
           "Sr. No": "-",
-          "Customer KRA PIN": "No posted sales",
-          "Customer Name": "No posted sales",
+          "Customer KRA PIN": "No KRA PIN customer sales",
+          "Customer Name": "No KRA PIN customer sales",
           "KRA Device No.": "Not configured",
           "Invoice Date": `${period.start} to ${period.end}`,
-          "CUI Invoice No.": "No posted sales",
-          "Item Description": "No posted sales in this VAT-preparation window",
+          "CUI Invoice No.": "No KRA PIN customer sales",
+          "Item Description": "No posted sales for KRA PIN customers in this VAT-preparation window",
           "Exclusive Amount": money(0),
           VAT: money(0),
           "Inclusive Amount": money(0),

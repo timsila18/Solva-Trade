@@ -127,6 +127,12 @@ function todayIsoDate() {
   return `${value.year}-${value.month}-${value.day}`;
 }
 
+function kraEtrWindowLabel(today: string) {
+  const date = new Date(`${today.slice(0, 7)}-01T00:00:00+03:00`);
+  const month = new Intl.DateTimeFormat("en-KE", { month: "long", year: "numeric", timeZone: "Africa/Nairobi" }).format(date);
+  return `1 to 19 ${month}`;
+}
+
 function customerName(invoice: SalesInvoiceRow) {
   const customer = Array.isArray(invoice.customers) ? invoice.customers[0] : invoice.customers;
   return customer?.customer_name || "Walk-in customer";
@@ -271,6 +277,7 @@ export default async function SalesPage() {
   const [invoices, customers, suppliers] = await Promise.all([recentSales(), salesCustomers(), salesSuppliers()]);
   const today = todayIsoDate();
   const monthStart = `${today.slice(0, 7)}-01`;
+  const kraWindow = kraEtrWindowLabel(today);
   const invoicesNeedingFollowUp = invoices.filter((invoice) => asNumber(invoice.balance_due) > 0);
   const orderedInvoices = [...invoices].sort((a, b) => {
     const aOpen = asNumber(a.balance_due) > 0 ? 0 : 1;
@@ -311,7 +318,7 @@ export default async function SalesPage() {
       </section>
 
       <section className="mt-6 rounded-lg border border-cyan-100 bg-white p-5 shadow-sm">
-        <div className="grid gap-4 lg:grid-cols-3">
+        <div className="grid gap-4 lg:grid-cols-4">
           <div>
             <p className="text-sm font-semibold text-[var(--solva-blue-700)]">Sales History</p>
             <h2 className="mt-1 text-xl font-semibold text-slate-950">View invoices, payments, balances and receipts</h2>
@@ -348,6 +355,18 @@ export default async function SalesPage() {
             >
               <FileText className="h-4 w-4" />
               Open Reports
+            </a>
+          </div>
+          <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
+            <p className="text-sm font-semibold text-rose-700">Accountant VAT Report</p>
+            <h2 className="mt-1 text-xl font-semibold text-slate-950">KRA PIN sales</h2>
+            <p className="mt-2 text-sm leading-6 text-slate-600">Sales to customers with KRA PINs for {kraWindow}.</p>
+            <a
+              href="#vat-filing-report"
+              className="mt-4 inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-slate-950 px-5 text-sm font-semibold text-white"
+            >
+              <FileText className="h-4 w-4" />
+              Open Report
             </a>
           </div>
         </div>
@@ -421,6 +440,32 @@ export default async function SalesPage() {
             To
             <input name="to" type="date" defaultValue={today} className="mt-2 min-h-11 w-full rounded-md border border-slate-300 px-3 text-sm" />
           </label>
+          <div className="grid gap-2 sm:grid-cols-3 md:min-w-72">
+            <button name="format" value="pdf" className="min-h-11 rounded-md bg-[var(--solva-blue-700)] px-4 text-sm font-semibold text-white">PDF</button>
+            <button name="format" value="excel" className="min-h-11 rounded-md border border-cyan-200 bg-cyan-50 px-4 text-sm font-semibold text-[var(--solva-blue-700)]">Excel</button>
+            <button name="format" value="print" className="min-h-11 rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700">Print</button>
+          </div>
+        </form>
+      </section>
+
+      <section id="vat-filing-report" className="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
+          <div>
+            <p className="text-sm font-semibold text-rose-700">Accountant VAT report</p>
+            <h2 className="mt-1 text-xl font-semibold text-slate-950">KRA ETR sales for VAT filing</h2>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              Includes only sales to customers with KRA PINs for {kraWindow}, ready for the accountant before the 20th.
+            </p>
+          </div>
+          <Link href="/reports" className="text-sm font-semibold text-[var(--solva-blue-700)]">Full report centre</Link>
+        </div>
+        <form action="/api/exports" className="mt-4 flex flex-col gap-3 rounded-md bg-slate-50 p-4 md:flex-row md:items-end md:justify-between">
+          <input type="hidden" name="module" value="Tax" />
+          <input type="hidden" name="process" value="KRA ETR Sales Report" />
+          <div>
+            <p className="text-sm font-semibold text-slate-700">VAT preparation period</p>
+            <p className="mt-1 text-lg font-semibold text-slate-950">{kraWindow}</p>
+          </div>
           <div className="grid gap-2 sm:grid-cols-3 md:min-w-72">
             <button name="format" value="pdf" className="min-h-11 rounded-md bg-[var(--solva-blue-700)] px-4 text-sm font-semibold text-white">PDF</button>
             <button name="format" value="excel" className="min-h-11 rounded-md border border-cyan-200 bg-cyan-50 px-4 text-sm font-semibold text-[var(--solva-blue-700)]">Excel</button>
