@@ -1850,7 +1850,25 @@ function hourKey(value: string | null | undefined) {
   return new Intl.DateTimeFormat("en-KE", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Africa/Nairobi" }).format(date).slice(0, 2) + ":00";
 }
 
-function salesPeriodWindow(period: string | null) {
+function cleanDateParam(value: string | null | undefined) {
+  const text = String(value ?? "").trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null;
+}
+
+function salesPeriodWindow(period: string | null, searchParams?: URLSearchParams) {
+  const explicitStart = cleanDateParam(searchParams?.get("from") ?? searchParams?.get("startDate") ?? searchParams?.get("dateFrom"));
+  const explicitEnd = cleanDateParam(searchParams?.get("to") ?? searchParams?.get("endDate") ?? searchParams?.get("dateTo"));
+  if (explicitStart || explicitEnd) {
+    const today = todayIsoDate();
+    const start = explicitStart ?? explicitEnd ?? today;
+    const end = explicitEnd ?? explicitStart ?? today;
+    return {
+      label: start === end ? start : `${start} to ${end}`,
+      start: start <= end ? start : end,
+      end: start <= end ? end : start,
+    };
+  }
+
   const today = todayIsoDate();
   const lower = String(period ?? "").toLowerCase();
   if (lower.includes("annual") || lower.includes("year")) return { label: "This year", start: `${today.slice(0, 4)}-01-01`, end: today };
@@ -1878,10 +1896,10 @@ type SalesSourceAllocationRow = {
 
 async function salesOperationalData(searchParams?: URLSearchParams) {
   const businessId = await activeReportBusinessId();
-  if (!businessId) return { invoices: [] as SalesInvoiceRow[], items: [] as SalesItemRow[], allocations: [] as SalesSourceAllocationRow[], period: salesPeriodWindow(searchParams?.get("period") ?? null) };
+  if (!businessId) return { invoices: [] as SalesInvoiceRow[], items: [] as SalesItemRow[], allocations: [] as SalesSourceAllocationRow[], period: salesPeriodWindow(searchParams?.get("period") ?? null, searchParams) };
 
   const supabase = await createSupabaseServerClient();
-  const period = salesPeriodWindow(searchParams?.get("period") ?? null);
+  const period = salesPeriodWindow(searchParams?.get("period") ?? null, searchParams);
   const requestedCustomerId = searchParams?.get("customerId");
   let invoiceQuery = supabase
       .from("sales_invoices")
@@ -1892,7 +1910,7 @@ async function salesOperationalData(searchParams?: URLSearchParams) {
       .lte("invoice_date", period.end)
       .order("invoice_date", { ascending: true })
       .limit(3000);
-  if (requestedCustomerId) invoiceQuery = invoiceQuery.eq("customer_id", requestedCustomerId);
+  if (requestedCustomerId && requestedCustomerId !== "all") invoiceQuery = invoiceQuery.eq("customer_id", requestedCustomerId);
 
   const { data: invoices } = await invoiceQuery;
   const invoiceRows = (invoices ?? []) as SalesInvoiceRow[];

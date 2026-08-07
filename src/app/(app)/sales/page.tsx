@@ -4,6 +4,7 @@ import { completeProcessAction, reverseSalesInvoiceAction } from "@/app/(app)/ac
 import { PersistedForm } from "@/components/app/persisted-form";
 import { EmptyState, MetricCard, PageHero, PlainCard } from "@/components/ui/premium";
 import { salesSummary, salesWorkflows } from "@/lib/sales-data";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getActiveBusinessId } from "@/lib/tenant";
 
@@ -19,6 +20,12 @@ type SalesInvoiceRow = {
   balance_due: number | string | null;
   status: string | null;
   customers: { customer_name: string | null; phone: string | null } | { customer_name: string | null; phone: string | null }[] | null;
+};
+
+type CustomerOption = {
+  id: string;
+  customer_name: string | null;
+  customer_code: string | null;
 };
 
 const storyCards = [
@@ -102,6 +109,17 @@ function asNumber(value: number | string | null | undefined) {
   return Number.isFinite(amount) ? amount : 0;
 }
 
+function todayIsoDate() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    day: "2-digit",
+    month: "2-digit",
+    timeZone: "Africa/Nairobi",
+    year: "numeric",
+  }).formatToParts(new Date());
+  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${value.year}-${value.month}-${value.day}`;
+}
+
 function customerName(invoice: SalesInvoiceRow) {
   const customer = Array.isArray(invoice.customers) ? invoice.customers[0] : invoice.customers;
   return customer?.customer_name || "Walk-in customer";
@@ -159,13 +177,12 @@ function salesDocumentHref(invoice: SalesInvoiceRow, process: "Sales Receipt" | 
 async function recentSales() {
   try {
     const supabase = await createSupabaseServerClient();
+    const admin = createSupabaseAdminClient();
     const { data: userData } = await supabase.auth.getUser();
-    const businessId =
-      (await getActiveBusinessId()) ||
-      (typeof userData.user?.app_metadata?.active_business_id === "string" ? userData.user.app_metadata.active_business_id : null);
+    const businessId = await activeSalesBusinessId(userData.user?.id, userData.user?.app_metadata?.active_business_id);
     if (!businessId) return [];
 
-    const { data, error } = await supabase
+    const { data, error } = await admin
       .from("sales_invoices")
       .select("id, invoice_number, invoice_date, created_at, total_amount, amount_paid, balance_due, status, customers(customer_name, phone)")
       .eq("business_id", businessId)
@@ -183,8 +200,50 @@ async function recentSales() {
   }
 }
 
+async function activeSalesBusinessId(userId: string | undefined, metadataBusinessIdValue: unknown) {
+  if (!userId) return null;
+  const admin = createSupabaseAdminClient();
+  const cookieBusinessId = await getActiveBusinessId();
+  const metadataBusinessId = typeof metadataBusinessIdValue === "string" ? metadataBusinessIdValue : null;
+  const { data: memberships } = await admin
+    .from("business_memberships")
+    .select("business_id")
+    .eq("user_id", userId)
+    .eq("active", true)
+    .order("joined_at", { ascending: true });
+  const membershipIds = (memberships ?? []).map((membership) => String(membership.business_id));
+  return (
+    (cookieBusinessId && membershipIds.includes(cookieBusinessId) ? cookieBusinessId : null) ||
+    (metadataBusinessId && membershipIds.includes(metadataBusinessId) ? metadataBusinessId : null) ||
+    membershipIds[0] ||
+    null
+  );
+}
+
+async function salesCustomers() {
+  try {
+    const supabase = await createSupabaseServerClient();
+    const admin = createSupabaseAdminClient();
+    const { data: userData } = await supabase.auth.getUser();
+    const businessId = await activeSalesBusinessId(userData.user?.id, userData.user?.app_metadata?.active_business_id);
+    if (!businessId) return [] as CustomerOption[];
+    const { data } = await admin
+      .from("customers")
+      .select("id, customer_name, customer_code")
+      .eq("business_id", businessId)
+      .order("customer_name", { ascending: true })
+      .limit(2000);
+    return (data ?? []) as CustomerOption[];
+  } catch (error) {
+    console.warn("Could not load sales report customers", error);
+    return [] as CustomerOption[];
+  }
+}
+
 export default async function SalesPage() {
-  const invoices = await recentSales();
+  const [invoices, customers] = await Promise.all([recentSales(), salesCustomers()]);
+  const today = todayIsoDate();
+  const monthStart = `${today.slice(0, 7)}-01`;
   const invoicesNeedingFollowUp = invoices.filter((invoice) => asNumber(invoice.balance_due) > 0);
   const orderedInvoices = [...invoices].sort((a, b) => {
     const aOpen = asNumber(a.balance_due) > 0 ? 0 : 1;
@@ -225,22 +284,72 @@ export default async function SalesPage() {
       </section>
 
       <section className="mt-6 rounded-lg border border-cyan-100 bg-white p-5 shadow-sm">
-        <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
+        <div className="grid gap-4 lg:grid-cols-2">
           <div>
             <p className="text-sm font-semibold text-[var(--solva-blue-700)]">Sales History</p>
             <h2 className="mt-1 text-xl font-semibold text-slate-950">View invoices, payments, balances and receipts</h2>
             <p className="mt-2 text-sm leading-6 text-slate-600">
               Open one clear history list for all posted sales, paid receipts, part payments and follow-ups.
             </p>
+            <a
+              href="#invoice-history"
+              className="mt-4 inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-md bg-[var(--solva-blue-700)] px-5 text-sm font-semibold text-white shadow-sm hover:bg-[var(--solva-blue-800)]"
+            >
+              <FileText className="h-4 w-4" />
+              Sales History
+            </a>
           </div>
-          <a
-            href="#invoice-history"
-            className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-md bg-[var(--solva-blue-700)] px-5 text-sm font-semibold text-white shadow-sm hover:bg-[var(--solva-blue-800)]"
-          >
-            <FileText className="h-4 w-4" />
-            Sales History
-          </a>
+          <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
+            <p className="text-sm font-semibold text-emerald-700">Customer Sales Reports</p>
+            <h2 className="mt-1 text-xl font-semibold text-slate-950">Sales by customer</h2>
+            <p className="mt-2 text-sm leading-6 text-slate-600">Pick all customers or one customer, choose dates, then download.</p>
+            <a
+              href="#customer-sales-reports"
+              className="mt-4 inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-slate-950 px-5 text-sm font-semibold text-white"
+            >
+              <FileText className="h-4 w-4" />
+              Open Reports
+            </a>
+          </div>
         </div>
+      </section>
+
+      <section id="customer-sales-reports" className="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
+          <div>
+            <p className="text-sm font-semibold text-[var(--solva-blue-700)]">Customer sales reports</p>
+            <h2 className="mt-1 text-xl font-semibold text-slate-950">Download all sales or one customer’s sales</h2>
+          </div>
+          <Link href="/reports" className="text-sm font-semibold text-[var(--solva-blue-700)]">Full report centre</Link>
+        </div>
+        <form action="/api/exports" className="mt-4 grid gap-3 rounded-md bg-slate-50 p-4 md:grid-cols-[1.4fr_1fr_1fr_auto] md:items-end">
+          <input type="hidden" name="module" value="Sales" />
+          <input type="hidden" name="process" value="Customer Sales and Profit Report" />
+          <label className="text-sm font-semibold text-slate-700">
+            Customer
+            <select name="customerId" className="mt-2 min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-sm">
+              <option value="">All customers</option>
+              {customers.map((customer) => (
+                <option key={customer.id} value={customer.id}>
+                  {customer.customer_name || customer.customer_code || "Unnamed customer"}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-sm font-semibold text-slate-700">
+            From
+            <input name="from" type="date" defaultValue={monthStart} className="mt-2 min-h-11 w-full rounded-md border border-slate-300 px-3 text-sm" />
+          </label>
+          <label className="text-sm font-semibold text-slate-700">
+            To
+            <input name="to" type="date" defaultValue={today} className="mt-2 min-h-11 w-full rounded-md border border-slate-300 px-3 text-sm" />
+          </label>
+          <div className="grid gap-2 sm:grid-cols-3 md:min-w-72">
+            <button name="format" value="pdf" className="min-h-11 rounded-md bg-[var(--solva-blue-700)] px-4 text-sm font-semibold text-white">PDF</button>
+            <button name="format" value="excel" className="min-h-11 rounded-md border border-cyan-200 bg-cyan-50 px-4 text-sm font-semibold text-[var(--solva-blue-700)]">Excel</button>
+            <button name="format" value="print" className="min-h-11 rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700">Print</button>
+          </div>
+        </form>
       </section>
 
       <section id="invoice-history" className="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
