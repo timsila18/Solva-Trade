@@ -2471,7 +2471,7 @@ function customerSalesAndProfitLines(
       unitPrice: numberValue(item.unit_price),
       discount: cost,
       taxRate: `${margin.toFixed(1)}% margin`,
-      taxAmount: numberValue(item.tax_amount),
+      taxAmount: 0,
       lineTotal: profit,
       warehouse: String(relatedOne(invoice?.customers)?.customer_name ?? "Walk-in customer"),
       batch: allocation?.source || "FIFO source",
@@ -3924,6 +3924,7 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
   const liveGrnDetails = grnId ? lines[0]?.details ?? {} : {};
   const effectivePartyName = liveInvoiceDetails.Customer || liveGrnDetails.Supplier || priceListCustomerName || partyName;
   const isValuationReport = isProductMasterReport(moduleName, processName) || isProductProfileReport(moduleName, processName) || isInventoryOperationalReport(moduleName, processName);
+  const isCustomerSalesProfit = isCustomerSalesProfitReport(moduleName, processName);
   const lineValueTotal = lines.reduce((sum, line) => sum + line.lineTotal, 0);
   const isLiveCustomerInvoice = Boolean(invoiceId && liveInvoiceDetails["Invoice no."]);
   const liveInvoiceLineTotal = isLiveCustomerInvoice && lineValueTotal > 0 ? lineValueTotal : 0;
@@ -3945,6 +3946,8 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
       lines.reduce((sum, line) => sum + Math.max(0, line.quantity * line.unitPrice - line.discount), 0);
   const tax = isValuationReport
     ? 0
+    : isCustomerSalesProfit
+      ? 0
     : liveInvoiceTotals
       ? liveInvoiceTotals.tax
       : parseAmount(fieldValue(fields, ["tax"], "0")) || lines.reduce((sum, line) => sum + line.taxAmount, 0);
@@ -4063,7 +4066,7 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
     totals: {
       Subtotal: money(subtotal),
       Discount: money(discount),
-      Tax: money(tax),
+      ...(isCustomerSalesProfit ? {} : { Tax: money(tax) }),
       Total: money(total),
       ...(processName.toLowerCase().includes("invoice") ? { "Amount due": money(balanceDue) } : {}),
       "Amount paid": money(amountPaid),
@@ -4084,7 +4087,8 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
 
 function csv(report: Report) {
   const reportHeaders = lineHeaders(report);
-  const detailHeaders = [
+  const suppressTax = isCustomerSalesProfitReport(report.moduleName, report.processName);
+  const baseDetailHeaders = [
     "module",
     "process",
     "business_name",
@@ -4125,48 +4129,57 @@ function csv(report: Report) {
     "audit_notes",
     ...reportHeaders.map((header) => `report_${header.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "")}`),
   ];
+  const detailHeaders = suppressTax
+    ? baseDetailHeaders.filter((header) => !["tax_rate", "tax_amount", "total_tax"].includes(header))
+    : baseDetailHeaders;
   const auditNotes = report.auditTrail.join(" | ");
-  const rows = report.lines.map((line, index) => [
-    report.moduleName,
-    report.processName,
-    report.businessName,
-    report.businessLocation,
-    report.businessPhone,
-    report.businessEmail,
-    report.paymentInstructions.join(" | "),
-    report.kraPin,
-    report.partyName,
-    report.generatedBy,
-    report.generatedAt,
-    report.transaction["Reference number"],
-    report.transaction["Document date"],
-    report.transaction["Due or action date"],
-    report.transaction.Branch,
-    report.transaction.Currency,
-    report.transaction["Payment terms"],
-    report.transaction["Process status"],
-    line.sku,
-    line.description,
-    line.unit,
-    String(line.quantity),
-    money(line.unitPrice),
-    money(line.discount),
-    line.taxRate,
-    money(line.taxAmount),
-    money(line.lineTotal),
-    line.warehouse,
-    line.batch,
-    line.notes,
-    report.totals.Subtotal,
-    report.totals.Tax,
-    report.totals.Total,
-    report.totals["Balance due"],
-    report.approvals.Prepared,
-    report.approvals.Reviewed,
-    report.approvals.Approved,
-    auditNotes,
-    ...lineCells(report, line, index),
-  ]);
+  const rows = report.lines.map((line, index) => {
+    const cells = lineCells(report, line, index);
+    const rowByHeader: Record<string, string> = {
+      module: report.moduleName,
+      process: report.processName,
+      business_name: report.businessName,
+      business_location: report.businessLocation,
+      business_phone: report.businessPhone,
+      business_email: report.businessEmail,
+      payment_instructions: report.paymentInstructions.join(" | "),
+      kra_pin: report.kraPin,
+      report_owner: report.partyName,
+      generated_by: report.generatedBy,
+      generated_at: report.generatedAt,
+      reference_number: report.transaction["Reference number"],
+      document_date: report.transaction["Document date"],
+      due_or_action_date: report.transaction["Due or action date"],
+      branch: report.transaction.Branch,
+      currency: report.transaction.Currency,
+      payment_terms: report.transaction["Payment terms"],
+      process_status: report.transaction["Process status"],
+      sku: line.sku,
+      description: line.description,
+      unit: line.unit,
+      quantity: String(line.quantity),
+      unit_price: money(line.unitPrice),
+      discount: money(line.discount),
+      tax_rate: line.taxRate,
+      tax_amount: money(line.taxAmount),
+      line_total: money(line.lineTotal),
+      warehouse: line.warehouse,
+      batch: line.batch,
+      line_notes: line.notes,
+      subtotal: report.totals.Subtotal,
+      total_tax: report.totals.Tax ?? "",
+      grand_total: report.totals.Total,
+      balance_due: report.totals["Balance due"],
+      prepared_by: report.approvals.Prepared,
+      review_status: report.approvals.Reviewed,
+      approval_status: report.approvals.Approved,
+      audit_notes: auditNotes,
+    };
+    reportHeaders.forEach((header, headerIndex) => {
+      rowByHeader[`report_${header.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "")}`] = cells[headerIndex] ?? "";
+    });
+    return detailHeaders.map((header) => rowByHeader[header] ?? "");
+  });
 
   return [detailHeaders, ...rows]
     .map((row) => row.map((value) => `"${csvSafe(value).replaceAll('"', '""')}"`).join(","))
@@ -4273,6 +4286,11 @@ function isCustomerFacingInvoice(report: Report) {
     invoiceLike &&
     !nonCustomerInvoice
   );
+}
+
+function isCustomerSalesProfitReport(moduleName: string, processName: string) {
+  const value = `${moduleName} ${processName}`.toLowerCase();
+  return value.includes("customer sales and profit") || value.includes("sales generation per customer");
 }
 
 function valueForHeader(report: Report, line: ReportLine, index: number, header: string) {
@@ -5762,14 +5780,19 @@ async function landscapePdf(report: Report) {
   const tableTitleY = catalogueDocument ? 412 : 376;
   const tableStartY = catalogueDocument ? 390 : 354;
   if (!catalogueDocument) {
+    const productOrInventoryReport =
+      isProductMasterReport(report.moduleName, report.processName) || isInventoryOperationalReport(report.moduleName, report.processName);
+    const customerSalesProfitReport = isCustomerSalesProfitReport(report.moduleName, report.processName);
     const kpis = [
-      isProductMasterReport(report.moduleName, report.processName) || isInventoryOperationalReport(report.moduleName, report.processName)
+      productOrInventoryReport
         ? ["Stock value", report.totals.Total]
         : ["Subtotal", report.totals.Subtotal],
-      isProductMasterReport(report.moduleName, report.processName) || isInventoryOperationalReport(report.moduleName, report.processName)
+      productOrInventoryReport
         ? ["Records", recordCount]
-        : ["Tax", report.totals.Tax],
-      isProductMasterReport(report.moduleName, report.processName) || isInventoryOperationalReport(report.moduleName, report.processName)
+        : customerSalesProfitReport
+          ? ["Records", recordCount]
+          : ["Tax", report.totals.Tax],
+      productOrInventoryReport
         ? ["Review status", report.lines.length ? "Ready" : "No records"]
         : ["Total", report.totals.Total],
     ];
