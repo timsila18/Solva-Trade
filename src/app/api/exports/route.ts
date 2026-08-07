@@ -1495,16 +1495,23 @@ async function profitByCustomerReportLines(): Promise<ReportLine[]> {
     });
 }
 
-async function profitBySupplierSourceReportLines(): Promise<ReportLine[]> {
+async function profitBySupplierSourceReportLines(searchParams?: URLSearchParams): Promise<ReportLine[]> {
   const businessId = await activeReportBusinessId();
   if (!businessId) return [];
 
   const supabase = await createSupabaseServerClient();
-  const { data } = await supabase
+  const period = salesPeriodWindow(searchParams?.get("period") ?? null, searchParams);
+  const supplierId = searchParams?.get("supplierId");
+  let query = supabase
     .from("sales_source_allocations")
-    .select("source_type, source_supplier_name, quantity, total_cost, sale_value, gross_profit, products(product_name, sku, product_code)")
+    .select("source_type, source_supplier_id, source_supplier_name, quantity, total_cost, sale_value, gross_profit, allocated_at, products(product_name, sku, product_code)")
     .eq("business_id", businessId)
+    .gte("allocated_at", `${period.start}T00:00:00`)
+    .lte("allocated_at", `${period.end}T23:59:59`)
     .limit(5000);
+  if (supplierId && supplierId !== "all") query = query.eq("source_supplier_id", supplierId);
+
+  const { data } = await query;
 
   const grouped = new Map<string, { source: string; supplier: string; products: Set<string>; units: number; revenue: number; cost: number; profit: number }>();
   for (const row of data ?? []) {
@@ -1540,11 +1547,12 @@ async function profitBySupplierSourceReportLines(): Promise<ReportLine[]> {
         lineTotal: row.profit,
         warehouse: row.supplier,
         batch: row.source,
-        notes: row.profit >= 0 ? "This source/supplier is generating positive gross profit." : "This source/supplier is generating a loss; review buying and selling prices.",
+        notes: `${period.label}. ${row.profit >= 0 ? "This source/supplier is generating positive gross profit." : "This source/supplier is generating a loss; review buying and selling prices."}`,
         details: {
           "#": String(index + 1),
           Source: row.source,
           Supplier: row.supplier,
+          Period: period.label,
           Products: row.products.size.toString(),
           "Units sold": row.units.toLocaleString("en-KE", { maximumFractionDigits: 2 }),
           Revenue: money(row.revenue),
@@ -3896,7 +3904,7 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
         : processName.toLowerCase().includes("profit by customer") || processName.toLowerCase().includes("customer profit")
           ? await profitByCustomerReportLines()
         : processName.toLowerCase().includes("profit by supplier") || processName.toLowerCase().includes("supplier source profit")
-          ? await profitBySupplierSourceReportLines()
+          ? await profitBySupplierSourceReportLines(searchParams)
         : isSalesSourceReport(processName)
           ? await salesSourceReportLines(processName)
           : isFinancialStatementReport(moduleName, processName)

@@ -28,6 +28,13 @@ type CustomerOption = {
   customer_code: string | null;
 };
 
+type SupplierOption = {
+  id: string;
+  trading_name: string | null;
+  legal_name: string | null;
+  supplier_code: string | null;
+};
+
 const storyCards = [
   {
     label: "Customers buying from you",
@@ -240,8 +247,28 @@ async function salesCustomers() {
   }
 }
 
+async function salesSuppliers() {
+  try {
+    const supabase = await createSupabaseServerClient();
+    const admin = createSupabaseAdminClient();
+    const { data: userData } = await supabase.auth.getUser();
+    const businessId = await activeSalesBusinessId(userData.user?.id, userData.user?.app_metadata?.active_business_id);
+    if (!businessId) return [] as SupplierOption[];
+    const { data } = await admin
+      .from("suppliers")
+      .select("id, trading_name, legal_name, supplier_code")
+      .eq("business_id", businessId)
+      .order("trading_name", { ascending: true })
+      .limit(2000);
+    return (data ?? []) as SupplierOption[];
+  } catch (error) {
+    console.warn("Could not load sales report suppliers", error);
+    return [] as SupplierOption[];
+  }
+}
+
 export default async function SalesPage() {
-  const [invoices, customers] = await Promise.all([recentSales(), salesCustomers()]);
+  const [invoices, customers, suppliers] = await Promise.all([recentSales(), salesCustomers(), salesSuppliers()]);
   const today = todayIsoDate();
   const monthStart = `${today.slice(0, 7)}-01`;
   const invoicesNeedingFollowUp = invoices.filter((invoice) => asNumber(invoice.balance_due) > 0);
@@ -284,7 +311,7 @@ export default async function SalesPage() {
       </section>
 
       <section className="mt-6 rounded-lg border border-cyan-100 bg-white p-5 shadow-sm">
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className="grid gap-4 lg:grid-cols-3">
           <div>
             <p className="text-sm font-semibold text-[var(--solva-blue-700)]">Sales History</p>
             <h2 className="mt-1 text-xl font-semibold text-slate-950">View invoices, payments, balances and receipts</h2>
@@ -305,6 +332,18 @@ export default async function SalesPage() {
             <p className="mt-2 text-sm leading-6 text-slate-600">Pick all customers or one customer, choose dates, then download.</p>
             <a
               href="#customer-sales-reports"
+              className="mt-4 inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-slate-950 px-5 text-sm font-semibold text-white"
+            >
+              <FileText className="h-4 w-4" />
+              Open Reports
+            </a>
+          </div>
+          <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
+            <p className="text-sm font-semibold text-amber-700">Supplier Sales Reports</p>
+            <h2 className="mt-1 text-xl font-semibold text-slate-950">Profit by supplier</h2>
+            <p className="mt-2 text-sm leading-6 text-slate-600">See whose goods sold best and brought the strongest gross profit.</p>
+            <a
+              href="#supplier-sales-reports"
               className="mt-4 inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-slate-950 px-5 text-sm font-semibold text-white"
             >
               <FileText className="h-4 w-4" />
@@ -332,6 +371,44 @@ export default async function SalesPage() {
               {customers.map((customer) => (
                 <option key={customer.id} value={customer.id}>
                   {customer.customer_name || customer.customer_code || "Unnamed customer"}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-sm font-semibold text-slate-700">
+            From
+            <input name="from" type="date" defaultValue={monthStart} className="mt-2 min-h-11 w-full rounded-md border border-slate-300 px-3 text-sm" />
+          </label>
+          <label className="text-sm font-semibold text-slate-700">
+            To
+            <input name="to" type="date" defaultValue={today} className="mt-2 min-h-11 w-full rounded-md border border-slate-300 px-3 text-sm" />
+          </label>
+          <div className="grid gap-2 sm:grid-cols-3 md:min-w-72">
+            <button name="format" value="pdf" className="min-h-11 rounded-md bg-[var(--solva-blue-700)] px-4 text-sm font-semibold text-white">PDF</button>
+            <button name="format" value="excel" className="min-h-11 rounded-md border border-cyan-200 bg-cyan-50 px-4 text-sm font-semibold text-[var(--solva-blue-700)]">Excel</button>
+            <button name="format" value="print" className="min-h-11 rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700">Print</button>
+          </div>
+        </form>
+      </section>
+
+      <section id="supplier-sales-reports" className="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
+          <div>
+            <p className="text-sm font-semibold text-amber-700">Supplier sales reports</p>
+            <h2 className="mt-1 text-xl font-semibold text-slate-950">Download sales and profit by supplier/source</h2>
+          </div>
+          <Link href="/reports" className="text-sm font-semibold text-[var(--solva-blue-700)]">Full report centre</Link>
+        </div>
+        <form action="/api/exports" className="mt-4 grid gap-3 rounded-md bg-slate-50 p-4 md:grid-cols-[1.4fr_1fr_1fr_auto] md:items-end">
+          <input type="hidden" name="module" value="Sales" />
+          <input type="hidden" name="process" value="Profit by Supplier and Source Report" />
+          <label className="text-sm font-semibold text-slate-700">
+            Supplier
+            <select name="supplierId" className="mt-2 min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-sm">
+              <option value="">All suppliers and sources</option>
+              {suppliers.map((supplier) => (
+                <option key={supplier.id} value={supplier.id}>
+                  {supplier.trading_name || supplier.legal_name || supplier.supplier_code || "Unnamed supplier"}
                 </option>
               ))}
             </select>
