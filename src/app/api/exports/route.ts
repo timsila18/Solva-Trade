@@ -171,6 +171,10 @@ function paymentInstructions(details: PaymentDetails, businessName: string, fall
   return lines;
 }
 
+function displayBusinessName(name: string) {
+  return name.replace(/\bCymereg\b/g, "Cymreg");
+}
+
 function pdfText(value: string) {
   return value
     .replace(/[^\x20-\x7E]/g, " ")
@@ -414,6 +418,7 @@ function isSalesOperationalReport(moduleName: string, processName: string) {
     value.includes("weekly route sales report") ||
     value.includes("sales tracking report") ||
     value.includes("customer sales and profit report") ||
+    value.includes("customer sales statement") ||
     value.includes("sales generation per customer") ||
     value.includes("deal loss reasons report") ||
     value.includes("monthly retail sales summary report") ||
@@ -1434,70 +1439,72 @@ async function profitByCustomerReportLines(searchParams?: URLSearchParams): Prom
   const supabase = await createSupabaseServerClient();
   const period = salesPeriodWindow(searchParams?.get("period") ?? null, searchParams);
   const requestedCustomerId = searchParams?.get("customerId");
-  const { data } = await supabase
-    .from("sales_source_allocations")
-    .select("quantity, total_cost, sale_value, gross_profit, allocated_at, sales_invoices(invoice_number, invoice_date, customer_id, customers(customer_name, customer_code, kra_pin))")
+  let invoiceQuery = supabase
+    .from("sales_invoices")
+    .select("id, invoice_number, invoice_date, total_amount, amount_paid, balance_due, status, customer_id, customers(customer_name, customer_code, kra_pin, phone)")
     .eq("business_id", businessId)
-    .gte("allocated_at", `${period.start}T00:00:00`)
-    .lte("allocated_at", `${period.end}T23:59:59`)
-    .limit(5000);
+    .neq("status", "reversed")
+    .gte("invoice_date", period.start)
+    .lte("invoice_date", period.end)
+    .order("invoice_date", { ascending: true })
+    .limit(3000);
+  if (requestedCustomerId && requestedCustomerId !== "all") invoiceQuery = invoiceQuery.eq("customer_id", requestedCustomerId);
 
-  const grouped = new Map<string, { customer: string; code: string; kraPin: string; invoices: Set<string>; units: number; revenue: number; cost: number; profit: number }>();
-  for (const row of data ?? []) {
-    const invoiceRecord = Array.isArray(row.sales_invoices) ? row.sales_invoices[0] : row.sales_invoices;
-    if (requestedCustomerId && requestedCustomerId !== "all" && String(invoiceRecord?.customer_id ?? "") !== requestedCustomerId) continue;
-    const customerRecord = Array.isArray(invoiceRecord?.customers) ? invoiceRecord?.customers[0] : invoiceRecord?.customers;
-    const customer = customerRecord as { customer_name?: string | null; customer_code?: string | null; kra_pin?: string | null } | null;
-    const name = String(customer?.customer_name ?? "Customer not recorded");
-    const current = grouped.get(name) ?? {
-      customer: name,
-      code: String(customer?.customer_code ?? ""),
-      kraPin: String(customer?.kra_pin ?? ""),
-      invoices: new Set<string>(),
-      units: 0,
-      revenue: 0,
-      cost: 0,
-      profit: 0,
+  const { data: invoices } = await invoiceQuery;
+  const invoiceRows = (invoices ?? []) as SalesInvoiceRow[];
+  const invoiceIds = invoiceRows.map((invoice) => invoice.id).filter(Boolean);
+  if (!invoiceIds.length) return [];
+
+  const { data: items } = await supabase
+    .from("sales_invoice_items")
+    .select("id, invoice_id, product_id, invoice_quantity, unit_price, line_total, products(product_name, product_code, sku)")
+    .eq("business_id", businessId)
+    .in("invoice_id", invoiceIds)
+    .order("invoice_id", { ascending: true })
+    .limit(10000);
+
+  const invoicesById = new Map(invoiceRows.map((invoice) => [String(invoice.id), invoice]));
+  return ((items ?? []) as SalesItemRow[]).map((item, index) => {
+    const invoice = invoicesById.get(String(item.invoice_id));
+    const product = relatedOne(item.products);
+    const customer = relatedOne(invoice?.customers) as { customer_name?: string | null; customer_code?: string | null; kra_pin?: string | null; phone?: string | null } | null;
+    const quantity = numberValue(item.invoice_quantity);
+    const unitPrice = numberValue(item.unit_price);
+    const lineTotal = numberValue(item.line_total);
+    const customerName = String(customer?.customer_name ?? "Walk-in customer");
+    return {
+      sku: String(product?.sku ?? product?.product_code ?? ""),
+      description: String(product?.product_name ?? "Sold item"),
+      unit: "Item",
+      quantity,
+      unitPrice,
+      discount: 0,
+      taxRate: "Included where applicable",
+      taxAmount: 0,
+      lineTotal,
+      warehouse: customerName,
+      batch: String(invoice?.invoice_number ?? ""),
+      notes: `Invoice ${String(invoice?.invoice_number ?? "not recorded")} dated ${dateKey(invoice?.invoice_date)}.`,
+      details: {
+        "#": String(index + 1),
+        Date: dateKey(invoice?.invoice_date),
+        Customer: customerName,
+        "Customer code": String(customer?.customer_code ?? "-"),
+        "Customer KRA PIN": String(customer?.kra_pin ?? "-"),
+        "Customer phone": String(customer?.phone ?? "-"),
+        "Invoice no.": String(invoice?.invoice_number ?? ""),
+        Product: String(product?.product_name ?? "Sold item"),
+        SKU: String(product?.sku ?? product?.product_code ?? ""),
+        Qty: quantity.toLocaleString("en-KE", { maximumFractionDigits: 2 }),
+        Rate: money(unitPrice),
+        Amount: money(lineTotal),
+        "Payment status": numberValue(invoice?.balance_due) <= 0 ? "Paid" : numberValue(invoice?.amount_paid) > 0 ? "Part paid" : "Unpaid",
+        "Amount paid": money(numberValue(invoice?.amount_paid)),
+        "Balance due": money(numberValue(invoice?.balance_due)),
+        Period: period.label,
+      },
     };
-    if (invoiceRecord?.invoice_number) current.invoices.add(String(invoiceRecord.invoice_number));
-    current.units += numberValue(row.quantity);
-    current.revenue += numberValue(row.sale_value);
-    current.cost += numberValue(row.total_cost);
-    current.profit += numberValue(row.gross_profit);
-    grouped.set(name, current);
-  }
-
-  return Array.from(grouped.values())
-    .sort((a, b) => b.profit - a.profit)
-    .map((row, index) => {
-      const margin = row.revenue ? (row.profit / row.revenue) * 100 : 0;
-      return {
-        sku: row.code || String(index + 1).padStart(3, "0"),
-        description: row.customer,
-        unit: "Customer",
-        quantity: row.units,
-        unitPrice: row.cost,
-        discount: row.revenue,
-        taxRate: `${margin.toFixed(1)}% margin`,
-        taxAmount: row.cost,
-        lineTotal: row.profit,
-        warehouse: "Customer profit",
-        batch: `${row.invoices.size} invoice${row.invoices.size === 1 ? "" : "s"}`,
-        notes: `${period.label}. ${row.profit >= 0 ? "Profitable customer after received-stock costs." : "Loss-making customer; review prices, discounts or buying cost."}`,
-        details: {
-          "#": String(index + 1),
-          Customer: row.customer,
-          Period: period.label,
-          "Customer code": row.code || "-",
-          Invoices: row.invoices.size.toString(),
-          "Units sold": row.units.toLocaleString("en-KE", { maximumFractionDigits: 2 }),
-          Sales: money(row.revenue),
-          "Supply cost": money(row.cost),
-          "Gross profit": money(row.profit),
-          Margin: `${margin.toFixed(1)}%`,
-        },
-      };
-    });
+  });
 }
 
 async function profitBySupplierSourceReportLines(searchParams?: URLSearchParams): Promise<ReportLine[]> {
@@ -1782,7 +1789,10 @@ type SalesInvoiceRow = {
   status?: string | null;
   delivery_status?: string | null;
   created_at?: string | null;
-  customers?: { customer_name?: string | null; customer_code?: string | null } | { customer_name?: string | null; customer_code?: string | null }[] | null;
+  customers?:
+    | { customer_name?: string | null; customer_code?: string | null; kra_pin?: string | null; phone?: string | null }
+    | { customer_name?: string | null; customer_code?: string | null; kra_pin?: string | null; phone?: string | null }[]
+    | null;
   branches?: { branch_name?: string | null; branch_code?: string | null } | { branch_name?: string | null; branch_code?: string | null }[] | null;
 };
 
@@ -2648,6 +2658,7 @@ function personInitials(name: string) {
 }
 
 function titleFor(report: Report) {
+  if (isCustomerSalesStatementReport(report.moduleName, report.processName)) return "CUSTOMER SALES STATEMENT";
   return report.processName.toUpperCase();
 }
 
@@ -3466,6 +3477,19 @@ function blueprintFromTerms(report: Report): DocumentBlueprint {
       emphasis: "report",
     };
   }
+  if (isCustomerSalesStatementReport(report.moduleName, report.processName)) {
+    return {
+      ...base,
+      accent: "#1455D9",
+      soft: "#EEF6FF",
+      label: "Customer sales statement",
+      table: "Goods sold, invoices, payments and balances for the selected customer",
+      headers: ["#", "Date", "Invoice no.", "Product", "SKU", "Qty", "Rate", "Amount", "Payment status", "Balance due"],
+      signatures: [],
+      footerNote: "Customer-facing statement showing goods sold, invoice values, payments and outstanding balances.",
+      emphasis: "report",
+    };
+  }
   if (value.includes("profit by customer") || value.includes("customer profit")) {
     return {
       ...base,
@@ -3659,7 +3683,8 @@ function templateFor(report: Report): DocumentTemplate {
 }
 
 function shouldShowPaymentInstructions(report: Report) {
-  if (report.businessName.toLowerCase().includes("cymereg") && isDayToDayDocument(report)) {
+  const businessName = report.businessName.toLowerCase();
+  if ((businessName.includes("cymereg") || businessName.includes("cymreg")) && isDayToDayDocument(report)) {
     return false;
   }
 
@@ -3866,7 +3891,7 @@ async function tenantContext() {
 
     if (!business) return { ...fallback, ...metadataTenant };
     const businessLogoPath = await signedBusinessLogoPath(business.logo_path);
-    const businessName = business.trading_name ?? business.legal_name ?? fallback.businessName;
+    const businessName = displayBusinessName(business.trading_name ?? business.legal_name ?? fallback.businessName);
     const businessPhone = business.phone ?? metadataPhone;
 
     return {
@@ -3909,8 +3934,7 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
       ? await goodsReceivedDocumentLines(grnId)
       : isPurchaseSourceReport(processName)
         ? await purchaseSourceReportLines(processName)
-        : processName.toLowerCase().includes("customer sales and profit") ||
-            processName.toLowerCase().includes("sales generation per customer") ||
+        : isCustomerSalesStatementReport(moduleName, processName) ||
             processName.toLowerCase().includes("profit by customer") ||
             processName.toLowerCase().includes("customer profit")
           ? await profitByCustomerReportLines(searchParams)
@@ -4209,8 +4233,9 @@ function logoHtml(report: Report) {
   if (report.businessLogoPath) {
     return `<img src="${htmlEscape(report.businessLogoPath)}" alt="${htmlEscape(report.businessName)} logo" />`;
   }
-  if (report.businessName.toLowerCase().includes("cymereg")) {
-    return `<img src="/cymereg-enterprises-logo.svg" alt="Cymereg Enterprises logo" />`;
+  const cleanBusinessName = report.businessName.toLowerCase();
+  if (cleanBusinessName.includes("cymereg") || cleanBusinessName.includes("cymreg")) {
+    return `<img src="/cymereg-enterprises-logo.svg" alt="Cymreg Enterprises logo" />`;
   }
   return `<span>${htmlEscape(initials(report.businessName))}</span>`;
 }
@@ -4278,8 +4303,8 @@ function lineHeaders(report: Report) {
     return ["#", "Product or service", "SKU", "Qty", "Rate", "Amount", "Tax"];
   }
   const value = `${report.moduleName} ${report.processName}`.toLowerCase();
-  if (value.includes("customer sales and profit") || value.includes("sales generation per customer")) {
-    return ["#", "Customer", "Period", "Invoices", "Units sold", "Sales", "Supply cost", "Gross profit", "Margin"];
+  if (isCustomerSalesStatementReport(report.moduleName, report.processName)) {
+    return ["#", "Date", "Invoice no.", "Product", "SKU", "Qty", "Rate", "Amount", "Payment status", "Balance due"];
   }
   if (value.includes("profit by supplier") || value.includes("supplier source profit")) {
     return ["#", "Source", "Supplier", "Period", "Products", "Units sold", "Sales", "Supply cost", "Gross profit", "Margin"];
@@ -4308,13 +4333,21 @@ function isCustomerFacingInvoice(report: Report) {
 }
 
 function isCustomerSalesProfitReport(moduleName: string, processName: string) {
+  return isCustomerSalesStatementReport(moduleName, processName) || isSupplierProfitReport(moduleName, processName);
+}
+
+function isCustomerSalesStatementReport(moduleName: string, processName: string) {
   const value = `${moduleName} ${processName}`.toLowerCase();
   return (
+    value.includes("customer sales statement") ||
     value.includes("customer sales and profit") ||
-    value.includes("sales generation per customer") ||
-    value.includes("profit by supplier") ||
-    value.includes("supplier source profit")
+    value.includes("sales generation per customer")
   );
+}
+
+function isSupplierProfitReport(moduleName: string, processName: string) {
+  const value = `${moduleName} ${processName}`.toLowerCase();
+  return value.includes("profit by supplier") || value.includes("supplier source profit");
 }
 
 function valueForHeader(report: Report, line: ReportLine, index: number, header: string) {
@@ -4505,6 +4538,18 @@ function introCards(report: Report, columns: "two-column" | "invoice-grid" | "po
 function templateIntro(report: Report) {
   const blueprint = blueprintFor(report);
   const template = templateFor(report);
+  if (isCustomerSalesStatementReport(report.moduleName, report.processName)) {
+    const period = report.lines[0]?.details?.Period ?? `${report.transaction["Document date"]} to ${report.transaction["Due / action date"]}`;
+    return `
+      <section class="statement-summary">
+        <div><span>Customer</span><strong>${htmlEscape(report.partyName)}</strong></div>
+        <div><span>Period</span><strong>${htmlEscape(period)}</strong></div>
+        <div><span>Generated on</span><strong>${htmlEscape(report.generatedAt)}</strong></div>
+        <div><span>Total sales</span><strong>${htmlEscape(report.totals.Total)}</strong></div>
+      </section>
+      <section class="reason-box"><h3>Customer account summary</h3><p>Goods sold, invoice values, payments received and balances still outstanding for the selected period.</p></section>
+    `;
+  }
   if (blueprint.emphasis === "receipt") {
     const status = receiptPaymentStatus(report);
     return `
@@ -5055,7 +5100,8 @@ function wideReportHeaders(report: Report) {
     "Inventory Discrepancy Report": ["Item no.", "Item name", "Vendor", "On-hand quantity", "Actual item count", "Inventory discrepancy (auto-fill)", "Reorder level", "Item discontinued?"],
     "Inventory Damage Report": ["Item no.", "Name", "Vendor", "Condition", "Damage report", "Quantity", "Asset value", "Total value"],
     "Sales Tracking Report": ["Product name", "Cost per item", "Markup percentage", "Total sold", "Total revenue", "Profit per item", "Total income"],
-    "Customer Sales and Profit Report": ["#", "Customer", "Period", "Invoices", "Units sold", "Sales", "Supply cost", "Gross profit", "Margin"],
+    "Customer Sales and Profit Report": ["#", "Date", "Invoice no.", "Product", "SKU", "Qty", "Rate", "Amount", "Payment status", "Balance due"],
+    "Customer Sales Statement": ["#", "Date", "Invoice no.", "Product", "SKU", "Qty", "Rate", "Amount", "Payment status", "Balance due"],
     "Profit by Supplier and Source Report": ["#", "Source", "Supplier", "Period", "Products", "Units sold", "Sales", "Supply cost", "Gross profit", "Margin"],
     "KRA ETR Sales Report": ["Sr. No", "Customer KRA PIN", "Customer Name", "KRA Device No.", "Invoice Date", "CUI Invoice No.", "Item Description", "Exclusive Amount", "VAT", "Inclusive Amount"],
   };
@@ -5782,6 +5828,8 @@ async function landscapePdf(report: Report) {
   drawChrome(1);
 
   canvas.rect(48, 444, 746, 42, "soft");
+  const customerStatementDocument = isCustomerSalesStatementReport(report.moduleName, report.processName);
+  const statementPeriod = report.lines[0]?.details?.Period ?? `${report.transaction["Document date"]} to ${report.transaction["Due / action date"]}`;
   const detailCards = catalogueDocument
     ? [
         ["Prepared for", report.partyName],
@@ -5789,6 +5837,13 @@ async function landscapePdf(report: Report) {
         ["Products listed", recordCount],
         ["Currency", report.transaction.Currency],
       ]
+    : customerStatementDocument
+      ? [
+          ["Customer", report.partyName],
+          ["Statement period", statementPeriod],
+          ["Generated on", report.generatedAt],
+          ["Total sales", report.totals.Total],
+        ]
     : [
         ["Generated by", `${report.generatedBy} - ${roleLabel(report.generatedByRole)}`],
         ["Generated on", report.generatedAt],
@@ -5806,18 +5861,22 @@ async function landscapePdf(report: Report) {
   if (!catalogueDocument) {
     const productOrInventoryReport =
       isProductMasterReport(report.moduleName, report.processName) || isInventoryOperationalReport(report.moduleName, report.processName);
-    const customerSalesProfitReport = isCustomerSalesProfitReport(report.moduleName, report.processName);
+    const customerSalesStatementReport = isCustomerSalesStatementReport(report.moduleName, report.processName);
     const kpis = [
       productOrInventoryReport
         ? ["Stock value", report.totals.Total]
+        : customerSalesStatementReport
+          ? ["Total sales", report.totals.Total]
         : ["Subtotal", report.totals.Subtotal],
       productOrInventoryReport
         ? ["Records", recordCount]
-        : customerSalesProfitReport
-          ? ["Records", recordCount]
+        : customerSalesStatementReport
+          ? ["Amount paid", report.totals["Amount paid"] ?? "KES 0.00"]
           : ["Tax", report.totals.Tax],
       productOrInventoryReport
         ? ["Review status", report.lines.length ? "Ready" : "No records"]
+        : customerSalesStatementReport
+          ? ["Balance due", report.totals["Balance due"] ?? "KES 0.00"]
         : ["Total", report.totals.Total],
     ];
     kpis.forEach(([label, value], index) => {
@@ -5836,7 +5895,7 @@ async function landscapePdf(report: Report) {
   let rendered = renderLandscapePdfTablePage(canvas, headers, widths, rows, 0, tableStartY, 52);
   while (rendered.nextRow < rows.length) {
     canvas.line(48, 40, 794, 40, "border", 0.5);
-    canvas.text(`${report.businessName} | ${report.processName}`, 48, 24, 7.2, "muted");
+    canvas.text(`${report.businessName} | ${titleFor(report)}`, 48, 24, 7.2, "muted");
     canvas.text(`Generated by Solva Trade on ${report.generatedAt}`, 318, 24, 7.2, "muted");
     pages.push(canvas.output());
     pageNumber += 1;
@@ -5847,7 +5906,7 @@ async function landscapePdf(report: Report) {
 
   const footerY = Math.max(36, Math.min(84, rendered.y));
   canvas.line(48, footerY, 794, footerY, "border", 0.5);
-  canvas.text(`${report.businessName} | ${report.processName}`, 48, footerY - 16, 7.2, "muted");
+  canvas.text(`${report.businessName} | ${titleFor(report)}`, 48, footerY - 16, 7.2, "muted");
   canvas.text(`Generated by Solva Trade on ${report.generatedAt}`, 318, footerY - 16, 7.2, "muted");
   pages.push(canvas.output());
 

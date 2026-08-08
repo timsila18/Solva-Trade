@@ -410,14 +410,14 @@ export default async function SalesPage() {
       <section id="customer-sales-reports" className="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
           <div>
-            <p className="text-sm font-semibold text-[var(--solva-blue-700)]">Customer sales reports</p>
-            <h2 className="mt-1 text-xl font-semibold text-slate-950">Download all sales or one customer’s sales</h2>
+            <p className="text-sm font-semibold text-[var(--solva-blue-700)]">Customer sales statements</p>
+            <h2 className="mt-1 text-xl font-semibold text-slate-950">Download all sales or one customer&apos;s sales</h2>
           </div>
           <Link href="/reports" className="text-sm font-semibold text-[var(--solva-blue-700)]">Full report centre</Link>
         </div>
         <form action="/api/exports" className="mt-4 grid gap-3 rounded-md bg-slate-50 p-4 md:grid-cols-[1.4fr_1fr_1fr_auto] md:items-end">
           <input type="hidden" name="module" value="Sales" />
-          <input type="hidden" name="process" value="Customer Sales and Profit Report" />
+          <input type="hidden" name="process" value="Customer Sales Statement" />
           <label className="text-sm font-semibold text-slate-700">
             Customer
             <select name="customerId" className="mt-2 min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-sm">
