@@ -163,6 +163,19 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
       .map((_, index) => index)
       .filter((index) => matchingIndexes.has(index) || selectedIndexes.has(index));
   }, [matchingIndexes, products, selectedIndexes]);
+  const productSearchResults = useMemo(() => {
+    const query = search.trim();
+    if (!query) return [];
+    return products
+      .map((product, index) => ({
+        product,
+        index,
+        score: searchScore([product.name, product.code, product.vatCode], query),
+      }))
+      .filter(({ score }) => score >= 0)
+      .sort((a, b) => b.score - a.score || a.product.name.localeCompare(b.product.name))
+      .slice(0, 12);
+  }, [products, search]);
 
   function setLineSelected(index: number, selected: boolean) {
     setSelectedIndexes((current) => {
@@ -170,6 +183,15 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
       if (selected) next.add(index);
       else next.delete(index);
       return next;
+    });
+  }
+
+  function useProductFromSearch(index: number) {
+    setLineSelected(index, true);
+    window.requestAnimationFrame(() => {
+      const quantityInput = containerRef.current?.querySelector<HTMLInputElement>(`[name="field_line_${index}_quantity"]`);
+      quantityInput?.scrollIntoView({ behavior: "smooth", block: "center" });
+      quantityInput?.focus();
     });
   }
 
@@ -414,6 +436,34 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
                 placeholder={mode === "sale" ? "Search product to sell" : "Search delivered product"}
                 className="min-h-11 w-full rounded-md border border-slate-300 bg-white pl-9 pr-3 py-2 text-sm font-normal"
               />
+              {search.trim() ? (
+                <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-20 max-h-80 overflow-y-auto rounded-md border border-slate-200 bg-white p-1 shadow-xl">
+                  {productSearchResults.length ? (
+                    productSearchResults.map(({ product, index }) => (
+                      <button
+                        key={product.id || index}
+                        type="button"
+                        onClick={() => useProductFromSearch(index)}
+                        className="flex w-full items-center justify-between gap-3 rounded px-3 py-2 text-left text-sm font-normal hover:bg-cyan-50 focus:bg-cyan-50 focus:outline-none"
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate font-semibold text-slate-950">{product.name || "Unnamed product"}</span>
+                          <span className="block truncate text-xs text-slate-500">
+                            {[product.code || "No code", product.trackInventory ? `Stock ${money(product.available)}` : "Service"].filter(Boolean).join(" - ")}
+                          </span>
+                        </span>
+                        <span className="shrink-0 text-xs font-semibold text-[var(--solva-blue-700)]">
+                          {selectedIndexes.has(index) ? "Selected" : "Use"}
+                        </span>
+                      </button>
+                    ))
+                  ) : (
+                    <div className="px-3 py-3 text-sm font-normal text-slate-500">
+                      No product matches. Add it first, then return here.
+                    </div>
+                  )}
+                </div>
+              ) : null}
             </div>
             <button
               type="button"
