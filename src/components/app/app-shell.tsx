@@ -56,6 +56,10 @@ function roleName(role: CoreRole | string | null | undefined) {
   return "User";
 }
 
+function displayBusinessName(name: string | null | undefined) {
+  return (name || "your business").replace(/\bCymereg\b/g, "Cymreg");
+}
+
 export async function AppShell({ children }: { children: React.ReactNode }) {
   const supabase = await createSupabaseServerClient();
   const admin = createSupabaseAdminClient();
@@ -64,7 +68,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
   const activeBusinessId = typeof user?.app_metadata?.active_business_id === "string" ? user.app_metadata.active_business_id : null;
   const metadataRole = typeof user?.app_metadata?.business_role === "string" ? user.app_metadata.business_role : "owner";
   const metadataBusinessName =
-    typeof user?.app_metadata?.business_name === "string" ? user.app_metadata.business_name : "your business";
+    typeof user?.app_metadata?.business_name === "string" ? displayBusinessName(user.app_metadata.business_name) : "your business";
   const userName =
     typeof user?.user_metadata?.full_name === "string"
       ? user.user_metadata.full_name
@@ -114,8 +118,8 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
       if (businessData) {
         business = {
           id: businessData.id,
-          tradingName: businessData.trading_name,
-          legalName: businessData.legal_name,
+          tradingName: displayBusinessName(businessData.trading_name),
+          legalName: displayBusinessName(businessData.legal_name),
         };
       }
 

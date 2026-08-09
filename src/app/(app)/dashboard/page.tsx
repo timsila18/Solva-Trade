@@ -140,8 +140,9 @@ export default async function DashboardPage() {
       ? user.user_metadata.full_name
       : user?.email?.split("@")[0] ?? "there";
   const metadataBusinessId = typeof user?.app_metadata?.active_business_id === "string" ? user.app_metadata.active_business_id : null;
+  const displayBusinessName = (name: string | null | undefined) => (name || "Your business").replace(/\bCymereg\b/g, "Cymreg");
   const metadataBusinessName =
-    typeof user?.app_metadata?.business_name === "string" ? user.app_metadata.business_name : "Your business";
+    typeof user?.app_metadata?.business_name === "string" ? displayBusinessName(user.app_metadata.business_name) : "Your business";
 
   let businessName = metadataBusinessName;
   let branchName = "Main workspace";
@@ -163,7 +164,7 @@ export default async function DashboardPage() {
         .select("trading_name, legal_name")
         .eq("id", businessId)
         .maybeSingle();
-      businessName = business?.trading_name ?? business?.legal_name ?? businessName;
+      businessName = displayBusinessName(business?.trading_name ?? business?.legal_name ?? businessName);
 
       const { data: branch } = await admin
         .from("branches")

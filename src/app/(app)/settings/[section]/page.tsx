@@ -165,7 +165,7 @@ function PaymentMethodFields({ business }: { business: BusinessSettings | null }
       />
       <TextField name="till_number" label="M-Pesa Till number" defaultValue={details.till_number} placeholder="8060990" />
       <TextField name="send_money_phone" label="Send Money M-Pesa number" defaultValue={details.send_money_phone} placeholder="0720243591" />
-      <TextField name="cheque_payee" label="Cheque payee name" defaultValue={details.cheque_payee ?? businessName} placeholder="Cymereg Enterprise" />
+      <TextField name="cheque_payee" label="Cheque payee name" defaultValue={details.cheque_payee ?? businessName} placeholder="Cymreg Enterprise" />
       <TextField name="paybill_number" label="Paybill number" defaultValue={details.paybill_number} />
       <TextField name="paybill_account_number" label="Paybill account number" defaultValue={details.paybill_account_number} />
       <TextField name="pochi_la_biashara_phone" label="Pochi la Biashara phone" defaultValue={details.pochi_la_biashara_phone} />
