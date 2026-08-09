@@ -3963,7 +3963,15 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
     searchParams.get("party") ??
     fieldValue(fields, ["customer", "supplier", "received_from", "paid_to", "payee", "owner", "driver", "employee"], tenant.businessName);
   const generatedBy = personInitials(searchParams.get("generatedBy") ?? searchParams.get("printer") ?? tenant.generatedBy);
-  const priceListCustomerName = isCustomerPriceListReport(moduleName, processName) ? await customerNameForReport(customerId) : "";
+  const customerStatementReport =
+    isCustomerSalesStatementReport(moduleName, processName) ||
+    processName.toLowerCase().includes("profit by customer") ||
+    processName.toLowerCase().includes("customer profit");
+  const selectedCustomerName =
+    customerId && customerId !== "all" && (isCustomerPriceListReport(moduleName, processName) || customerStatementReport)
+      ? await customerNameForReport(customerId)
+      : "";
+  const priceListCustomerName = isCustomerPriceListReport(moduleName, processName) ? selectedCustomerName : "";
   const submittedLines = isProfileDocument(moduleName, processName) ? profileLinesFromFields(fields, processName) : reportLineFromFields(fields, processName);
   const liveSourceLines = invoiceId
     ? await salesInvoiceDocumentLines(invoiceId)
@@ -4002,7 +4010,14 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
   const lines = liveSourceLines.length ? liveSourceLines : submittedLines.length ? submittedLines : workflowLines;
   const liveInvoiceDetails = invoiceId ? lines[0]?.details ?? {} : {};
   const liveGrnDetails = grnId ? lines[0]?.details ?? {} : {};
-  const effectivePartyName = liveInvoiceDetails.Customer || liveGrnDetails.Supplier || priceListCustomerName || partyName;
+  const lineCustomerName =
+    customerStatementReport && customerId && customerId !== "all"
+      ? String(lines.find((line) => String(line.details?.Customer ?? "").trim())?.details?.Customer ?? "").trim()
+      : "";
+  const customerStatementPartyName = customerStatementReport
+    ? selectedCustomerName || lineCustomerName || searchParams.get("customer") || "All customers"
+    : "";
+  const effectivePartyName = liveInvoiceDetails.Customer || liveGrnDetails.Supplier || priceListCustomerName || customerStatementPartyName || partyName;
   const isValuationReport = isProductMasterReport(moduleName, processName) || isProductProfileReport(moduleName, processName) || isInventoryOperationalReport(moduleName, processName);
   const isCustomerSalesProfit = isCustomerSalesProfitReport(moduleName, processName);
   const isSupplierProfit = isSupplierProfitReport(moduleName, processName);
@@ -5187,27 +5202,57 @@ function wideReportHeaders(report: Report) {
   return selected.length >= 5 ? selected : allHeaders.slice(0, Math.min(10, allHeaders.length));
 }
 
-function wideTableWidths(headers: string[]) {
+function scaledWidths(weights: number[], totalWidth = 746) {
+  const total = weights.reduce((sum, value) => sum + value, 0);
+  let used = 0;
+  return weights.map((weight, index) => {
+    if (index === weights.length - 1) return totalWidth - used;
+    const width = Math.max(24, Math.floor((weight / total) * totalWidth));
+    used += width;
+    return width;
+  });
+}
+
+function wideTableWidths(headers: string[], report?: Report) {
+  if (report && isCustomerSalesStatementReport(report.moduleName, report.processName)) {
+    return scaledWidths(
+      headers.map((header) => {
+        const h = header.toLowerCase();
+        if (h === "#") return 0.35;
+        if (h === "date") return 0.72;
+        if (h.includes("invoice")) return 0.95;
+        if (h.includes("product")) return 2.75;
+        if (h === "sku" || h.includes("sku")) return 2.25;
+        if (h === "qty" || h.includes("quantity")) return 0.52;
+        if (h === "rate") return 0.85;
+        if (h.includes("amount") || h.includes("balance")) return 0.95;
+        if (h.includes("status")) return 0.95;
+        return 1;
+      }),
+    );
+  }
+
   const weights = headers.map((header) => {
     const h = header.toLowerCase();
+    if (h === "#" || h === "sr. no" || h.includes("serial")) return 0.45;
+    if (h === "date" || h.includes("invoice date")) return 0.85;
+    if (h.includes("invoice no") || h.includes("reference") || h.includes("receipt no")) return 1.05;
+    if (h === "sku" || h.includes("sku")) return 1.85;
     if (h.includes("name") || h.includes("description") || h.includes("product")) return 2.35;
     if (h.includes("vendor") || h.includes("customer") || h.includes("action") || h.includes("tracking")) return 1.55;
     if (h.includes("value") || h.includes("price") || h.includes("cost") || h.includes("revenue") || h.includes("profit") || h.includes("total")) return 1.15;
-    if (h.includes("qty") || h.includes("quantity") || h.includes("level") || h.includes("stock")) return 1.05;
+    if (h.includes("qty") || h.includes("quantity")) return 0.65;
+    if (h.includes("level") || h.includes("stock")) return 1.05;
     if (h.includes("status") || h.includes("risk") || h.includes("vat")) return 1.05;
     return 1;
   });
-  const total = weights.reduce((sum, value) => sum + value, 0);
-  return weights.map((weight, index) => {
-    const width = Math.floor((weight / total) * 746);
-    return index === weights.length - 1 ? 746 - weights.slice(0, -1).reduce((sum, w) => sum + Math.floor((w / total) * 746), 0) : width;
-  });
+  return scaledWidths(weights);
 }
 
 function renderLandscapePdfTable(canvas: PdfCanvas, report: Report, startY: number) {
   const headers = wideReportHeaders(report);
   const rows = report.lines.map((line, index) => headers.map((header) => valueForHeader(report, line, index, header)));
-  const widths = wideTableWidths(headers);
+  const widths = wideTableWidths(headers, report);
   const x = 48;
   let y = startY;
 
@@ -5873,7 +5918,7 @@ async function landscapePdf(report: Report) {
   const solvaLogo = assets.find((asset) => asset.name === "SolvaLogo");
   const headers = wideReportHeaders(report);
   const rows = report.lines.map((line, index) => headers.map((header) => valueForHeader(report, line, index, header)));
-  const widths = wideTableWidths(headers);
+  const widths = wideTableWidths(headers, report);
   const pages: string[] = [];
 
   const drawChrome = (pageNumber: number, compact = false) => {
