@@ -4424,7 +4424,7 @@ function isCustomerSalesProfitReport(moduleName: string, processName: string) {
 }
 
 function isCustomerSalesStatementReport(moduleName: string, processName: string) {
-  const value = `${moduleName} ${processName}`.toLowerCase();
+  const value = `${moduleName} ${processName}`.toLowerCase().replace(/[-_/]+/g, " ").replace(/\s+/g, " ");
   return (
     value.includes("customer sales statement") ||
     value.includes("customer sales and profit") ||
@@ -5068,6 +5068,7 @@ class PdfCanvas {
 
 function pdfTableWidths(report: Report, headers: string[]) {
   if (isCustomerFacingInvoice(report)) return [34, 244, 52, 76, 56, 68];
+  if (isCustomerSalesStatementReport(report.moduleName, report.processName)) return customerSalesStatementWidths(headers, 530);
   if (report.processName === "Customer Price List") return [30, 190, 86, 92, 94, 68];
   if (report.processName === "Product Master Report") return [76, 154, 62, 58, 58, 72, 50];
   if (report.processName === "Product Inventory Usage Report") return [72, 154, 56, 58, 70, 54, 66];
@@ -5269,23 +5270,48 @@ function scaledWidths(weights: number[], totalWidth = 746) {
   });
 }
 
+function customerSalesStatementWidths(headers: string[], totalWidth = 746) {
+  const fixedWidths: number[] = headers.map((header) => {
+    const h = header.toLowerCase();
+    if (h === "#" || h === "sr. no" || h.includes("serial")) return totalWidth > 600 ? 28 : 24;
+    if (h === "date" || h.includes("invoice date")) return totalWidth > 600 ? 58 : 48;
+    if (h.includes("invoice")) return totalWidth > 600 ? 78 : 64;
+    if (h === "qty" || h.includes("quantity")) return totalWidth > 600 ? 38 : 32;
+    if (h === "rate") return totalWidth > 600 ? 78 : 62;
+    if (h.includes("amount") || h.includes("balance")) return totalWidth > 600 ? 84 : 68;
+    if (h.includes("status")) return totalWidth > 600 ? 70 : 56;
+    return 0;
+  });
+  const flexibleWeights: number[] = headers.map((header) => {
+    const h = header.toLowerCase();
+    if (h.includes("product")) return 1.28;
+    if (h === "sku" || h.includes("sku")) return 1;
+    return 0;
+  });
+  const fixedTotal = fixedWidths.reduce((sum, width) => sum + width, 0);
+  const flexibleTotal = flexibleWeights.reduce((sum, weight) => sum + weight, 0);
+  const remaining = Math.max(0, totalWidth - fixedTotal);
+  let used = 0;
+
+  return headers.map((_, index) => {
+    const fixed = fixedWidths[index];
+    if (fixed) {
+      used += fixed;
+      return fixed;
+    }
+    const weight = flexibleWeights[index] || 1;
+    const width =
+      index === headers.length - 1
+        ? totalWidth - used
+        : Math.max(totalWidth > 600 ? 54 : 42, Math.floor((weight / Math.max(1, flexibleTotal || headers.length)) * remaining));
+    used += width;
+    return width;
+  });
+}
+
 function wideTableWidths(headers: string[], report?: Report) {
   if (report && isCustomerSalesStatementReport(report.moduleName, report.processName)) {
-    return scaledWidths(
-      headers.map((header) => {
-        const h = header.toLowerCase();
-        if (h === "#") return 0.22;
-        if (h === "date") return 0.45;
-        if (h.includes("invoice")) return 0.65;
-        if (h.includes("product")) return 3.15;
-        if (h === "sku" || h.includes("sku")) return 2.65;
-        if (h === "qty" || h.includes("quantity")) return 0.42;
-        if (h === "rate") return 0.72;
-        if (h.includes("amount") || h.includes("balance")) return 0.8;
-        if (h.includes("status")) return 0.8;
-        return 1;
-      }),
-    );
+    return customerSalesStatementWidths(headers, 746);
   }
 
   const weights = headers.map((header) => {
