@@ -42,12 +42,114 @@ const navGroups = [
   { label: "Company", items: ["Team", "Branches", "Warehouses", "Settings", "Billing", "Imports", "Audit Trail", "Support"] },
 ];
 
-const navBadges: Record<string, string> = {
-  Sales: "0",
-  Purchases: "0",
-  Inventory: "0",
+const defaultNavBadges: Record<string, string> = {
   Reports: "New",
 };
+
+type SupabaseAdminClient = ReturnType<typeof createSupabaseAdminClient>;
+
+function badgeCount(value: number) {
+  if (value > 999) return "999+";
+  return value.toLocaleString("en-KE");
+}
+
+async function safeCount(
+  client: SupabaseAdminClient,
+  table: string,
+  businessId: string,
+  options?: { statusNot?: string; status?: string; active?: boolean },
+) {
+  try {
+    let query = client.from(table).select("id", { count: "exact", head: true }).eq("business_id", businessId);
+    if (options?.statusNot) query = query.neq("status", options.statusNot);
+    if (options?.status) query = query.eq("status", options.status);
+    if (typeof options?.active === "boolean") query = query.eq("active", options.active);
+    const { count, error } = await query;
+    if (error) {
+      console.warn(`Sidebar count skipped for ${table}`, error.message);
+      return 0;
+    }
+    return count ?? 0;
+  } catch (error) {
+    console.warn(`Sidebar count skipped for ${table}`, error);
+    return 0;
+  }
+}
+
+async function loadNavBadges(client: SupabaseAdminClient, businessId: string) {
+  if (!businessId || businessId === "local-business") return defaultNavBadges;
+
+  const [sales, purchases, customers, suppliers, products, stockSummary] = await Promise.all([
+    safeCount(client, "sales_invoices", businessId, { statusNot: "reversed" }),
+    safeCount(client, "goods_received_notes", businessId),
+    safeCount(client, "customers", businessId, { statusNot: "archived" }),
+    safeCount(client, "suppliers", businessId, { statusNot: "archived" }),
+    safeCount(client, "products", businessId, { active: true }),
+    loadInventoryBadgeCount(client, businessId),
+  ]);
+
+  return {
+    ...defaultNavBadges,
+    Sales: badgeCount(sales),
+    Purchases: badgeCount(purchases),
+    Customers: badgeCount(customers),
+    Suppliers: badgeCount(suppliers),
+    Inventory: badgeCount(stockSummary),
+    Products: badgeCount(products),
+  };
+}
+
+async function loadInventoryBadgeCount(client: SupabaseAdminClient, businessId: string) {
+  try {
+    const [{ data: products, error: productsError }, { data: balances, error: balancesError }, alerts] = await Promise.all([
+      client
+        .from("products")
+        .select("id, active, archived, track_inventory, reorder_level")
+        .eq("business_id", businessId)
+        .eq("active", true)
+        .limit(5000),
+      client
+        .from("stock_balances")
+        .select("product_id, available_quantity, reorder_status")
+        .eq("business_id", businessId)
+        .limit(10000),
+      safeCount(client, "inventory_alerts", businessId, { status: "active" }),
+    ]);
+
+    if (productsError || balancesError) {
+      console.warn("Sidebar inventory badge skipped", productsError?.message ?? balancesError?.message);
+      return alerts;
+    }
+
+    const availableByProduct = new Map<string, { available: number; status: string }>();
+    for (const balance of balances ?? []) {
+      const productId = String(balance.product_id ?? "");
+      if (!productId) continue;
+      const current = availableByProduct.get(productId) ?? { available: 0, status: "healthy" };
+      const amount = Number(balance.available_quantity ?? 0);
+      current.available += Number.isFinite(amount) ? amount : 0;
+      const status = String(balance.reorder_status ?? "").toLowerCase();
+      if (status && status !== "healthy") current.status = status;
+      availableByProduct.set(productId, current);
+    }
+
+    let stockIssues = 0;
+    for (const product of products ?? []) {
+      if (product.archived === true || product.track_inventory === false) continue;
+      const balance = availableByProduct.get(String(product.id)) ?? { available: 0, status: "out_of_stock" };
+      const reorderLevel = Number(product.reorder_level ?? 0);
+      const hasReorderLevel = Number.isFinite(reorderLevel) && reorderLevel > 0;
+      if (balance.available <= 0 || (hasReorderLevel && balance.available <= reorderLevel) || balance.status !== "healthy") {
+        stockIssues += 1;
+      }
+    }
+
+    return stockIssues + alerts;
+  } catch (error) {
+    console.warn("Sidebar inventory badge skipped", error);
+    return 0;
+  }
+}
 
 function roleName(role: CoreRole | string | null | undefined) {
   if (role === "owner") return "Business Owner";
@@ -139,6 +241,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
     (item) => !item.permission || canPerformAction(membership, item.permission),
   );
   const mainNav = nav.filter((item) => priorityNav.includes(item.label));
+  const navBadges = await loadNavBadges(admin, business.id);
 
   return (
     <div className="min-h-screen bg-[#f3f6fa] text-slate-950">
