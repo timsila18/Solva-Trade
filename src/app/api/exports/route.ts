@@ -5257,15 +5257,15 @@ function wideTableWidths(headers: string[], report?: Report) {
     return scaledWidths(
       headers.map((header) => {
         const h = header.toLowerCase();
-        if (h === "#") return 0.35;
-        if (h === "date") return 0.72;
-        if (h.includes("invoice")) return 0.95;
-        if (h.includes("product")) return 2.75;
-        if (h === "sku" || h.includes("sku")) return 2.25;
-        if (h === "qty" || h.includes("quantity")) return 0.52;
-        if (h === "rate") return 0.85;
-        if (h.includes("amount") || h.includes("balance")) return 0.95;
-        if (h.includes("status")) return 0.95;
+        if (h === "#") return 0.22;
+        if (h === "date") return 0.45;
+        if (h.includes("invoice")) return 0.65;
+        if (h.includes("product")) return 3.15;
+        if (h === "sku" || h.includes("sku")) return 2.65;
+        if (h === "qty" || h.includes("quantity")) return 0.42;
+        if (h === "rate") return 0.72;
+        if (h.includes("amount") || h.includes("balance")) return 0.8;
+        if (h.includes("status")) return 0.8;
         return 1;
       }),
     );
