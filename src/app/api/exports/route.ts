@@ -1110,7 +1110,7 @@ async function inventorySalesReportLines(): Promise<ReportLine[]> {
   const supabase = await createSupabaseServerClient();
   const { data } = await supabase
     .from("sales_source_allocations")
-    .select("allocated_at, quantity, unit_cost, total_cost, sale_value, sale_unit_price")
+    .select("allocated_at, quantity, unit_cost, total_cost, sale_value, sale_unit_price, sales_invoice_items(invoice_quantity, unit_price, line_total)")
     .eq("business_id", businessId)
     .order("allocated_at", { ascending: true })
     .limit(1000);
@@ -1120,7 +1120,7 @@ async function inventorySalesReportLines(): Promise<ReportLine[]> {
     const date = row.allocated_at ? new Date(String(row.allocated_at)) : new Date();
     const key = new Intl.DateTimeFormat("en-KE", { month: "short", year: "numeric", timeZone: "Africa/Nairobi" }).format(date);
     const current = grouped.get(key) ?? { revenue: 0, units: 0, grossProfit: 0 };
-    const revenue = allocationSaleValue(row);
+    const revenue = authoritativeAllocationSaleValue(row);
     current.revenue += revenue;
     current.units += numberValue(row.quantity);
     current.grossProfit += revenue - allocationCost(row);
@@ -1394,7 +1394,7 @@ async function salesSourceReportLines(processName: string): Promise<ReportLine[]
   let query = supabase
     .from("sales_source_allocations")
     .select(
-      "source_type, source_supplier_name, quantity, unit_cost, total_cost, sale_unit_price, sale_value, allocated_at, products(product_name, product_code, sku), sales_invoices(invoice_number, invoice_date, customers(customer_name))",
+      "source_type, source_supplier_name, quantity, unit_cost, total_cost, sale_unit_price, sale_value, allocated_at, products(product_name, product_code, sku), sales_invoice_items(invoice_quantity, unit_price, line_total), sales_invoices(invoice_number, invoice_date, customers(customer_name))",
     )
     .eq("business_id", businessId)
     .order("allocated_at", { ascending: false })
@@ -1413,8 +1413,8 @@ async function salesSourceReportLines(processName: string): Promise<ReportLine[]
     const invoice = invoiceRecord as { invoice_number?: string | null; invoice_date?: string | null } | null;
     const customer = customerRecord as { customer_name?: string | null } | null;
     const cost = allocationCost(row);
-    const saleValue = allocationSaleValue(row);
-    const grossProfit = allocationGrossProfit(row);
+    const saleValue = authoritativeAllocationSaleValue(row);
+    const grossProfit = saleValue - cost;
     const margin = saleValue ? (grossProfit / saleValue) * 100 : 0;
 
     return {
@@ -1521,7 +1521,7 @@ async function profitBySupplierSourceReportLines(searchParams?: URLSearchParams)
   const sourceType = searchParams?.get("sourceType");
   let query = supabase
     .from("sales_source_allocations")
-    .select("source_type, source_supplier_id, source_supplier_name, quantity, unit_cost, total_cost, sale_unit_price, sale_value, allocated_at, products(product_name, sku, product_code)")
+    .select("source_type, source_supplier_id, source_supplier_name, quantity, unit_cost, total_cost, sale_unit_price, sale_value, allocated_at, products(product_name, sku, product_code), sales_invoice_items(invoice_quantity, unit_price, line_total)")
     .eq("business_id", businessId)
     .gte("allocated_at", `${period.start}T00:00:00`)
     .lte("allocated_at", `${period.end}T23:59:59`)
@@ -1543,7 +1543,7 @@ async function profitBySupplierSourceReportLines(searchParams?: URLSearchParams)
       current.products.add(String(product.product_name ?? product.sku ?? product.product_code));
     }
     current.units += numberValue(row.quantity);
-    const revenue = allocationSaleValue(row);
+    const revenue = authoritativeAllocationSaleValue(row);
     const cost = allocationCost(row);
     current.revenue += revenue;
     current.cost += cost;
@@ -4447,6 +4447,22 @@ function allocationSaleValue(row: { quantity?: number | string | null; sale_unit
   const storedSale = numberValue(row.sale_value);
   if (storedSale) return storedSale;
   return numberValue(row.quantity) * numberValue(row.sale_unit_price);
+}
+
+function authoritativeAllocationSaleValue(row: {
+  quantity?: number | string | null;
+  sale_unit_price?: number | string | null;
+  sale_value?: number | string | null;
+  sales_invoice_items?:
+    | { invoice_quantity?: number | string | null; unit_price?: number | string | null; line_total?: number | string | null }
+    | { invoice_quantity?: number | string | null; unit_price?: number | string | null; line_total?: number | string | null }[]
+    | null;
+}) {
+  const invoiceItem = relatedOne(row.sales_invoice_items);
+  const itemQuantity = numberValue(invoiceItem?.invoice_quantity);
+  const itemTotal = numberValue(invoiceItem?.line_total);
+  if (itemQuantity > 0 && itemTotal > 0) return numberValue(row.quantity) * (itemTotal / itemQuantity);
+  return allocationSaleValue(row);
 }
 
 function allocationGrossProfit(row: {

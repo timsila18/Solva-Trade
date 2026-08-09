@@ -80,7 +80,23 @@ type ProfitAllocationRow = {
   sale_value: number | string | null;
   sale_unit_price: number | string | null;
   total_cost: number | string | null;
+  sales_invoice_items?:
+    | { invoice_quantity?: number | string | null; line_total?: number | string | null }
+    | { invoice_quantity?: number | string | null; line_total?: number | string | null }[]
+    | null;
 };
+
+function firstRelated<T>(value: T | T[] | null | undefined) {
+  return Array.isArray(value) ? value[0] : value ?? null;
+}
+
+function allocationSaleValue(row: ProfitAllocationRow) {
+  const invoiceItem = firstRelated(row.sales_invoice_items);
+  const itemQuantity = numeric(invoiceItem?.invoice_quantity);
+  const itemTotal = numeric(invoiceItem?.line_total);
+  if (itemQuantity > 0 && itemTotal > 0) return numeric(row.quantity) * (itemTotal / itemQuantity);
+  return numeric(row.sale_value) || numeric(row.quantity) * numeric(row.sale_unit_price);
+}
 
 function workflowAmount(payload: WorkflowPayload | null | undefined) {
   const fields = payload?.fields ?? {};
@@ -111,7 +127,7 @@ function profitForPeriod(rows: ProfitAllocationRow[], startIso: string, endIso: 
       return value >= startIso && value < endIso;
     })
     .reduce((sum, row) => {
-      const saleValue = numeric(row.sale_value) || numeric(row.quantity) * numeric(row.sale_unit_price);
+      const saleValue = allocationSaleValue(row);
       const cost = numeric(row.total_cost) || numeric(row.quantity) * numeric(row.unit_cost);
       return sum + saleValue - cost;
     }, 0);
@@ -246,7 +262,7 @@ export default async function DashboardPage() {
         .eq("business_id", businessId),
       admin
         .from("sales_source_allocations")
-        .select("allocated_at, quantity, unit_cost, total_cost, sale_unit_price, sale_value")
+        .select("allocated_at, quantity, unit_cost, total_cost, sale_unit_price, sale_value, sales_invoice_items(invoice_quantity, line_total)")
         .eq("business_id", businessId)
         .gte("allocated_at", yearStartIso)
         .lt("allocated_at", tomorrowIso)
