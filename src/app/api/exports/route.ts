@@ -3708,6 +3708,10 @@ function templateFor(report: Report): DocumentTemplate {
 }
 
 function shouldShowPaymentInstructions(report: Report) {
+  if (isCustomerSalesStatementReport(report.moduleName, report.processName)) {
+    return false;
+  }
+
   const businessName = report.businessName.toLowerCase();
   if ((businessName.includes("cymereg") || businessName.includes("cymreg")) && isDayToDayDocument(report)) {
     return false;
@@ -4467,6 +4471,10 @@ function approvalSummary(generatedBy: string, role: string): Record<string, stri
 }
 
 function signatureLabelsFor(report: Report) {
+  if (isCustomerSalesStatementReport(report.moduleName, report.processName)) {
+    return [];
+  }
+
   if (isDayToDayDocument(report)) {
     const template = templateFor(report);
     if (template === "grn") return ["Received by", "Checked by", "Date"];
@@ -4572,13 +4580,12 @@ function templateIntro(report: Report) {
   if (isCustomerSalesStatementReport(report.moduleName, report.processName)) {
     const period = report.lines[0]?.details?.Period ?? `${report.transaction["Document date"]} to ${report.transaction["Due / action date"]}`;
     return `
-      <section class="statement-summary">
+      <section class="statement-summary compact-statement-summary">
         <div><span>Customer</span><strong>${htmlEscape(report.partyName)}</strong></div>
         <div><span>Period</span><strong>${htmlEscape(period)}</strong></div>
-        <div><span>Generated on</span><strong>${htmlEscape(report.generatedAt)}</strong></div>
-        <div><span>Total sales</span><strong>${htmlEscape(report.totals.Total)}</strong></div>
+        <div><span>Generated</span><strong>${htmlEscape(report.generatedAt)}</strong></div>
+        <div><span>Closing</span><strong>${htmlEscape(report.totals["Balance due"] ?? report.totals.Total)}</strong></div>
       </section>
-      <section class="reason-box"><h3>Customer account summary</h3><p>Goods sold, invoice values, payments received and balances still outstanding for the selected period.</p></section>
     `;
   }
   if (blueprint.emphasis === "receipt") {
@@ -4671,6 +4678,7 @@ function templateOutro(report: Report) {
 function htmlDocument(report: Report, print = false) {
   const headers = lineHeaders(report);
   const catalogueDocument = isCustomerPriceListReport(report.moduleName, report.processName);
+  const customerSalesStatement = isCustomerSalesStatementReport(report.moduleName, report.processName);
   const plainInvoice = isPlainCustomerInvoice(report);
   const lineRows = report.lines
     .map(
@@ -4757,6 +4765,10 @@ function htmlDocument(report: Report, print = false) {
     .statement-summary div, .report-kpis div { border-radius: 8px; background: var(--doc-soft); padding: 13px; }
     .statement-summary span, .report-kpis span { display: block; color: ${brand.muted}; font-size: 11px; font-weight: 800; text-transform: uppercase; }
     .statement-summary strong, .report-kpis strong { display: block; margin-top: 5px; color: ${brand.blue}; font-size: 17px; }
+    .compact-statement-summary { margin-bottom: 10px; }
+    .compact-statement-summary div { padding: 9px 10px; }
+    .compact-statement-summary span { font-size: 9px; }
+    .compact-statement-summary strong { font-size: 12px; line-height: 1.25; }
     .report-kpis small { display: block; margin-top: 4px; color: ${brand.slate}; line-height: 1.4; }
     .reason-box, .terms, .pod-box, .receipt-slip, .payment-instructions { margin-top: 18px; border: 1px solid ${brand.border}; border-radius: 8px; background: ${brand.soft}; padding: 14px; }
     .receipt-slip { display: grid; grid-template-columns: 1fr 220px; border-style: dashed; }
@@ -4779,6 +4791,8 @@ function htmlDocument(report: Report, print = false) {
     tbody tr:nth-child(even) td { background: #f4f8fc; }
     .num { text-align: right; }
     .after-table { display: grid; grid-template-columns: 1fr 300px; gap: 28px; margin-top: 24px; align-items: start; }
+    .customer-statement-after-table { grid-template-columns: 1fr 240px; gap: 14px; margin-top: 12px; }
+    .statement-spacer { min-height: 1px; }
     .totals table { border: 1px solid ${brand.border}; border-radius: 8px; overflow: hidden; }
     .totals th, .totals td { background: white; color: ${brand.navy}; border-top: 1px solid ${brand.border}; font-size: 12px; }
     .totals th { text-align: left; }
@@ -4869,9 +4883,11 @@ function htmlDocument(report: Report, print = false) {
     ${
       catalogueDocument
         ? ""
-        : `<section class="after-table">
+        : `<section class="after-table${customerSalesStatement ? " customer-statement-after-table" : ""}">
       ${
-        dailyDocument
+        customerSalesStatement
+          ? `<div class="statement-spacer"></div>`
+          : dailyDocument
           ? `<article class="panel audit compact-note"><h3>${htmlEscape(noteTitle)}</h3><p>${htmlEscape(noteBody)}</p></article>`
           : `<article class="panel audit">
         <h3>${htmlEscape(approvalTitle)}</h3>
@@ -4886,14 +4902,14 @@ function htmlDocument(report: Report, print = false) {
     </section>`
     }
 
-    ${catalogueDocument ? "" : `<section class="signatures">
+    ${catalogueDocument || customerSalesStatement ? "" : `<section class="signatures">
       ${signatureLabels.map((label) => `<div class="signature">${htmlEscape(label)}</div>`).join("")}
     </section>`}
 
-    ${catalogueDocument ? "" : templateOutro(report)}
+    ${catalogueDocument || customerSalesStatement ? "" : templateOutro(report)}
 
     ${plainInvoice ? "" : `<footer>
-      ${htmlEscape(report.businessName)} document generated by Solva Trade${dailyDocument ? "" : `. Printed by ${htmlEscape(report.generatedBy)}`} on ${htmlEscape(report.generatedAt)}.
+      ${htmlEscape(report.businessName)} document generated by Solva Trade${dailyDocument || customerSalesStatement ? "" : `. Printed by ${htmlEscape(report.generatedBy)}`} on ${htmlEscape(report.generatedAt)}.
     </footer>`}
   </main>
 </body>
@@ -6097,6 +6113,7 @@ async function pdf(report: Report) {
   const template = templateFor(report);
   const style = blueprintFor(report);
   const dailyDocument = isDayToDayDocument(report);
+  const customerSalesStatement = isCustomerSalesStatementReport(report.moduleName, report.processName);
   const approvalTitle = report.generatedByRole === "owner" ? "OWNER CERTIFICATION AND AUDIT" : "APPROVAL AND AUDIT";
   const assets = await pdfAssets(report, "portrait");
   const tenantLogo = assets.find((asset) => asset.name === "TenantLogo");
@@ -6179,13 +6196,28 @@ async function pdf(report: Report) {
     canvas.text(`Branch: ${report.transaction.Branch}`, 328, 642, 8.5, "navy");
     tableStart = 594;
   } else if (template === "statement" || template === "finance" || template === "cashbook" || template === "paymentVoucher" || template === "report" || template === "inventoryReport" || template === "stockMovement" || template === "executiveReport") {
-    const labels = template === "report" || template === "executiveReport" ? ["Health", "Cash / Value", "Risk"] : ["Opening", "Movements", "Closing"];
+    const labels = customerSalesStatement
+      ? ["Customer", "Movements", "Closing"]
+      : template === "report" || template === "executiveReport"
+        ? ["Health", "Cash / Value", "Risk"]
+        : ["Opening", "Movements", "Closing"];
     [48, 224, 400].forEach((x, index) => {
-      canvas.rect(x, 642, 164, 58, "surface");
-      canvas.text(labels[index], x + 14, 676, 8, "blue", true);
-      canvas.text(index === 0 ? "Ready" : index === 1 ? report.totals.Total : report.totals["Balance due"], x + 14, 654, 16, "navy", true);
+      canvas.rect(x, 652, 164, 42, "surface");
+      canvas.text(labels[index], x + 12, 676, 7, "blue", true);
+      const value = customerSalesStatement
+        ? index === 0
+          ? report.partyName
+          : index === 1
+            ? report.totals.Total
+            : report.totals["Balance due"]
+        : index === 0
+          ? "Ready"
+          : index === 1
+            ? report.totals.Total
+            : report.totals["Balance due"];
+      canvas.wrap(value, x + 12, 662, 140, customerSalesStatement ? 8.4 : 16, "navy", true, customerSalesStatement ? 9.2 : 18, customerSalesStatement ? 2 : 1);
     });
-    tableStart = 614;
+    tableStart = customerSalesStatement ? 628 : 614;
   } else if (template === "creditNote" || template === "debitNote") {
     canvas.rect(48, 628, 250, 72, "soft");
     canvas.rect(314, 628, 250, 72, "soft");
@@ -6252,7 +6284,7 @@ async function pdf(report: Report) {
         : "Thanks for choosing us. We appreciate your business.";
     canvas.text(noteTitle, 48, summaryTop, 10, "blue", true);
     canvas.wrap(noteBody, 48, summaryTop - 18, 286, 8.2, "navy", false, 10.2, 4);
-  } else {
+  } else if (!customerSalesStatement) {
     canvas.text(approvalTitle, 48, summaryTop, 10, "blue", true);
     Object.entries(report.approvals).slice(0, 4).forEach(([label, value], index) => {
       const y = summaryTop - 18 - index * 22;
@@ -6262,10 +6294,12 @@ async function pdf(report: Report) {
   }
 
   const signatureLabels = signatureLabelsFor(report);
-  [48, 242, 436].forEach((x, index) => {
-    canvas.line(x, 96, x + 128, 96, "navy");
-    canvas.wrap(signatureLabels[index] ?? "Approved by", x + 16, 82, 104, 8, "slate");
-  });
+  if (signatureLabels.length) {
+    [48, 242, 436].forEach((x, index) => {
+      canvas.line(x, 96, x + 128, 96, "navy");
+      canvas.wrap(signatureLabels[index] ?? "", x + 16, 82, 104, 8, "slate");
+    });
+  }
   if (template === "salesReceipt") {
     const status = receiptPaymentStatus(report);
     canvas.rect(48, 112, 516, 28, "soft");
@@ -6275,7 +6309,7 @@ async function pdf(report: Report) {
   }
   canvas.line(48, 58, 564, 58, "border");
   canvas.wrap(
-    dailyDocument
+    dailyDocument || customerSalesStatement
       ? `${report.businessName} document generated by Solva Trade on ${report.generatedAt}.`
       : `${report.businessName} document generated by Solva Trade. ${style.footerNote} Printed by ${report.generatedBy} on ${report.generatedAt}.`,
     76,
