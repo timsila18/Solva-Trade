@@ -3786,6 +3786,14 @@ function displayTotalEntries(report: Report) {
     return [];
   }
 
+  if (isSupplierProfitReport(report.moduleName, report.processName)) {
+    return [
+      ["Sales", report.totals.Sales ?? report.totals.Subtotal ?? "KES 0.00"],
+      ["Supply cost", report.totals["Supply cost"] ?? report.totals.Discount ?? "KES 0.00"],
+      ["Gross profit", report.totals["Gross profit"] ?? report.totals.Total ?? "KES 0.00"],
+    ] as [string, string][];
+  }
+
   if (isDayToDayDocument(report)) {
     const total =
       report.totals.Total ??
@@ -3997,7 +4005,17 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
   const effectivePartyName = liveInvoiceDetails.Customer || liveGrnDetails.Supplier || priceListCustomerName || partyName;
   const isValuationReport = isProductMasterReport(moduleName, processName) || isProductProfileReport(moduleName, processName) || isInventoryOperationalReport(moduleName, processName);
   const isCustomerSalesProfit = isCustomerSalesProfitReport(moduleName, processName);
+  const isSupplierProfit = isSupplierProfitReport(moduleName, processName);
   const lineValueTotal = lines.reduce((sum, line) => sum + line.lineTotal, 0);
+  const supplierProfitSalesTotal = isSupplierProfit
+    ? lines.reduce((sum, line) => sum + detailAmount(line.details?.Sales ?? money(line.discount)), 0)
+    : 0;
+  const supplierProfitCostTotal = isSupplierProfit
+    ? lines.reduce((sum, line) => sum + detailAmount(line.details?.["Supply cost"] ?? money(line.unitPrice)), 0)
+    : 0;
+  const supplierProfitGrossTotal = isSupplierProfit
+    ? lines.reduce((sum, line) => sum + detailAmount(line.details?.["Gross profit"] ?? money(line.lineTotal)), 0)
+    : 0;
   const isLiveCustomerInvoice = Boolean(invoiceId && liveInvoiceDetails["Invoice no."]);
   const liveInvoiceLineTotal = isLiveCustomerInvoice && lineValueTotal > 0 ? lineValueTotal : 0;
   const liveInvoiceTotals = invoiceId && lines[0]?.details
@@ -4012,6 +4030,8 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
     : null;
   const subtotal = isValuationReport
     ? lineValueTotal
+    : isSupplierProfit
+      ? supplierProfitSalesTotal
     : liveInvoiceTotals?.subtotal
       ? liveInvoiceTotals.subtotal
     : parseAmount(fieldValue(fields, ["subtotal"], "0")) ||
@@ -4023,9 +4043,17 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
     : liveInvoiceTotals
       ? liveInvoiceTotals.tax
       : parseAmount(fieldValue(fields, ["tax"], "0")) || lines.reduce((sum, line) => sum + line.taxAmount, 0);
-  const discount = isValuationReport || isLiveCustomerInvoice ? 0 : parseAmount(fieldValue(fields, ["discount"], "0")) || lines.reduce((sum, line) => sum + line.discount, 0);
+  const discount = isValuationReport || isLiveCustomerInvoice
+    ? 0
+    : isSupplierProfit
+      ? supplierProfitCostTotal
+      : parseAmount(fieldValue(fields, ["discount"], "0")) || lines.reduce((sum, line) => sum + line.discount, 0);
   const total =
-    (isValuationReport ? lineValueTotal : liveInvoiceTotals?.total || parseAmount(fieldValue(fields, ["total", "amount", "amount_received", "amount_sent"], "0"))) ||
+    (isValuationReport
+      ? lineValueTotal
+      : isSupplierProfit
+        ? supplierProfitGrossTotal
+        : liveInvoiceTotals?.total || parseAmount(fieldValue(fields, ["total", "amount", "amount_received", "amount_sent"], "0"))) ||
     lineValueTotal ||
     Math.max(0, subtotal - discount + tax);
   const balanceDueField = fieldValue(fields, ["balance_due", "outstanding_amount"], "");
@@ -4138,6 +4166,7 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
     totals: {
       Subtotal: money(subtotal),
       Discount: money(discount),
+      ...(isSupplierProfit ? { Sales: money(supplierProfitSalesTotal), "Supply cost": money(supplierProfitCostTotal), "Gross profit": money(supplierProfitGrossTotal) } : {}),
       ...(isCustomerSalesProfit ? {} : { Tax: money(tax) }),
       Total: money(total),
       ...(processName.toLowerCase().includes("invoice") ? { "Amount due": money(balanceDue) } : {}),
@@ -4927,8 +4956,8 @@ class PdfCanvas {
     this.ops.push(`${pdfColors[color]} RG ${width} w ${x1} ${y1} m ${x2} ${y2} l S`);
   }
 
-  text(value: string, x: number, y: number, size = 10, color = "navy", bold = false) {
-    this.ops.push(`BT ${pdfColors[color]} rg ${bold ? "/F2" : "/F1"} ${size} Tf ${x} ${y} Td (${pdfText(value)}) Tj ET`);
+  text(value: string | number | null | undefined, x: number, y: number, size = 10, color = "navy", bold = false) {
+    this.ops.push(`BT ${pdfColors[color]} rg ${bold ? "/F2" : "/F1"} ${size} Tf ${x} ${y} Td (${pdfText(String(value ?? ""))}) Tj ET`);
   }
 
   image(name: string, x: number, y: number, width: number, height: number) {
@@ -5910,21 +5939,28 @@ async function landscapePdf(report: Report) {
     const productOrInventoryReport =
       isProductMasterReport(report.moduleName, report.processName) || isInventoryOperationalReport(report.moduleName, report.processName);
     const customerSalesStatementReport = isCustomerSalesStatementReport(report.moduleName, report.processName);
+    const supplierProfitReport = isSupplierProfitReport(report.moduleName, report.processName);
     const kpis = [
       productOrInventoryReport
         ? ["Stock value", report.totals.Total]
         : customerSalesStatementReport
           ? ["Total sales", report.totals.Total]
+          : supplierProfitReport
+            ? ["Sales", report.totals.Subtotal]
         : ["Subtotal", report.totals.Subtotal],
       productOrInventoryReport
         ? ["Records", recordCount]
         : customerSalesStatementReport
           ? ["Amount paid", report.totals["Amount paid"] ?? "KES 0.00"]
-          : ["Tax", report.totals.Tax],
+          : supplierProfitReport
+            ? ["Supply cost", report.totals.Discount]
+            : ["Tax", report.totals.Tax ?? "KES 0.00"],
       productOrInventoryReport
         ? ["Review status", report.lines.length ? "Ready" : "No records"]
         : customerSalesStatementReport
           ? ["Balance due", report.totals["Balance due"] ?? "KES 0.00"]
+          : supplierProfitReport
+            ? ["Gross profit", report.totals.Total]
         : ["Total", report.totals.Total],
     ];
     kpis.forEach(([label, value], index) => {
