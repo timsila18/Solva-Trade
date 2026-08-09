@@ -2165,6 +2165,7 @@ function itemBaseLine(item: SalesItemRow, invoice: SalesInvoiceRow | undefined, 
       Price: money(unitPrice),
       Qty: quantity.toLocaleString("en-KE", { maximumFractionDigits: 2 }),
       Amount: money(total),
+      "Amount Payable": money(total),
       "Tax rate": "VAT included where applicable",
       Tax: money(0),
       "Total payable": money(total),
@@ -2181,6 +2182,29 @@ function itemBaseLine(item: SalesItemRow, invoice: SalesInvoiceRow | undefined, 
       "Payment status": String(invoice?.status ?? "posted"),
     },
   };
+}
+
+function productSizeGroup(description: string) {
+  const value = description.toLowerCase().replace(/\s+/g, " ");
+  const packMatch = value.match(/(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)\s*(ml|l|lt|lts|litre|liter|litres|liters)\b/);
+  const directMatch = value.match(/(\d+(?:\.\d+)?)\s*(ml|l|lt|lts|litre|liter|litres|liters)\b/);
+  const match = packMatch
+    ? { amount: Number(packMatch[2]), unit: packMatch[3] }
+    : directMatch
+      ? { amount: Number(directMatch[1]), unit: directMatch[2] }
+      : null;
+  if (!match || !Number.isFinite(match.amount)) return { rank: 999999, label: "other" };
+  const rank = match.unit.startsWith("l") ? match.amount * 1000 : match.amount;
+  return { rank, label: `${rank}ml` };
+}
+
+function sortInvoiceLinesForPrint(lines: ReportLine[]) {
+  return [...lines].sort((a, b) => {
+    const aGroup = productSizeGroup(`${a.description} ${a.sku}`);
+    const bGroup = productSizeGroup(`${b.description} ${b.sku}`);
+    if (aGroup.rank !== bGroup.rank) return aGroup.rank - bGroup.rank;
+    return a.description.localeCompare(b.description);
+  });
 }
 
 async function salesInvoiceDocumentLines(invoiceId: string | null): Promise<ReportLine[]> {
@@ -2204,7 +2228,7 @@ async function salesInvoiceDocumentLines(invoiceId: string | null): Promise<Repo
       .limit(200),
   ]);
   const invoice = ((invoices ?? [])[0] ?? undefined) as SalesInvoiceRow | undefined;
-  return ((items ?? []) as SalesItemRow[]).map((item, index) => itemBaseLine(item, invoice, index));
+  return sortInvoiceLinesForPrint(((items ?? []) as SalesItemRow[]).map((item, index) => itemBaseLine(item, invoice, index)));
 }
 
 async function goodsReceivedDocumentLines(grnId: string | null): Promise<ReportLine[]> {
@@ -2659,6 +2683,7 @@ function personInitials(name: string) {
 
 function titleFor(report: Report) {
   if (isCustomerSalesStatementReport(report.moduleName, report.processName)) return "CUSTOMER SALES STATEMENT";
+  if (isPlainCustomerInvoice(report)) return "INVOICE";
   return report.processName.toUpperCase();
 }
 
@@ -4300,7 +4325,7 @@ function drawFittedImage(canvas: PdfCanvas, image: PdfImageResource | undefined,
 
 function lineHeaders(report: Report) {
   if (isCustomerFacingInvoice(report)) {
-    return ["#", "Product or service", "SKU", "Qty", "Rate", "Amount", "Tax"];
+    return ["Serial No.", "Description", "Quantity", "Unit Price", "Discount", "Amount Payable"];
   }
   const value = `${report.moduleName} ${report.processName}`.toLowerCase();
   if (isCustomerSalesStatementReport(report.moduleName, report.processName)) {
@@ -4332,6 +4357,12 @@ function isCustomerFacingInvoice(report: Report) {
   );
 }
 
+function isPlainCustomerInvoice(report: Report) {
+  if (!isCustomerFacingInvoice(report)) return false;
+  const value = `${report.moduleName} ${report.processName}`.toLowerCase();
+  return value.includes("invoice") && !value.includes("proforma") && !value.includes("quotation");
+}
+
 function isCustomerSalesProfitReport(moduleName: string, processName: string) {
   return isCustomerSalesStatementReport(moduleName, processName) || isSupplierProfitReport(moduleName, processName);
 }
@@ -4356,7 +4387,7 @@ function valueForHeader(report: Report, line: ReportLine, index: number, header:
   if (directDetail !== undefined) return directDetail;
   const matchingDetail = Object.entries(line.details ?? {}).find(([key]) => key.toLowerCase() === h);
   if (matchingDetail) return matchingDetail[1];
-  if (h === "#" || h.includes("s/no") || h.includes("line") || h.includes("stop")) return String(index + 1);
+  if (h === "#" || h.includes("s/no") || h.includes("serial") || h.includes("line") || h.includes("stop")) return String(index + 1);
   if (h === "item name" || h === "name" || h === "product name") return detailValue(line, "Product name", detailValue(line, "Item name", line.description));
   if (h === "item no." || h === "item number") return detailValue(line, "Product code", detailValue(line, "Item no.", line.sku));
   if (h.includes("brand")) return detailValue(line, "Brand", line.notes);
@@ -4640,6 +4671,7 @@ function templateOutro(report: Report) {
 function htmlDocument(report: Report, print = false) {
   const headers = lineHeaders(report);
   const catalogueDocument = isCustomerPriceListReport(report.moduleName, report.processName);
+  const plainInvoice = isPlainCustomerInvoice(report);
   const lineRows = report.lines
     .map(
       (line, index) => `<tr>${lineCells(report, line, index)
@@ -4819,7 +4851,7 @@ function htmlDocument(report: Report, print = false) {
         <h2>${htmlEscape(titleFor(report))}</h2>
         ${dailyDocument ? "" : `<p class="ref">${htmlEscape(style.label)}</p>`}
         <p class="ref"># ${htmlEscape(report.transaction["Reference number"])}</p>
-        <p class="ref">Generated ${htmlEscape(report.generatedAt)}</p>
+        ${plainInvoice ? "" : `<p class="ref">Generated ${htmlEscape(report.generatedAt)}</p>`}
         <div class="solva-mark"><img src="/solva-trade-logo.png" alt="Solva Trade" /></div>
       </section>
     </header>
@@ -4860,9 +4892,9 @@ function htmlDocument(report: Report, print = false) {
 
     ${catalogueDocument ? "" : templateOutro(report)}
 
-    <footer>
+    ${plainInvoice ? "" : `<footer>
       ${htmlEscape(report.businessName)} document generated by Solva Trade${dailyDocument ? "" : `. Printed by ${htmlEscape(report.generatedBy)}`} on ${htmlEscape(report.generatedAt)}.
-    </footer>
+    </footer>`}
   </main>
 </body>
 </html>`;
@@ -4926,7 +4958,7 @@ class PdfCanvas {
 }
 
 function pdfTableWidths(report: Report, headers: string[]) {
-  if (isCustomerFacingInvoice(report)) return [24, 176, 78, 36, 62, 86, 68];
+  if (isCustomerFacingInvoice(report)) return [34, 244, 52, 76, 56, 68];
   if (report.processName === "Customer Price List") return [28, 156, 70, 82, 84, 58, 52];
   if (report.processName === "Product Master Report") return [76, 154, 62, 58, 58, 72, 50];
   if (report.processName === "Product Inventory Usage Report") return [72, 154, 56, 58, 70, 54, 66];
@@ -5998,7 +6030,6 @@ async function customerInvoicePdf(report: Report) {
 
   const finishPage = () => {
     canvas.line(48, 58, 564, 58, "border");
-    canvas.text(`${report.businessName} invoice generated by Solva Trade on ${report.generatedAt}`, 76, 42, 7.2, "muted");
     pages.push(canvas.output());
     pageNumber += 1;
   };
