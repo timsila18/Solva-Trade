@@ -5150,7 +5150,14 @@ function renderPdfTable(canvas: PdfCanvas, report: Report, startY: number) {
 
 function isLandscapePdfReport(report: Report) {
   const template = templateFor(report);
-  return ["report", "inventoryReport", "stockMovement", "executiveReport"].includes(template);
+  const longListDocument =
+    isCustomerPriceListReport(report.moduleName, report.processName) ||
+    isCustomerSalesStatementReport(report.moduleName, report.processName);
+  const lineHeavyOperationalDocument =
+    report.lines.length > 12 &&
+    ["grn", "purchaseOrder", "deliveryNote", "dispatchNote", "creditNote", "debitNote", "statement"].includes(template);
+
+  return ["report", "inventoryReport", "stockMovement", "executiveReport"].includes(template) || longListDocument || lineHeavyOperationalDocument;
 }
 
 function pdfDocument(content: string, width: number, height: number, images: PdfImageResource[] = []) {
