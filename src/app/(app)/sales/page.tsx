@@ -454,7 +454,7 @@ export default async function SalesPage() {
           </div>
           <Link href="/reports" className="text-sm font-semibold text-[var(--solva-blue-700)]">Full report centre</Link>
         </div>
-        <form action="/api/exports" className="mt-4 grid gap-3 rounded-md bg-slate-50 p-4 md:grid-cols-[1.4fr_1fr_1fr_auto] md:items-end">
+        <form action="/api/exports" className="mt-4 grid gap-3 rounded-md bg-slate-50 p-4 md:grid-cols-[1.3fr_1fr_1fr_1fr_auto] md:items-end">
           <input type="hidden" name="module" value="Sales" />
           <input type="hidden" name="process" value="Profit by Supplier and Source Report" />
           <label className="text-sm font-semibold text-slate-700">
@@ -467,6 +467,19 @@ export default async function SalesPage() {
                 </option>
               ))}
             </select>
+            <span className="mt-1 block text-xs font-medium text-slate-500">
+              {suppliers.length ? `${suppliers.length} saved supplier${suppliers.length === 1 ? "" : "s"} available` : "No saved suppliers yet. Add suppliers first or use all sources."}
+            </span>
+          </label>
+          <label className="text-sm font-semibold text-slate-700">
+            Source
+            <select name="sourceType" className="mt-2 min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-sm">
+              <option value="all">All sources</option>
+              <option value="direct_supplier">Direct supplier</option>
+              <option value="local_market">Local market</option>
+              <option value="tz_supplier">Tanzania Supplier</option>
+              <option value="unspecified">Not recorded</option>
+            </select>
           </label>
           <label className="text-sm font-semibold text-slate-700">
             From
@@ -477,9 +490,18 @@ export default async function SalesPage() {
             <input name="to" type="date" defaultValue={today} className="mt-2 min-h-11 w-full rounded-md border border-slate-300 px-3 text-sm" />
           </label>
           <div className="grid gap-2 sm:grid-cols-3 md:min-w-72">
-            <button name="format" value="pdf" className="min-h-11 rounded-md bg-[var(--solva-blue-700)] px-4 text-sm font-semibold text-white">PDF</button>
-            <button name="format" value="excel" className="min-h-11 rounded-md border border-cyan-200 bg-cyan-50 px-4 text-sm font-semibold text-[var(--solva-blue-700)]">Excel</button>
-            <button name="format" value="print" className="min-h-11 rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700">Print</button>
+            <PinProtectedSubmitButton name="format" value="pdf" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-[var(--solva-blue-700)] px-4 text-sm font-semibold text-white">
+              <Eye className="h-4 w-4" />
+              PDF
+            </PinProtectedSubmitButton>
+            <PinProtectedSubmitButton name="format" value="excel" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-cyan-200 bg-cyan-50 px-4 text-sm font-semibold text-[var(--solva-blue-700)]">
+              <Eye className="h-4 w-4" />
+              Excel
+            </PinProtectedSubmitButton>
+            <PinProtectedSubmitButton name="format" value="print" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700">
+              <Eye className="h-4 w-4" />
+              Print
+            </PinProtectedSubmitButton>
           </div>
         </form>
       </section>

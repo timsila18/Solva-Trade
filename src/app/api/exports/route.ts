@@ -1518,6 +1518,7 @@ async function profitBySupplierSourceReportLines(searchParams?: URLSearchParams)
   const supabase = await createSupabaseServerClient();
   const period = salesPeriodWindow(searchParams?.get("period") ?? null, searchParams);
   const supplierId = searchParams?.get("supplierId");
+  const sourceType = searchParams?.get("sourceType");
   let query = supabase
     .from("sales_source_allocations")
     .select("source_type, source_supplier_id, source_supplier_name, quantity, unit_cost, total_cost, sale_unit_price, sale_value, allocated_at, products(product_name, sku, product_code)")
@@ -1526,6 +1527,7 @@ async function profitBySupplierSourceReportLines(searchParams?: URLSearchParams)
     .lte("allocated_at", `${period.end}T23:59:59`)
     .limit(5000);
   if (supplierId && supplierId !== "all") query = query.eq("source_supplier_id", supplierId);
+  if (sourceType && sourceType !== "all") query = query.eq("source_type", sourceType);
 
   const { data } = await query;
 
