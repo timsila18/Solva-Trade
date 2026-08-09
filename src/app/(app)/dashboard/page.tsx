@@ -75,9 +75,11 @@ type WorkflowPayload = {
 
 type ProfitAllocationRow = {
   allocated_at: string | null;
+  quantity: number | string | null;
+  unit_cost: number | string | null;
   sale_value: number | string | null;
+  sale_unit_price: number | string | null;
   total_cost: number | string | null;
-  gross_profit: number | string | null;
 };
 
 function workflowAmount(payload: WorkflowPayload | null | undefined) {
@@ -109,9 +111,9 @@ function profitForPeriod(rows: ProfitAllocationRow[], startIso: string, endIso: 
       return value >= startIso && value < endIso;
     })
     .reduce((sum, row) => {
-      const explicitProfit = numeric(row.gross_profit);
-      if (explicitProfit !== 0) return sum + explicitProfit;
-      return sum + numeric(row.sale_value) - numeric(row.total_cost);
+      const saleValue = numeric(row.sale_value) || numeric(row.quantity) * numeric(row.sale_unit_price);
+      const cost = numeric(row.total_cost) || numeric(row.quantity) * numeric(row.unit_cost);
+      return sum + saleValue - cost;
     }, 0);
 }
 
@@ -244,7 +246,7 @@ export default async function DashboardPage() {
         .eq("business_id", businessId),
       admin
         .from("sales_source_allocations")
-        .select("allocated_at, sale_value, total_cost, gross_profit")
+        .select("allocated_at, quantity, unit_cost, total_cost, sale_unit_price, sale_value")
         .eq("business_id", businessId)
         .gte("allocated_at", yearStartIso)
         .lt("allocated_at", tomorrowIso)

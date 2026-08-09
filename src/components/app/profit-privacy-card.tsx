@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Eye, EyeOff, FileText, LockKeyhole, TrendingDown, TrendingUp } from "lucide-react";
+import { PinProtectedExportLink } from "@/components/app/pin-protected-export";
 
 type ProfitPeriod = {
   label: string;
@@ -100,12 +101,12 @@ export function ProfitPrivacyCard({
             >
               Customer profit
             </Link>
-            <Link
+            <PinProtectedExportLink
               href="/api/exports?module=Sales&process=Profit%20by%20Supplier%20and%20Source%20Report&format=pdf"
               className="inline-flex min-h-9 items-center justify-center rounded-md border border-cyan-200 px-2 text-center text-[11px] font-semibold text-[var(--solva-blue-700)]"
             >
               Supplier profit
-            </Link>
+            </PinProtectedExportLink>
           </div>
         </div>
       ) : (

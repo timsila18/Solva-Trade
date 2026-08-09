@@ -2,6 +2,7 @@ import Link from "next/link";
 import { AlertTriangle, CheckCircle2, Clock3, Eye, FileText, ReceiptText, UserPlus } from "lucide-react";
 import { completeProcessAction, reverseSalesInvoiceAction } from "@/app/(app)/actions";
 import { PersistedForm } from "@/components/app/persisted-form";
+import { PinProtectedSubmitButton } from "@/components/app/pin-protected-export";
 import { EmptyState, MetricCard, PageHero, PlainCard } from "@/components/ui/premium";
 import { salesSummary, salesWorkflows } from "@/lib/sales-data";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -438,9 +439,9 @@ export default async function SalesPage() {
             <input name="to" type="date" defaultValue={today} className="mt-2 min-h-11 w-full rounded-md border border-slate-300 px-3 text-sm" />
           </label>
           <div className="grid gap-2 sm:grid-cols-3 md:min-w-72">
-            <button name="format" value="pdf" className="min-h-11 rounded-md bg-[var(--solva-blue-700)] px-4 text-sm font-semibold text-white">PDF</button>
-            <button name="format" value="excel" className="min-h-11 rounded-md border border-cyan-200 bg-cyan-50 px-4 text-sm font-semibold text-[var(--solva-blue-700)]">Excel</button>
-            <button name="format" value="print" className="min-h-11 rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700">Print</button>
+            <PinProtectedSubmitButton name="format" value="pdf" className="min-h-11 rounded-md bg-[var(--solva-blue-700)] px-4 text-sm font-semibold text-white">PDF</PinProtectedSubmitButton>
+            <PinProtectedSubmitButton name="format" value="excel" className="min-h-11 rounded-md border border-cyan-200 bg-cyan-50 px-4 text-sm font-semibold text-[var(--solva-blue-700)]">Excel</PinProtectedSubmitButton>
+            <PinProtectedSubmitButton name="format" value="print" className="min-h-11 rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700">Print</PinProtectedSubmitButton>
           </div>
         </form>
       </section>

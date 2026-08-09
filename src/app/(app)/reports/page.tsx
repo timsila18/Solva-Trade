@@ -1,4 +1,5 @@
 import { Banknote, BarChart3, CalendarClock, FileText, Mail, PackageSearch, Printer, ReceiptText, Send, ShieldCheck, TrendingUp, Users } from "lucide-react";
+import { PinProtectedExportLink } from "@/components/app/pin-protected-export";
 import { MetricCard, PageHero } from "@/components/ui/premium";
 import { documentCatalog, documentCategories, type BusinessDocument } from "@/lib/document-catalog";
 import {
@@ -231,23 +232,32 @@ function ownerExportHref(report: (typeof ownerReportCards)[number], format: "pdf
   return `/api/exports?module=${encodeURIComponent(report.category)}&process=${encodeURIComponent(report.report)}&format=${format}`;
 }
 
+function isSupplierProfitExport(category: string, name: string) {
+  return `${category} ${name}`.toLowerCase().includes("profit by supplier");
+}
+
 function ReportActions({ document, compact = false }: { document: BusinessDocument; compact?: boolean }) {
+  const protectedReport = isSupplierProfitExport(document.category, document.name);
+  const GenerateLink = protectedReport ? PinProtectedExportLink : "a";
+  const ExcelLink = protectedReport ? PinProtectedExportLink : "a";
+  const PrintLink = protectedReport ? PinProtectedExportLink : "a";
+
   return (
     <div className={compact ? "mt-3" : "mt-4"}>
-      <a
+      <GenerateLink
         href={exportHref(document, "pdf")}
         className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md bg-[var(--solva-blue-700)] px-3 text-sm font-semibold text-white shadow-sm"
       >
         <FileText className="h-4 w-4" />
         Generate
-      </a>
+      </GenerateLink>
       <div className="mt-2 grid grid-cols-2 gap-2">
-        <a href={exportHref(document, "excel")} className="inline-flex min-h-9 items-center justify-center rounded-md border border-cyan-200 bg-cyan-50 px-3 text-xs font-semibold text-[var(--solva-blue-700)]">
+        <ExcelLink href={exportHref(document, "excel")} className="inline-flex min-h-9 items-center justify-center rounded-md border border-cyan-200 bg-cyan-50 px-3 text-xs font-semibold text-[var(--solva-blue-700)]">
           Excel
-        </a>
-        <a href={exportHref(document, "print")} className="inline-flex min-h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700">
+        </ExcelLink>
+        <PrintLink href={exportHref(document, "print")} className="inline-flex min-h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700">
           Print
-        </a>
+        </PrintLink>
       </div>
     </div>
   );
@@ -285,6 +295,10 @@ export default function ReportsPage() {
         <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
           {ownerReportCards.map((report) => {
             const Icon = report.icon;
+            const protectedReport = isSupplierProfitExport(report.category, report.report);
+            const GenerateLink = protectedReport ? PinProtectedExportLink : "a";
+            const ExcelLink = protectedReport ? PinProtectedExportLink : "a";
+            const PrintLink = protectedReport ? PinProtectedExportLink : "a";
             return (
               <article key={report.question} className="flex min-h-[220px] flex-col rounded-lg border border-slate-200 bg-slate-50 p-4">
                 <div className="flex items-start justify-between gap-3">
@@ -295,19 +309,19 @@ export default function ReportsPage() {
                 </div>
                 <h3 className="mt-4 text-base font-semibold leading-6 text-slate-950">{report.question}</h3>
                 <p className="mt-2 flex-1 text-sm leading-6 text-slate-600">{report.description}</p>
-                <a
+                <GenerateLink
                   href={ownerExportHref(report, "pdf")}
                   className="mt-4 inline-flex min-h-10 items-center justify-center rounded-md bg-[var(--solva-blue-700)] px-3 text-sm font-semibold text-white"
                 >
                   Generate PDF
-                </a>
+                </GenerateLink>
                 <div className="mt-2 grid grid-cols-2 gap-2">
-                  <a href={ownerExportHref(report, "excel")} className="inline-flex min-h-9 items-center justify-center rounded-md border border-cyan-200 bg-white px-3 text-xs font-semibold text-[var(--solva-blue-700)]">
+                  <ExcelLink href={ownerExportHref(report, "excel")} className="inline-flex min-h-9 items-center justify-center rounded-md border border-cyan-200 bg-white px-3 text-xs font-semibold text-[var(--solva-blue-700)]">
                     Excel
-                  </a>
-                  <a href={ownerExportHref(report, "print")} className="inline-flex min-h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700">
+                  </ExcelLink>
+                  <PrintLink href={ownerExportHref(report, "print")} className="inline-flex min-h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700">
                     Print
-                  </a>
+                  </PrintLink>
                 </div>
               </article>
             );
