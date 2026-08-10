@@ -47,14 +47,25 @@ function searchScore(values: unknown[], query: string) {
   const tokens = normalizeSearch(query).split(/\s+/).filter(Boolean);
   if (!tokens.length) return 0;
   const haystack = values.map(normalizeSearch);
-  if (!tokens.every((token) => haystack.some((value) => value.includes(token)))) return -1;
-  return tokens.every((token) => haystack.some((value) => value.startsWith(token))) ? 2 : 1;
+  const compactHaystack = haystack.map((value) => value.replace(/\s+/g, ""));
+  const matched = tokens.every((token) => {
+    const compactToken = token.replace(/\s+/g, "");
+    return haystack.some((value) => value.includes(token)) || compactHaystack.some((value) => value.includes(compactToken));
+  });
+  if (!matched) return -1;
+  return tokens.every((token) => {
+    const compactToken = token.replace(/\s+/g, "");
+    return haystack.some((value) => value.startsWith(token)) || compactHaystack.some((value) => value.startsWith(compactToken));
+  })
+    ? 2
+    : 1;
 }
 
 export function MultiLineTransactionForm({ mode, customers = [], suppliers = [], products, today }: Props) {
   const [search, setSearch] = useState("");
   const [partySearch, setPartySearch] = useState("");
   const [selectedPartyId, setSelectedPartyId] = useState("");
+  const [newCustomerName, setNewCustomerName] = useState("");
   const [saleSourceSearch, setSaleSourceSearch] = useState("");
   const [saleSourceSupplierId, setSaleSourceSupplierId] = useState("");
   const [showPreview, setShowPreview] = useState(false);
@@ -150,11 +161,18 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
       .map(({ supplier }) => supplier);
   }, [saleSourceSearch, saleSourceSupplierId, suppliers]);
   const matchingIndexes = useMemo(() => {
+    const productSearchValues = (product: ProductLookup) => [
+      product.name,
+      product.code,
+      product.vatCode,
+      String(product.name ?? "").replace(/\s+/g, ""),
+      String(product.code ?? "").replace(/[-_\s]+/g, ""),
+    ];
     return new Set(
       products
         .map((product, index) => ({ product, index }))
-        .filter(({ product }) => searchScore([product.name, product.code, product.vatCode], search) >= 0)
-        .sort((a, b) => searchScore([b.product.name, b.product.code, b.product.vatCode], search) - searchScore([a.product.name, a.product.code, a.product.vatCode], search))
+        .filter(({ product }) => searchScore(productSearchValues(product), search) >= 0)
+        .sort((a, b) => searchScore(productSearchValues(b.product), search) - searchScore(productSearchValues(a.product), search))
         .map(({ index }) => index),
     );
   }, [products, search]);
@@ -162,19 +180,6 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
     return products.map((_, index) => index).filter((index) => matchingIndexes.has(index));
   }, [matchingIndexes, products]);
   const visibleIndexSet = useMemo(() => new Set(visibleIndexes), [visibleIndexes]);
-  const productSearchResults = useMemo(() => {
-    const query = search.trim();
-    if (!query) return [];
-    return products
-      .map((product, index) => ({
-        product,
-        index,
-        score: searchScore([product.name, product.code, product.vatCode], query),
-      }))
-      .filter(({ score }) => score >= 0)
-      .sort((a, b) => b.score - a.score || a.product.name.localeCompare(b.product.name))
-      .slice(0, 12);
-  }, [products, search]);
 
   function setLineSelected(index: number, selected: boolean) {
     setSelectedIndexes((current) => {
@@ -182,15 +187,6 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
       if (selected) next.add(index);
       else next.delete(index);
       return next;
-    });
-  }
-
-  function useProductFromSearch(index: number) {
-    setLineSelected(index, true);
-    window.requestAnimationFrame(() => {
-      const quantityInput = containerRef.current?.querySelector<HTMLInputElement>(`[name="field_line_${index}_quantity"]`);
-      quantityInput?.scrollIntoView({ behavior: "smooth", block: "center" });
-      quantityInput?.focus();
     });
   }
 
@@ -268,7 +264,10 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
             name={partyName}
             required={mode !== "sale"}
             value={selectedPartyId}
-            onChange={(event) => setSelectedPartyId(event.currentTarget.value)}
+            onChange={(event) => {
+              setSelectedPartyId(event.currentTarget.value);
+              if (event.currentTarget.value) setNewCustomerName("");
+            }}
             className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-normal"
           >
             <option value="">Select saved {partyLabel.toLowerCase()}</option>
@@ -287,6 +286,7 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
                   onClick={() => {
                     setSelectedPartyId(party.id);
                     setPartySearch(party.name);
+                    setNewCustomerName("");
                   }}
                   className="flex w-full items-center justify-between gap-3 rounded px-3 py-2 text-left text-sm font-normal hover:bg-cyan-50"
                 >
@@ -307,6 +307,8 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
               <input type="hidden" name="label_customer_name" value="Customer name" />
               <input
                 name="field_customer_name"
+                value={newCustomerName || (!selectedPartyId ? partySearch : "")}
+                onChange={(event) => setNewCustomerName(event.currentTarget.value)}
                 placeholder="Or type new customer name and continue"
                 className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-normal"
               />
@@ -435,34 +437,6 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
                 placeholder={mode === "sale" ? "Search product to sell" : "Search delivered product"}
                 className="min-h-11 w-full rounded-md border border-slate-300 bg-white pl-9 pr-3 py-2 text-sm font-normal"
               />
-              {search.trim() ? (
-                <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-20 max-h-80 overflow-y-auto rounded-md border border-slate-200 bg-white p-1 shadow-xl">
-                  {productSearchResults.length ? (
-                    productSearchResults.map(({ product, index }) => (
-                      <button
-                        key={product.id || index}
-                        type="button"
-                        onClick={() => useProductFromSearch(index)}
-                        className="flex w-full items-center justify-between gap-3 rounded px-3 py-2 text-left text-sm font-normal hover:bg-cyan-50 focus:bg-cyan-50 focus:outline-none"
-                      >
-                        <span className="min-w-0">
-                          <span className="block truncate font-semibold text-slate-950">{product.name || "Unnamed product"}</span>
-                          <span className="block truncate text-xs text-slate-500">
-                            {[product.code || "No code", product.trackInventory ? `Stock ${money(product.available)}` : "Service"].filter(Boolean).join(" - ")}
-                          </span>
-                        </span>
-                        <span className="shrink-0 text-xs font-semibold text-[var(--solva-blue-700)]">
-                          {selectedIndexes.has(index) ? "Selected" : "Use"}
-                        </span>
-                      </button>
-                    ))
-                  ) : (
-                    <div className="px-3 py-3 text-sm font-normal text-slate-500">
-                      No product matches. Add it first, then return here.
-                    </div>
-                  )}
-                </div>
-              ) : null}
             </div>
             <button
               type="button"

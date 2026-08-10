@@ -89,6 +89,12 @@ function getRawNumber(formData: FormData, key: string) {
   return Number.isFinite(number) ? number : 0;
 }
 
+function chunkArray<T>(items: T[], size = 100) {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) chunks.push(items.slice(index, index + size));
+  return chunks;
+}
+
 function inclusiveVatAmount(inclusiveAmount: number, vatRate: number) {
   if (inclusiveAmount <= 0 || vatRate <= 0) return 0;
   return inclusiveAmount * (vatRate / (100 + vatRate));
@@ -361,6 +367,44 @@ async function sourceOverrideForSaleLine(
   };
 }
 
+async function insertSaleAllocationFallback(
+  admin: SupabaseWorkspaceClient,
+  input: {
+    businessId: string;
+    invoiceId: string;
+    invoiceItemId: string;
+    stockMovementId: string;
+    productId: string;
+    quantity: number;
+    unitCost: number;
+    saleUnitPrice: number;
+    sourceType: string | null;
+    supplierId: string | null;
+    supplierName: string | null;
+  },
+) {
+  const sourceType = input.sourceType || "unspecified";
+  const unitCost = Number.isFinite(input.unitCost) ? input.unitCost : 0;
+  const saleUnitPrice = Number.isFinite(input.saleUnitPrice) ? input.saleUnitPrice : 0;
+  const { error } = await admin.from("sales_source_allocations").insert({
+    business_id: input.businessId,
+    sales_invoice_id: input.invoiceId,
+    sales_invoice_item_id: input.invoiceItemId,
+    stock_movement_id: input.stockMovementId,
+    product_id: input.productId,
+    source_type: sourceType,
+    source_supplier_id: input.supplierId,
+    source_supplier_name: input.supplierName,
+    quantity: input.quantity,
+    unit_cost: unitCost,
+    total_cost: input.quantity * unitCost,
+    sale_unit_price: saleUnitPrice,
+    sale_value: input.quantity * saleUnitPrice,
+    gross_profit: input.quantity * (saleUnitPrice - unitCost),
+  });
+  if (error) console.warn("Solva Trade fallback sale allocation skipped", error);
+}
+
 function supplierTypeValue(value: string) {
   const supplierMap: Record<string, string> = {
     manufacturer: "manufacturer",
@@ -566,10 +610,14 @@ async function postSalesInvoice(formData: FormData, userId: string, fallbackBusi
     tax_amount: line.taxAmount,
     line_total: line.lineTotal,
   }));
-  const { data: items, error: itemError } = await admin.from("sales_invoice_items").insert(invoiceItems).select("id, product_id");
-  if (itemError || !items?.length) throw new Error(itemError?.message ?? "Could not post invoice items.");
+  const items: { id: string; product_id: string }[] = [];
+  for (const chunk of chunkArray(invoiceItems)) {
+    const { data: chunkItems, error: itemError } = await admin.from("sales_invoice_items").insert(chunk).select("id, product_id");
+    if (itemError || !chunkItems?.length) throw new Error(itemError?.message ?? "Could not post invoice items.");
+    items.push(...(chunkItems as { id: string; product_id: string }[]));
+  }
 
-  for (const line of lines) {
+  for (const [linePosition, line] of lines.entries()) {
     const product = productsById.get(line.productId);
     if (!product?.track_inventory) continue;
     const unitCost = Number(product.standard_cost ?? 0);
@@ -597,8 +645,9 @@ async function postSalesInvoice(formData: FormData, userId: string, fallbackBusi
     }).select("id").single();
     if (movementError || !movement) throw new Error(movementError?.message ?? "Could not post stock movement.");
 
-    const invoiceItem = items.find((item) => String(item.product_id) === line.productId);
+    const invoiceItem = items[linePosition] ?? items.find((item) => String(item.product_id) === line.productId);
     if (!invoiceItem?.id) continue;
+    const saleUnitPrice = line.quantity > 0 ? line.lineTotal / line.quantity : 0;
     const { error: allocationError } = await (admin as SolvaRpcClient).rpc("allocate_sale_fifo_source", {
       target_business_id: businessId,
       target_invoice_id: invoice.id,
@@ -608,10 +657,24 @@ async function postSalesInvoice(formData: FormData, userId: string, fallbackBusi
       target_branch_id: branchId,
       target_warehouse_id: warehouseId,
       target_quantity: line.quantity,
-      target_sale_unit_price: line.quantity > 0 ? line.lineTotal / line.quantity : 0,
+      target_sale_unit_price: saleUnitPrice,
     });
-    if (allocationError) throw new Error(allocationError.message);
-    if (lineSource.sourceType || lineSource.supplierId) {
+    if (allocationError) {
+      console.warn("Solva Trade FIFO sale allocation fell back", allocationError);
+      await insertSaleAllocationFallback(admin, {
+        businessId,
+        invoiceId: String(invoice.id),
+        invoiceItemId: String(invoiceItem.id),
+        stockMovementId: String(movement.id),
+        productId: line.productId,
+        quantity: line.quantity,
+        unitCost,
+        saleUnitPrice,
+        sourceType: lineSource.sourceType || null,
+        supplierId: lineSource.supplierId,
+        supplierName: lineSource.supplierName,
+      });
+    } else if (lineSource.sourceType || lineSource.supplierId) {
       const { error: allocationSourceError } = await admin
         .from("sales_source_allocations")
         .update({
@@ -622,7 +685,7 @@ async function postSalesInvoice(formData: FormData, userId: string, fallbackBusi
         .eq("business_id", businessId)
         .eq("sales_invoice_id", invoice.id)
         .eq("sales_invoice_item_id", invoiceItem.id);
-      if (allocationSourceError) throw new Error(allocationSourceError.message);
+      if (allocationSourceError) console.warn("Solva Trade sale source override skipped", allocationSourceError);
     }
   }
 
@@ -1205,8 +1268,10 @@ async function postGoodsReceived(formData: FormData, userId: string, fallbackBus
     source_reason: sourceReason,
     notes: `Source: ${sourceType.replaceAll("_", " ")} via ${supplierName}`,
   }));
-  const { error: itemError } = await admin.from("goods_received_note_items").insert(grnItems);
-  if (itemError) throw new Error(itemError.message);
+  for (const chunk of chunkArray(grnItems)) {
+    const { error: itemError } = await admin.from("goods_received_note_items").insert(chunk);
+    if (itemError) throw new Error(itemError.message);
+  }
 
   const movements = lines.map((line) => ({
     business_id: businessId,
@@ -1234,8 +1299,10 @@ async function postGoodsReceived(formData: FormData, userId: string, fallbackBus
     source_reason: sourceReason,
     created_by: userId,
   }));
-  const { error: movementError } = await admin.from("stock_movements").insert(movements);
-  if (movementError) throw new Error(movementError.message);
+  for (const chunk of chunkArray(movements)) {
+    const { error: movementError } = await admin.from("stock_movements").insert(chunk);
+    if (movementError) throw new Error(movementError.message);
+  }
   return { grnId: String(grn.id), grnNumber };
 }
 

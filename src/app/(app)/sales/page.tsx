@@ -412,7 +412,7 @@ export default async function SalesPage() {
         <div className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
           <div>
             <p className="text-sm font-semibold text-[var(--solva-blue-700)]">Customer sales statements</p>
-            <h2 className="mt-1 text-xl font-semibold text-slate-950">Download all sales or one customer&apos;s sales</h2>
+            <h2 className="mt-1 text-xl font-semibold text-slate-950">Generate Customer Statement</h2>
           </div>
           <Link href="/reports" className="text-sm font-semibold text-[var(--solva-blue-700)]">Full report centre</Link>
         </div>

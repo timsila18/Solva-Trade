@@ -1511,6 +1511,219 @@ async function profitByCustomerReportLines(searchParams?: URLSearchParams): Prom
   });
 }
 
+async function customerStatementReportLines(searchParams?: URLSearchParams): Promise<ReportLine[]> {
+  const businessId = await activeReportBusinessId();
+  if (!businessId) return [];
+
+  const supabase = await createSupabaseServerClient();
+  const period = salesPeriodWindow(searchParams?.get("period") ?? null, searchParams);
+  const requestedCustomerId = searchParams?.get("customerId");
+  const paymentStart = `${period.start}T00:00:00.000+03:00`;
+  const paymentEnd = `${period.end}T23:59:59.999+03:00`;
+
+  let invoiceQuery = supabase
+    .from("sales_invoices")
+    .select("id, invoice_number, invoice_date, total_amount, amount_paid, balance_due, status, customer_id, customers(customer_name, customer_code, kra_pin, phone)")
+    .eq("business_id", businessId)
+    .neq("status", "reversed")
+    .gte("invoice_date", period.start)
+    .lte("invoice_date", period.end)
+    .order("invoice_date", { ascending: true })
+    .limit(3000);
+  if (requestedCustomerId && requestedCustomerId !== "all") invoiceQuery = invoiceQuery.eq("customer_id", requestedCustomerId);
+
+  let paymentQuery = supabase
+    .from("customer_payments")
+    .select("id, customer_id, payment_number, payment_date, amount_received, status, transaction_reference, payer_name, payer_phone, customers(customer_name, customer_code, kra_pin, phone)")
+    .eq("business_id", businessId)
+    .neq("status", "reversed")
+    .gte("payment_date", paymentStart)
+    .lte("payment_date", paymentEnd)
+    .order("payment_date", { ascending: true })
+    .limit(3000);
+  if (requestedCustomerId && requestedCustomerId !== "all") paymentQuery = paymentQuery.eq("customer_id", requestedCustomerId);
+
+  let openingInvoiceQuery = supabase
+    .from("sales_invoices")
+    .select("total_amount")
+    .eq("business_id", businessId)
+    .neq("status", "reversed")
+    .lt("invoice_date", period.start)
+    .limit(5000);
+  if (requestedCustomerId && requestedCustomerId !== "all") openingInvoiceQuery = openingInvoiceQuery.eq("customer_id", requestedCustomerId);
+
+  let openingPaymentQuery = supabase
+    .from("customer_payments")
+    .select("amount_received")
+    .eq("business_id", businessId)
+    .neq("status", "reversed")
+    .lt("payment_date", paymentStart)
+    .limit(5000);
+  if (requestedCustomerId && requestedCustomerId !== "all") openingPaymentQuery = openingPaymentQuery.eq("customer_id", requestedCustomerId);
+
+  const [{ data: invoices }, { data: payments }, { data: openingInvoices }, { data: openingPayments }] = await Promise.all([
+    invoiceQuery,
+    paymentQuery,
+    openingInvoiceQuery,
+    openingPaymentQuery,
+  ]);
+
+  const invoiceRows = (invoices ?? []) as SalesInvoiceRow[];
+  const paymentRows = (payments ?? []) as CustomerPaymentRow[];
+  const invoiceIds = invoiceRows.map((invoice) => invoice.id).filter(Boolean);
+  const itemsByInvoice = new Map<string, string[]>();
+  if (invoiceIds.length) {
+    const { data: items } = await supabase
+      .from("sales_invoice_items")
+      .select("invoice_id, products(product_name, product_code, sku)")
+      .eq("business_id", businessId)
+      .in("invoice_id", invoiceIds)
+      .order("invoice_id", { ascending: true })
+      .limit(10000);
+
+    for (const item of (items ?? []) as SalesItemRow[]) {
+      const product = relatedOne(item.products);
+      const invoiceId = String(item.invoice_id ?? "");
+      const name = String(product?.product_name ?? product?.sku ?? product?.product_code ?? "Sold item");
+      if (!invoiceId) continue;
+      itemsByInvoice.set(invoiceId, [...(itemsByInvoice.get(invoiceId) ?? []), name]);
+    }
+  }
+
+  const openingBalance =
+    (openingInvoices ?? []).reduce((sum, invoice) => sum + numberValue((invoice as { total_amount?: number | string | null }).total_amount), 0) -
+    (openingPayments ?? []).reduce((sum, payment) => sum + numberValue((payment as { amount_received?: number | string | null }).amount_received), 0);
+
+  type StatementEvent = {
+    date: string;
+    sortType: number;
+    documentNo: string;
+    type: "Invoice" | "Receipt";
+    description: string;
+    debit: number;
+    credit: number;
+    customerName: string;
+    customerCode: string;
+    customerPin: string;
+    customerPhone: string;
+    status: string;
+  };
+
+  const events: StatementEvent[] = [
+    ...invoiceRows.map((invoice) => {
+      const customer = relatedOne(invoice.customers) as { customer_name?: string | null; customer_code?: string | null; kra_pin?: string | null; phone?: string | null } | null;
+      const products = itemsByInvoice.get(String(invoice.id)) ?? [];
+      const productSummary =
+        products.length > 4
+          ? `${products.slice(0, 4).join(", ")} +${products.length - 4} more`
+          : products.length
+            ? products.join(", ")
+            : "Goods sold";
+      const customerName = String(customer?.customer_name ?? "Walk-in customer");
+      return {
+        date: dateKey(invoice.invoice_date),
+        sortType: 1,
+        documentNo: String(invoice.invoice_number ?? ""),
+        type: "Invoice" as const,
+        description: requestedCustomerId && requestedCustomerId !== "all" ? productSummary : `${customerName}: ${productSummary}`,
+        debit: numberValue(invoice.total_amount),
+        credit: 0,
+        customerName,
+        customerCode: String(customer?.customer_code ?? "-"),
+        customerPin: String(customer?.kra_pin ?? "-"),
+        customerPhone: String(customer?.phone ?? "-"),
+        status: numberValue(invoice.balance_due) <= 0 ? "Paid" : numberValue(invoice.amount_paid) > 0 ? "Part paid" : "Unpaid",
+      };
+    }),
+    ...paymentRows.map((payment) => {
+      const customer = relatedOne(payment.customers) as { customer_name?: string | null; customer_code?: string | null; kra_pin?: string | null; phone?: string | null } | null;
+      const customerName = String(customer?.customer_name ?? payment.payer_name ?? "Walk-in customer");
+      const reference = String(payment.transaction_reference ?? "").trim();
+      return {
+        date: dateKey(payment.payment_date),
+        sortType: 2,
+        documentNo: String(payment.payment_number ?? reference ?? ""),
+        type: "Receipt" as const,
+        description: `${requestedCustomerId && requestedCustomerId !== "all" ? "" : `${customerName}: `}Payment received${reference ? ` (${reference})` : ""}`.trim(),
+        debit: 0,
+        credit: numberValue(payment.amount_received),
+        customerName,
+        customerCode: String(customer?.customer_code ?? "-"),
+        customerPin: String(customer?.kra_pin ?? "-"),
+        customerPhone: String(customer?.phone ?? payment.payer_phone ?? "-"),
+        status: String(payment.status ?? "posted"),
+      };
+    }),
+  ].sort((a, b) => a.date.localeCompare(b.date) || a.sortType - b.sortType || a.documentNo.localeCompare(b.documentNo));
+
+  if (!events.length) {
+    return [
+      {
+        sku: "NO-ACTIVITY",
+        description: "No account movement in this period",
+        unit: "Statement",
+        quantity: 0,
+        unitPrice: openingBalance,
+        discount: 0,
+        taxRate: "",
+        taxAmount: 0,
+        lineTotal: 0,
+        warehouse: requestedCustomerId && requestedCustomerId !== "all" ? await customerNameForReport(requestedCustomerId) : "All customers",
+        batch: period.label,
+        notes: "No invoices or receipts were posted for the selected period.",
+        details: {
+          "#": "1",
+          Date: period.start,
+          "Document No.": "-",
+          Type: "No activity",
+          Description: "No invoices or receipts were posted for the selected period.",
+          Debit: money(0),
+          Credit: money(0),
+          Balance: money(openingBalance),
+          "Opening balance": money(openingBalance),
+          Period: period.label,
+        },
+      },
+    ];
+  }
+
+  let runningBalance = openingBalance;
+  return events.map((event, index) => {
+    runningBalance += event.debit - event.credit;
+    return {
+      sku: event.documentNo,
+      description: event.description,
+      unit: event.type,
+      quantity: 1,
+      unitPrice: runningBalance,
+      discount: event.credit,
+      taxRate: "",
+      taxAmount: 0,
+      lineTotal: event.debit,
+      warehouse: event.customerName,
+      batch: event.status,
+      notes: `${event.type} ${event.documentNo || "not recorded"} on ${event.date}.`,
+      details: {
+        "#": String(index + 1),
+        Date: event.date,
+        "Document No.": event.documentNo || "-",
+        Type: event.type,
+        Description: event.description,
+        Debit: money(event.debit),
+        Credit: money(event.credit),
+        Balance: money(runningBalance),
+        Customer: event.customerName,
+        "Customer code": event.customerCode,
+        "Customer KRA PIN": event.customerPin,
+        "Customer phone": event.customerPhone,
+        Status: event.status,
+        "Opening balance": money(openingBalance),
+        Period: period.label,
+      },
+    };
+  });
+}
+
 async function profitBySupplierSourceReportLines(searchParams?: URLSearchParams): Promise<ReportLine[]> {
   const businessId = await activeReportBusinessId();
   if (!businessId) return [];
@@ -1813,6 +2026,22 @@ type SalesItemRow = {
   tax_amount?: number | string | null;
   line_total?: number | string | null;
   products?: { product_name?: string | null; product_code?: string | null; sku?: string | null; standard_cost?: number | string | null } | { product_name?: string | null; product_code?: string | null; sku?: string | null; standard_cost?: number | string | null }[] | null;
+};
+
+type CustomerPaymentRow = {
+  id: string;
+  customer_id?: string | null;
+  payment_number?: string | null;
+  payment_date?: string | null;
+  amount_received?: number | string | null;
+  status?: string | null;
+  transaction_reference?: string | null;
+  payer_name?: string | null;
+  payer_phone?: string | null;
+  customers?:
+    | { customer_name?: string | null; customer_code?: string | null; kra_pin?: string | null; phone?: string | null }
+    | { customer_name?: string | null; customer_code?: string | null; kra_pin?: string | null; phone?: string | null }[]
+    | null;
 };
 
 type KraEtrInvoiceRow = SalesInvoiceRow & {
@@ -3535,11 +3764,11 @@ function blueprintFromTerms(report: Report): DocumentBlueprint {
       ...base,
       accent: "#1455D9",
       soft: "#EEF6FF",
-      label: "Customer sales statement",
-      table: "Goods sold, invoices, payments and balances for the selected customer",
-      headers: ["#", "Date", "Invoice no.", "Product", "SKU", "Qty", "Rate", "Amount", "Payment status", "Balance due"],
+      label: "Customer account statement",
+      table: "Invoices, receipts and running balance",
+      headers: ["#", "Date", "Document No.", "Type", "Description", "Debit", "Credit", "Balance"],
       signatures: [],
-      footerNote: "Customer-facing statement showing goods sold, invoice values, payments and outstanding balances.",
+      footerNote: "Please confirm this statement within the agreed credit-control period.",
       emphasis: "report",
     };
   }
@@ -4007,8 +4236,9 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
       ? await goodsReceivedDocumentLines(grnId)
       : isPurchaseSourceReport(processName)
         ? await purchaseSourceReportLines(processName)
-        : isCustomerSalesStatementReport(moduleName, processName) ||
-            processName.toLowerCase().includes("profit by customer") ||
+        : isCustomerSalesStatementReport(moduleName, processName)
+          ? await customerStatementReportLines(searchParams)
+        : processName.toLowerCase().includes("profit by customer") ||
             processName.toLowerCase().includes("customer profit")
           ? await profitByCustomerReportLines(searchParams)
         : processName.toLowerCase().includes("profit by supplier") || processName.toLowerCase().includes("supplier source profit")
@@ -4048,8 +4278,19 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
   const effectivePartyName = liveInvoiceDetails.Customer || liveGrnDetails.Supplier || priceListCustomerName || customerStatementPartyName || partyName;
   const isValuationReport = isProductMasterReport(moduleName, processName) || isProductProfileReport(moduleName, processName) || isInventoryOperationalReport(moduleName, processName);
   const isCustomerSalesProfit = isCustomerSalesProfitReport(moduleName, processName);
+  const isCustomerStatement = isCustomerSalesStatementReport(moduleName, processName);
   const isSupplierProfit = isSupplierProfitReport(moduleName, processName);
   const lineValueTotal = lines.reduce((sum, line) => sum + line.lineTotal, 0);
+  const customerStatementDebitTotal = isCustomerStatement
+    ? lines.reduce((sum, line) => sum + detailAmount(line.details?.Debit), 0)
+    : 0;
+  const customerStatementCreditTotal = isCustomerStatement
+    ? lines.reduce((sum, line) => sum + detailAmount(line.details?.Credit), 0)
+    : 0;
+  const customerStatementOpeningBalance = isCustomerStatement ? detailAmount(lines[0]?.details?.["Opening balance"]) : 0;
+  const customerStatementClosingBalance = isCustomerStatement
+    ? detailAmount(lines.at(-1)?.details?.Balance)
+    : 0;
   const supplierProfitSalesTotal = isSupplierProfit
     ? lines.reduce((sum, line) => sum + detailAmount(line.details?.Sales ?? money(line.discount)), 0)
     : 0;
@@ -4073,6 +4314,8 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
     : null;
   const subtotal = isValuationReport
     ? lineValueTotal
+    : isCustomerStatement
+      ? customerStatementDebitTotal
     : isSupplierProfit
       ? supplierProfitSalesTotal
     : liveInvoiceTotals?.subtotal
@@ -4088,12 +4331,16 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
       : parseAmount(fieldValue(fields, ["tax"], "0")) || lines.reduce((sum, line) => sum + line.taxAmount, 0);
   const discount = isValuationReport || isLiveCustomerInvoice
     ? 0
+    : isCustomerStatement
+      ? customerStatementCreditTotal
     : isSupplierProfit
       ? supplierProfitCostTotal
       : parseAmount(fieldValue(fields, ["discount"], "0")) || lines.reduce((sum, line) => sum + line.discount, 0);
   const total =
     (isValuationReport
       ? lineValueTotal
+      : isCustomerStatement
+        ? customerStatementClosingBalance
       : isSupplierProfit
         ? supplierProfitGrossTotal
         : liveInvoiceTotals?.total || parseAmount(fieldValue(fields, ["total", "amount", "amount_received", "amount_sent"], "0"))) ||
@@ -4209,6 +4456,7 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
     totals: {
       Subtotal: money(subtotal),
       Discount: money(discount),
+      ...(isCustomerStatement ? { "Opening balance": money(customerStatementOpeningBalance), Invoices: money(customerStatementDebitTotal), Payments: money(customerStatementCreditTotal), "Closing balance": money(customerStatementClosingBalance) } : {}),
       ...(isSupplierProfit ? { Sales: money(supplierProfitSalesTotal), "Supply cost": money(supplierProfitCostTotal), "Gross profit": money(supplierProfitGrossTotal) } : {}),
       ...(isCustomerSalesProfit ? {} : { Tax: money(tax) }),
       Total: money(total),
@@ -4405,7 +4653,7 @@ function lineHeaders(report: Report) {
   }
   const value = `${report.moduleName} ${report.processName}`.toLowerCase();
   if (isCustomerSalesStatementReport(report.moduleName, report.processName)) {
-    return ["#", "Date", "Invoice no.", "Product", "SKU", "Qty", "Rate", "Amount", "Payment status", "Balance due"];
+    return ["#", "Date", "Document No.", "Type", "Description", "Debit", "Credit", "Balance"];
   }
   if (value.includes("profit by supplier") || value.includes("supplier source profit")) {
     return ["#", "Source", "Supplier", "Period", "Products", "Units sold", "Sales", "Supply cost", "Gross profit", "Margin"];
@@ -5286,7 +5534,7 @@ function wideReportHeaders(report: Report) {
     "Inventory Damage Report": ["Item no.", "Name", "Vendor", "Condition", "Damage report", "Quantity", "Asset value", "Total value"],
     "Sales Tracking Report": ["Product name", "Cost per item", "Markup percentage", "Total sold", "Total revenue", "Profit per item", "Total income"],
     "Customer Sales and Profit Report": ["#", "Date", "Invoice no.", "Product", "SKU", "Qty", "Rate", "Amount", "Payment status", "Balance due"],
-    "Customer Sales Statement": ["#", "Date", "Invoice no.", "Product", "SKU", "Qty", "Rate", "Amount", "Payment status", "Balance due"],
+    "Customer Sales Statement": ["#", "Date", "Document No.", "Type", "Description", "Debit", "Credit", "Balance"],
     "Profit by Supplier and Source Report": ["#", "Source", "Supplier", "Period", "Products", "Units sold", "Sales", "Supply cost", "Gross profit", "Margin"],
     "KRA ETR Sales Report": ["Sr. No", "Customer KRA PIN", "Customer Name", "KRA Device No.", "Invoice Date", "CUI Invoice No.", "Item Description", "Exclusive Amount", "VAT", "Inclusive Amount"],
   };
@@ -5311,15 +5559,18 @@ function customerSalesStatementWidths(headers: string[], totalWidth = 746) {
     const h = header.toLowerCase();
     if (h === "#" || h === "sr. no" || h.includes("serial")) return totalWidth > 600 ? 28 : 24;
     if (h === "date" || h.includes("invoice date")) return totalWidth > 600 ? 58 : 48;
+    if (h.includes("document no")) return totalWidth > 600 ? 86 : 70;
+    if (h === "type") return totalWidth > 600 ? 52 : 44;
     if (h.includes("invoice")) return totalWidth > 600 ? 78 : 64;
     if (h === "qty" || h.includes("quantity")) return totalWidth > 600 ? 38 : 32;
     if (h === "rate") return totalWidth > 600 ? 78 : 62;
-    if (h.includes("amount") || h.includes("balance")) return totalWidth > 600 ? 84 : 68;
+    if (h.includes("debit") || h.includes("credit") || h.includes("amount") || h.includes("balance")) return totalWidth > 600 ? 84 : 68;
     if (h.includes("status")) return totalWidth > 600 ? 70 : 56;
     return 0;
   });
   const flexibleWeights: number[] = headers.map((header) => {
     const h = header.toLowerCase();
+    if (h.includes("description")) return 1.6;
     if (h.includes("product")) return 1.28;
     if (h === "sku" || h.includes("sku")) return 1;
     return 0;
@@ -6082,7 +6333,7 @@ async function landscapePdf(report: Report) {
           ["Customer", report.partyName],
           ["Statement period", statementPeriod],
           ["Generated on", report.generatedAt],
-          ["Total sales", report.totals.Total],
+          ["Closing balance", report.totals["Closing balance"] ?? report.totals.Total],
         ]
     : [
         ["Generated by", `${report.generatedBy} - ${roleLabel(report.generatedByRole)}`],
@@ -6107,21 +6358,21 @@ async function landscapePdf(report: Report) {
       productOrInventoryReport
         ? ["Stock value", report.totals.Total]
         : customerSalesStatementReport
-          ? ["Total sales", report.totals.Total]
+          ? ["Opening balance", report.totals["Opening balance"] ?? "KES 0.00"]
           : supplierProfitReport
             ? ["Sales", report.totals.Subtotal]
         : ["Subtotal", report.totals.Subtotal],
       productOrInventoryReport
         ? ["Records", recordCount]
         : customerSalesStatementReport
-          ? ["Amount paid", report.totals["Amount paid"] ?? "KES 0.00"]
+          ? ["Invoices", report.totals.Invoices ?? "KES 0.00"]
           : supplierProfitReport
             ? ["Supply cost", report.totals.Discount]
             : ["Tax", report.totals.Tax ?? "KES 0.00"],
       productOrInventoryReport
         ? ["Review status", report.lines.length ? "Ready" : "No records"]
         : customerSalesStatementReport
-          ? ["Balance due", report.totals["Balance due"] ?? "KES 0.00"]
+          ? ["Payments", report.totals.Payments ?? "KES 0.00"]
           : supplierProfitReport
             ? ["Gross profit", report.totals.Total]
         : ["Total", report.totals.Total],
