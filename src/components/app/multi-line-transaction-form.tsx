@@ -159,10 +159,9 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
     );
   }, [products, search]);
   const visibleIndexes = useMemo(() => {
-    return products
-      .map((_, index) => index)
-      .filter((index) => matchingIndexes.has(index) || selectedIndexes.has(index));
-  }, [matchingIndexes, products, selectedIndexes]);
+    return products.map((_, index) => index).filter((index) => matchingIndexes.has(index));
+  }, [matchingIndexes, products]);
+  const visibleIndexSet = useMemo(() => new Set(visibleIndexes), [visibleIndexes]);
   const productSearchResults = useMemo(() => {
     const query = search.trim();
     if (!query) return [];
@@ -498,8 +497,8 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
             </tr>
           </thead>
           <tbody>
-            {visibleIndexes.map((index) => {
-              const product = products[index];
+            {products.map((product, index) => {
+              const rowVisible = visibleIndexSet.has(index);
               const productName = product.name || "Unnamed product";
               const productCode = product.code || "";
               const defaultUnitValue = mode === "sale" && product.price > 0 ? product.price : 0;
@@ -512,7 +511,11 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
               const accepted = quantity;
               const receiptTotal = accepted * unitValue;
               return (
-                <tr key={product.id || index} className="border-b border-slate-100 odd:bg-white even:bg-slate-50">
+                <tr
+                  key={product.id || index}
+                  hidden={!rowVisible}
+                  className="border-b border-slate-100 odd:bg-white even:bg-slate-50"
+                >
                   <td className="px-3 py-2 align-middle">
                     <input
                       type="checkbox"
