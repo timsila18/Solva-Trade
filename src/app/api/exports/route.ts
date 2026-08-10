@@ -2220,7 +2220,7 @@ async function salesInvoiceDocumentLines(invoiceId: string | null): Promise<Repo
   if (!businessId || !invoiceId) return [];
 
   const supabase = await createSupabaseServerClient();
-  const [{ data: invoices }, { data: items }] = await Promise.all([
+  const [invoiceResult, itemResult] = await Promise.all([
     supabase
       .from("sales_invoices")
       .select("id, invoice_number, invoice_date, subtotal, tax_total, total_amount, amount_paid, balance_due, status, delivery_status, created_at, customers(customer_name, customer_code), branches(branch_name, branch_code)")
@@ -2235,8 +2235,28 @@ async function salesInvoiceDocumentLines(invoiceId: string | null): Promise<Repo
       .order("id", { ascending: true })
       .limit(200),
   ]);
-  const invoice = ((invoices ?? [])[0] ?? undefined) as SalesInvoiceRow | undefined;
-  return sortInvoiceLinesForPrint(((items ?? []) as SalesItemRow[]).map((item, index) => itemBaseLine(item, invoice, index)));
+  if (invoiceResult.error) {
+    console.error("Sales invoice export invoice query failed", {
+      invoiceId,
+      businessId,
+      message: invoiceResult.error.message,
+    });
+    throw new Error(`Could not load this invoice. ${invoiceResult.error.message}`);
+  }
+  if (itemResult.error) {
+    console.error("Sales invoice export item query failed", {
+      invoiceId,
+      businessId,
+      message: itemResult.error.message,
+    });
+    throw new Error(`Could not load the invoice line items. ${itemResult.error.message}`);
+  }
+  const invoice = ((invoiceResult.data ?? [])[0] ?? undefined) as SalesInvoiceRow | undefined;
+  if (!invoice) {
+    console.error("Sales invoice export invoice not found", { invoiceId, businessId });
+    throw new Error("This invoice was not found in the current business workspace. Open Sales History and try downloading it again.");
+  }
+  return sortInvoiceLinesForPrint(((itemResult.data ?? []) as SalesItemRow[]).map((item, index) => itemBaseLine(item, invoice, index)));
 }
 
 async function goodsReceivedDocumentLines(grnId: string | null): Promise<ReportLine[]> {
@@ -6630,16 +6650,40 @@ async function exportResponse(searchParams: URLSearchParams) {
 }
 
 export async function GET(request: NextRequest) {
-  return exportResponse(request.nextUrl.searchParams);
+  try {
+    return await exportResponse(request.nextUrl.searchParams);
+  } catch (error) {
+    console.error("Solva export GET failed", {
+      module: request.nextUrl.searchParams.get("module"),
+      process: request.nextUrl.searchParams.get("process"),
+      invoiceId: request.nextUrl.searchParams.get("invoiceId"),
+      grnId: request.nextUrl.searchParams.get("grnId"),
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return new Response(error instanceof Error ? error.message : "The document could not be generated.", {
+      status: 500,
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
+    });
+  }
 }
 
 export async function POST(request: NextRequest) {
-  const formData = await request.formData();
-  const searchParams = new URLSearchParams();
-  for (const [key, value] of formData.entries()) {
-    if (typeof value !== "string") continue;
-    if (key === "format") searchParams.set(key, value);
-    else searchParams.append(key, value);
+  try {
+    const formData = await request.formData();
+    const searchParams = new URLSearchParams();
+    for (const [key, value] of formData.entries()) {
+      if (typeof value !== "string") continue;
+      if (key === "format") searchParams.set(key, value);
+      else searchParams.append(key, value);
+    }
+    return exportResponse(searchParams);
+  } catch (error) {
+    console.error("Solva export POST failed", {
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return new Response(error instanceof Error ? error.message : "The document could not be generated.", {
+      status: 500,
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
+    });
   }
-  return exportResponse(searchParams);
 }
