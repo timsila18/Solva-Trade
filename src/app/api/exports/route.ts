@@ -1520,79 +1520,135 @@ async function customerStatementReportLines(searchParams?: URLSearchParams): Pro
   const requestedCustomerId = searchParams?.get("customerId");
   const paymentStart = `${period.start}T00:00:00.000+03:00`;
   const paymentEnd = `${period.end}T23:59:59.999+03:00`;
+  const pageSize = 1000;
 
-  let invoiceQuery = supabase
-    .from("sales_invoices")
-    .select("id, invoice_number, invoice_date, total_amount, amount_paid, balance_due, status, customer_id, customers(customer_name, customer_code, kra_pin, phone)")
-    .eq("business_id", businessId)
-    .neq("status", "reversed")
-    .gte("invoice_date", period.start)
-    .lte("invoice_date", period.end)
-    .order("invoice_date", { ascending: true })
-    .limit(3000);
-  if (requestedCustomerId && requestedCustomerId !== "all") invoiceQuery = invoiceQuery.eq("customer_id", requestedCustomerId);
+  function chunkIds(ids: string[], size = 400) {
+    const chunks: string[][] = [];
+    for (let index = 0; index < ids.length; index += size) chunks.push(ids.slice(index, index + size));
+    return chunks;
+  }
 
-  let paymentQuery = supabase
-    .from("customer_payments")
-    .select("id, customer_id, payment_number, payment_date, amount_received, status, transaction_reference, payer_name, payer_phone, customers(customer_name, customer_code, kra_pin, phone)")
-    .eq("business_id", businessId)
-    .neq("status", "reversed")
-    .gte("payment_date", paymentStart)
-    .lte("payment_date", paymentEnd)
-    .order("payment_date", { ascending: true })
-    .limit(3000);
-  if (requestedCustomerId && requestedCustomerId !== "all") paymentQuery = paymentQuery.eq("customer_id", requestedCustomerId);
+  async function fetchInvoicesInWindow() {
+    const rows: SalesInvoiceRow[] = [];
+    for (let from = 0; ; from += pageSize) {
+      let query = supabase
+        .from("sales_invoices")
+        .select("id, invoice_number, invoice_date, total_amount, amount_paid, balance_due, status, customer_id, customers(customer_name, customer_code, kra_pin, phone)")
+        .eq("business_id", businessId)
+        .neq("status", "reversed")
+        .gte("invoice_date", period.start)
+        .lte("invoice_date", period.end)
+        .order("invoice_date", { ascending: true })
+        .order("created_at", { ascending: true })
+        .range(from, from + pageSize - 1);
+      if (requestedCustomerId && requestedCustomerId !== "all") query = query.eq("customer_id", requestedCustomerId);
+      const { data, error } = await query;
+      if (error) throw error;
+      const batch = (data ?? []) as SalesInvoiceRow[];
+      rows.push(...batch);
+      if (batch.length < pageSize) break;
+    }
+    return rows;
+  }
 
-  let openingInvoiceQuery = supabase
-    .from("sales_invoices")
-    .select("total_amount")
-    .eq("business_id", businessId)
-    .neq("status", "reversed")
-    .lt("invoice_date", period.start)
-    .limit(5000);
-  if (requestedCustomerId && requestedCustomerId !== "all") openingInvoiceQuery = openingInvoiceQuery.eq("customer_id", requestedCustomerId);
+  async function fetchPaymentsInWindow() {
+    const rows: CustomerPaymentRow[] = [];
+    for (let from = 0; ; from += pageSize) {
+      let query = supabase
+        .from("customer_payments")
+        .select("id, customer_id, payment_number, payment_date, amount_received, status, transaction_reference, payer_name, payer_phone, customers(customer_name, customer_code, kra_pin, phone)")
+        .eq("business_id", businessId)
+        .neq("status", "reversed")
+        .gte("payment_date", paymentStart)
+        .lte("payment_date", paymentEnd)
+        .order("payment_date", { ascending: true })
+        .range(from, from + pageSize - 1);
+      if (requestedCustomerId && requestedCustomerId !== "all") query = query.eq("customer_id", requestedCustomerId);
+      const { data, error } = await query;
+      if (error) throw error;
+      const batch = (data ?? []) as CustomerPaymentRow[];
+      rows.push(...batch);
+      if (batch.length < pageSize) break;
+    }
+    return rows;
+  }
 
-  let openingPaymentQuery = supabase
-    .from("customer_payments")
-    .select("amount_received")
-    .eq("business_id", businessId)
-    .neq("status", "reversed")
-    .lt("payment_date", paymentStart)
-    .limit(5000);
-  if (requestedCustomerId && requestedCustomerId !== "all") openingPaymentQuery = openingPaymentQuery.eq("customer_id", requestedCustomerId);
+  async function fetchOpeningInvoices() {
+    const rows: { total_amount?: number | string | null }[] = [];
+    for (let from = 0; ; from += pageSize) {
+      let query = supabase
+        .from("sales_invoices")
+        .select("total_amount")
+        .eq("business_id", businessId)
+        .neq("status", "reversed")
+        .lt("invoice_date", period.start)
+        .range(from, from + pageSize - 1);
+      if (requestedCustomerId && requestedCustomerId !== "all") query = query.eq("customer_id", requestedCustomerId);
+      const { data, error } = await query;
+      if (error) throw error;
+      const batch = (data ?? []) as { total_amount?: number | string | null }[];
+      rows.push(...batch);
+      if (batch.length < pageSize) break;
+    }
+    return rows;
+  }
 
-  const [{ data: invoices }, { data: payments }, { data: openingInvoices }, { data: openingPayments }] = await Promise.all([
-    invoiceQuery,
-    paymentQuery,
-    openingInvoiceQuery,
-    openingPaymentQuery,
+  async function fetchOpeningPayments() {
+    const rows: { amount_received?: number | string | null }[] = [];
+    for (let from = 0; ; from += pageSize) {
+      let query = supabase
+        .from("customer_payments")
+        .select("amount_received")
+        .eq("business_id", businessId)
+        .neq("status", "reversed")
+        .lt("payment_date", paymentStart)
+        .range(from, from + pageSize - 1);
+      if (requestedCustomerId && requestedCustomerId !== "all") query = query.eq("customer_id", requestedCustomerId);
+      const { data, error } = await query;
+      if (error) throw error;
+      const batch = (data ?? []) as { amount_received?: number | string | null }[];
+      rows.push(...batch);
+      if (batch.length < pageSize) break;
+    }
+    return rows;
+  }
+
+  const [invoiceRows, paymentRows, openingInvoices, openingPayments] = await Promise.all([
+    fetchInvoicesInWindow(),
+    fetchPaymentsInWindow(),
+    fetchOpeningInvoices(),
+    fetchOpeningPayments(),
   ]);
 
-  const invoiceRows = (invoices ?? []) as SalesInvoiceRow[];
-  const paymentRows = (payments ?? []) as CustomerPaymentRow[];
   const invoiceIds = invoiceRows.map((invoice) => invoice.id).filter(Boolean);
   const itemsByInvoice = new Map<string, string[]>();
   if (invoiceIds.length) {
-    const { data: items } = await supabase
-      .from("sales_invoice_items")
-      .select("invoice_id, products(product_name, product_code, sku)")
-      .eq("business_id", businessId)
-      .in("invoice_id", invoiceIds)
-      .order("invoice_id", { ascending: true })
-      .limit(10000);
-
-    for (const item of (items ?? []) as SalesItemRow[]) {
-      const product = relatedOne(item.products);
-      const invoiceId = String(item.invoice_id ?? "");
-      const name = String(product?.product_name ?? product?.sku ?? product?.product_code ?? "Sold item");
-      if (!invoiceId) continue;
-      itemsByInvoice.set(invoiceId, [...(itemsByInvoice.get(invoiceId) ?? []), name]);
+    for (const idChunk of chunkIds(invoiceIds)) {
+      for (let from = 0; ; from += pageSize) {
+        const { data: items, error } = await supabase
+          .from("sales_invoice_items")
+          .select("invoice_id, products(product_name, product_code, sku)")
+          .eq("business_id", businessId)
+          .in("invoice_id", idChunk)
+          .order("invoice_id", { ascending: true })
+          .range(from, from + pageSize - 1);
+        if (error) throw error;
+        const batch = (items ?? []) as SalesItemRow[];
+        for (const item of batch) {
+          const product = relatedOne(item.products);
+          const invoiceId = String(item.invoice_id ?? "");
+          const name = String(product?.product_name ?? product?.sku ?? product?.product_code ?? "Sold item");
+          if (!invoiceId) continue;
+          itemsByInvoice.set(invoiceId, [...(itemsByInvoice.get(invoiceId) ?? []), name]);
+        }
+        if (batch.length < pageSize) break;
+      }
     }
   }
 
   const openingBalance =
-    (openingInvoices ?? []).reduce((sum, invoice) => sum + numberValue((invoice as { total_amount?: number | string | null }).total_amount), 0) -
-    (openingPayments ?? []).reduce((sum, payment) => sum + numberValue((payment as { amount_received?: number | string | null }).amount_received), 0);
+    openingInvoices.reduce((sum, invoice) => sum + numberValue(invoice.total_amount), 0) -
+    openingPayments.reduce((sum, payment) => sum + numberValue(payment.amount_received), 0);
 
   type StatementEvent = {
     date: string;

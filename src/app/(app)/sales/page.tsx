@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AlertTriangle, CheckCircle2, Clock3, Eye, FileText, ReceiptText, UserPlus } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock3, Eye, FileText, ReceiptText, Search, UserPlus } from "lucide-react";
 import { completeProcessAction, reverseSalesInvoiceAction } from "@/app/(app)/actions";
 import { PersistedForm } from "@/components/app/persisted-form";
 import { PinProtectedSubmitButton } from "@/components/app/pin-protected-export";
@@ -157,6 +157,26 @@ function newestInvoiceFirst(a: SalesInvoiceRow, b: SalesInvoiceRow) {
   return bTime - aTime;
 }
 
+function normaliseSearch(value: unknown) {
+  return String(value ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function matchesSalesHistorySearch(invoice: SalesInvoiceRow, query: string) {
+  const cleanQuery = normaliseSearch(query);
+  if (!cleanQuery) return true;
+  const haystack = [
+    invoice.invoice_number,
+    invoice.invoice_date,
+    customerName(invoice),
+    Array.isArray(invoice.customers) ? invoice.customers[0]?.phone : invoice.customers?.phone,
+    invoice.total_amount,
+    invoice.amount_paid,
+  ]
+    .map(normaliseSearch)
+    .join(" ");
+  return haystack.includes(cleanQuery);
+}
+
 function receiptHref(invoice: SalesInvoiceRow) {
   return salesDocumentHref(invoice, "Sales Receipt");
 }
@@ -207,7 +227,7 @@ async function recentSales() {
       .select("id, invoice_number, invoice_date, created_at, total_amount, amount_paid, balance_due, status, customers(customer_name, phone)")
       .eq("business_id", businessId)
       .order("created_at", { ascending: false })
-      .limit(100);
+      .limit(5000);
 
     if (error) {
       console.warn("Could not load sales invoice desk", error);
@@ -280,7 +300,13 @@ async function salesSuppliers() {
   }
 }
 
-export default async function SalesPage() {
+export default async function SalesPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = searchParams ? await searchParams : {};
+  const historyCustomerQuery = typeof params.historyCustomer === "string" ? params.historyCustomer : "";
   const [invoices, customers, suppliers] = await Promise.all([recentSales(), salesCustomers(), salesSuppliers()]);
   const today = todayIsoDate();
   const monthStart = `${today.slice(0, 7)}-01`;
@@ -288,6 +314,7 @@ export default async function SalesPage() {
   const activeInvoices = invoices.filter((invoice) => !isReversedSale(invoice));
   const invoicesNeedingFollowUp = activeInvoices.filter((invoice) => asNumber(invoice.balance_due) > 0).sort(newestInvoiceFirst);
   const completedInvoices = activeInvoices.filter((invoice) => asNumber(invoice.balance_due) <= 0).sort(newestInvoiceFirst);
+  const visibleCompletedInvoices = completedInvoices.filter((invoice) => matchesSalesHistorySearch(invoice, historyCustomerQuery));
 
   return (
     <div className="pb-24">
@@ -326,7 +353,7 @@ export default async function SalesPage() {
             <p className="mt-2 text-sm leading-6 text-slate-600">
               Paid and concluded sales stay here. Only invoices still waiting for payment remain in the follow-up list below.
             </p>
-            <details className="mt-4 rounded-md border border-slate-200 bg-white">
+            <details className="mt-4 rounded-md border border-slate-200 bg-white" open={Boolean(historyCustomerQuery)}>
               <summary className="flex min-h-11 cursor-pointer items-center justify-between gap-3 rounded-md bg-[var(--solva-blue-700)] px-4 text-sm font-semibold text-white shadow-sm hover:bg-[var(--solva-blue-800)]">
                 <span className="inline-flex items-center gap-2">
                   <FileText className="h-4 w-4" />
@@ -334,10 +361,24 @@ export default async function SalesPage() {
                 </span>
                 <span className="rounded-full bg-white/15 px-2 py-1 text-xs">{completedInvoices.length}</span>
               </summary>
-              <div className="max-h-80 overflow-auto p-3">
-                {completedInvoices.length ? (
+              <div className="max-h-[72vh] overflow-auto p-4">
+                <form action="/sales" className="mb-3 grid gap-2 sm:grid-cols-[1fr_auto]">
+                  <label className="relative block">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                    <input
+                      name="historyCustomer"
+                      defaultValue={historyCustomerQuery}
+                      placeholder="Search customer, invoice number, phone or amount"
+                      className="min-h-11 w-full rounded-md border border-slate-300 bg-white pl-9 pr-3 text-sm font-semibold text-slate-800"
+                    />
+                  </label>
+                  <button className="inline-flex min-h-11 items-center justify-center rounded-md bg-slate-950 px-4 text-sm font-semibold text-white">
+                    Search
+                  </button>
+                </form>
+                {visibleCompletedInvoices.length ? (
                   <div className="grid gap-2">
-                    {completedInvoices.slice(0, 30).map((invoice) => (
+                    {visibleCompletedInvoices.map((invoice) => (
                       <div key={invoice.id} className="grid gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div>
@@ -359,12 +400,11 @@ export default async function SalesPage() {
                         </div>
                       </div>
                     ))}
-                    {completedInvoices.length > 30 ? (
-                      <p className="text-xs font-semibold text-slate-500">Showing latest 30 paid sales. Use reports for the full archive.</p>
-                    ) : null}
                   </div>
                 ) : (
-                  <p className="rounded-md bg-slate-50 p-3 text-sm text-slate-600">No paid sales are archived yet.</p>
+                  <p className="rounded-md bg-slate-50 p-3 text-sm text-slate-600">
+                    {completedInvoices.length ? "No paid sale matches that search." : "No paid sales are archived yet."}
+                  </p>
                 )}
               </div>
             </details>
