@@ -1863,6 +1863,151 @@ type FinancialActivityRow = {
   natural_amount?: number | string | null;
 };
 
+type MonthlyProfitLossBucket = {
+  key: string;
+  label: string;
+  revenue: number;
+  costOfSales: number;
+  expenses: number;
+};
+
+function monthKeyFromDate(value: string | null | undefined) {
+  const text = String(value ?? "").trim();
+  if (/^\d{4}-\d{2}/.test(text)) return text.slice(0, 7);
+  return todayIsoDate().slice(0, 7);
+}
+
+function monthLabelFromKey(key: string) {
+  return new Intl.DateTimeFormat("en-KE", { month: "long", year: "numeric", timeZone: "Africa/Nairobi" }).format(new Date(`${key}-01T00:00:00.000Z`));
+}
+
+function nextMonthKey(key: string) {
+  const [year, month] = key.split("-").map((part) => Number(part));
+  const date = new Date(Date.UTC(year, month, 1));
+  return date.toISOString().slice(0, 7);
+}
+
+function monthlyKeysBetween(startKey: string, endKey: string) {
+  const keys: string[] = [];
+  let current = startKey;
+  while (current <= endKey) {
+    keys.push(current);
+    current = nextMonthKey(current);
+  }
+  return keys;
+}
+
+async function monthlyProfitAndLossReportLines(): Promise<ReportLine[]> {
+  const businessId = await activeReportBusinessId();
+  if (!businessId) return [];
+
+  const supabase = await createSupabaseServerClient();
+  const [{ data: invoices }, { data: allocations }, { data: expenses }] = await Promise.all([
+    supabase
+      .from("sales_invoices")
+      .select("invoice_date, total_amount, status")
+      .eq("business_id", businessId)
+      .neq("status", "reversed")
+      .order("invoice_date", { ascending: true })
+      .limit(20000),
+    supabase
+      .from("sales_source_allocations")
+      .select("allocated_at, quantity, unit_cost, total_cost")
+      .eq("business_id", businessId)
+      .order("allocated_at", { ascending: true })
+      .limit(20000),
+    supabase
+      .from("expenses")
+      .select("expense_date, amount, tax_amount, total_paid")
+      .eq("business_id", businessId)
+      .order("expense_date", { ascending: true })
+      .limit(20000),
+  ]);
+
+  const transactionMonths = [
+    ...(invoices ?? []).map((row) => monthKeyFromDate(row.invoice_date)),
+    ...(allocations ?? []).map((row) => monthKeyFromDate(row.allocated_at)),
+    ...(expenses ?? []).map((row) => monthKeyFromDate(row.expense_date)),
+  ].filter(Boolean);
+
+  if (!transactionMonths.length) return [financialEmptyLine("No posted sales, stock cost allocations or expenses have been found for this business yet.")];
+
+  const startKey = transactionMonths.sort()[0];
+  const endKey = todayIsoDate().slice(0, 7);
+  const buckets = new Map<string, MonthlyProfitLossBucket>();
+  for (const key of monthlyKeysBetween(startKey, endKey)) {
+    buckets.set(key, { key, label: monthLabelFromKey(key), revenue: 0, costOfSales: 0, expenses: 0 });
+  }
+
+  for (const invoice of invoices ?? []) {
+    const key = monthKeyFromDate(invoice.invoice_date);
+    const bucket = buckets.get(key);
+    if (!bucket) continue;
+    bucket.revenue += numberValue(invoice.total_amount);
+  }
+
+  for (const allocation of allocations ?? []) {
+    const key = monthKeyFromDate(allocation.allocated_at);
+    const bucket = buckets.get(key);
+    if (!bucket) continue;
+    bucket.costOfSales += allocationCost(allocation);
+  }
+
+  for (const expense of expenses ?? []) {
+    const key = monthKeyFromDate(expense.expense_date);
+    const bucket = buckets.get(key);
+    if (!bucket) continue;
+    const totalPaid = numberValue(expense.total_paid);
+    bucket.expenses += totalPaid || numberValue(expense.amount) + numberValue(expense.tax_amount);
+  }
+
+  return Array.from(buckets.values()).map((bucket, index) => {
+    const grossProfit = bucket.revenue - bucket.costOfSales;
+    const netProfit = grossProfit - bucket.expenses;
+    const margin = bucket.revenue ? (netProfit / bucket.revenue) * 100 : 0;
+    return {
+      sku: `P&L-${bucket.key}`,
+      description: bucket.label,
+      unit: "Month",
+      quantity: index + 1,
+      unitPrice: bucket.revenue,
+      discount: bucket.costOfSales,
+      taxRate: `${margin.toFixed(1)}% net margin`,
+      taxAmount: bucket.expenses,
+      lineTotal: netProfit,
+      warehouse: "Finance",
+      batch: "Monthly Profit and Loss",
+      notes:
+        netProfit >= 0
+          ? `${bucket.label} is profitable after received-stock costs and recorded expenses.`
+          : `${bucket.label} is showing a loss after received-stock costs and recorded expenses.`,
+      details: {
+        "Statement type": "Monthly profit and loss",
+        Month: bucket.label,
+        "Month key": bucket.key,
+        Sales: money(bucket.revenue),
+        "Cost of goods sold": money(bucket.costOfSales),
+        "Gross profit": money(grossProfit),
+        "Operating expenses": money(bucket.expenses),
+        "Net profit / loss": money(netProfit),
+        "Net margin": `${margin.toFixed(1)}%`,
+        Section: "Monthly P&L",
+        "Account Code": "",
+        "Account Name": bucket.label,
+        Class: "monthly-summary",
+        Debit: money(bucket.costOfSales + bucket.expenses),
+        Credit: money(bucket.revenue),
+        Amount: money(netProfit),
+        Closing: money(netProfit),
+        "Closing Debit": money(netProfit < 0 ? Math.abs(netProfit) : 0),
+        "Closing Credit": money(netProfit > 0 ? netProfit : 0),
+        Classification: "Profit and Loss",
+        "Statement line": "Sales less received-stock cost of goods sold and posted operating expenses.",
+      },
+    };
+  });
+}
+
 function financialEmptyLine(message: string): ReportLine {
   return {
     sku: "LEDGER",
@@ -1983,6 +2128,11 @@ async function financialStatementReportLines(processName: string): Promise<Repor
   const businessId = await activeReportBusinessId();
   if (!businessId) return [];
 
+  const lower = processName.toLowerCase();
+  if (lower.includes("profit and loss") || lower.includes("income statement")) {
+    return monthlyProfitAndLossReportLines();
+  }
+
   const supabase = await createSupabaseServerClient();
   const { data } = await supabase
     .from("financial_statement_account_activity")
@@ -2004,26 +2154,9 @@ async function financialStatementReportLines(processName: string): Promise<Repor
 
   if (!rows.length) return [financialEmptyLine("No posted ledger activity has been found for this business yet.")];
 
-  const lower = processName.toLowerCase();
   const revenueRows = rows.filter((row) => row.accountClass.includes("revenue") || row.accountClass.includes("income") || row.statementSection.includes("revenue") || row.statementSection.includes("income"));
   const costRows = rows.filter((row) => row.accountClass.includes("cost") || row.statementSection.includes("cost"));
   const expenseRows = rows.filter((row) => row.accountClass.includes("expense") || row.statementSection.includes("expense"));
-
-  if (lower.includes("profit and loss") || lower.includes("income statement")) {
-    const revenue = revenueRows.reduce((sum, row) => sum + row.natural, 0);
-    const costOfSales = costRows.reduce((sum, row) => sum + Math.abs(row.natural), 0);
-    const expenses = expenseRows.reduce((sum, row) => sum + Math.abs(row.natural), 0);
-    const grossProfit = revenue - costOfSales;
-    const netProfit = grossProfit - expenses;
-    return [
-      ...[...revenueRows, ...costRows, ...expenseRows].map(financialLine),
-      financialSummaryLine("Total Revenue", revenue, "Revenue", "Total income earned in the selected period."),
-      financialSummaryLine("Cost of Sales", -costOfSales, "Cost of Sales", "Direct costs deducted from revenue."),
-      financialSummaryLine("Gross Profit", grossProfit, "Gross Profit", "Revenue less direct cost of sales."),
-      financialSummaryLine("Operating Expenses", -expenses, "Expenses", "Operating expenses deducted from gross profit."),
-      financialSummaryLine(netProfit < 0 ? "Net Loss" : "Net Profit", netProfit, "Net Result", "Final profit or loss for the period."),
-    ];
-  }
 
   if (lower.includes("trial balance")) return rows.map(financialLine);
 
@@ -5840,7 +5973,118 @@ function drawProfitLossSide(
   return cursorY;
 }
 
+function isMonthlyProfitLossReport(report: Report) {
+  return report.lines.some((line) => line.details?.["Statement type"] === "Monthly profit and loss");
+}
+
+async function monthlyProfitAndLossPdf(report: Report) {
+  const assets = await pdfAssets(report, "landscape");
+  const tenantLogo = assets.find((asset) => asset.name === "TenantLogo");
+  const solvaLogo = assets.find((asset) => asset.name === "SolvaLogo");
+  const rows = report.lines.filter((line) => line.details?.["Statement type"] === "Monthly profit and loss");
+  const totalSales = rows.reduce((sum, line) => sum + detailAmount(line.details?.Sales), 0);
+  const totalCost = rows.reduce((sum, line) => sum + detailAmount(line.details?.["Cost of goods sold"]), 0);
+  const totalExpenses = rows.reduce((sum, line) => sum + detailAmount(line.details?.["Operating expenses"]), 0);
+  const totalGross = totalSales - totalCost;
+  const totalNet = totalGross - totalExpenses;
+  const startMonth = rows[0]?.details?.Month ?? "Opening month";
+  const endMonth = rows.at(-1)?.details?.Month ?? "Current month";
+  const rowsPerPage = 18;
+  const pageCount = Math.max(1, Math.ceil(rows.length / rowsPerPage));
+  const widths = [120, 118, 128, 118, 128, 118, 74];
+  const headers = ["Month", "Sales", "Cost of goods", "Gross profit", "Expenses", "Net profit/loss", "Margin"];
+  const kpis = [
+    ["Sales", totalSales, "blue"],
+    ["Cost of goods sold", totalCost, "slate"],
+    ["Gross profit", totalGross, totalGross >= 0 ? "blue" : "gold"],
+    ["Expenses", totalExpenses, "slate"],
+    [totalNet >= 0 ? "Net profit" : "Net loss", totalNet, totalNet >= 0 ? "blue" : "gold"],
+  ] as const;
+
+  const pages = Array.from({ length: pageCount }, (_, pageIndex) => {
+    const canvas = new PdfCanvas();
+    const pageRows = rows.slice(pageIndex * rowsPerPage, (pageIndex + 1) * rowsPerPage);
+    canvas.rect(0, 0, 842, 595, "white");
+    canvas.rect(0, 586, 280, 9, "blue");
+    canvas.rect(280, 586, 280, 9, "cyan");
+    canvas.rect(560, 586, 282, 9, "gold");
+    canvas.text("SOLVA TRADE", 214, 302, 54, "watermark", true);
+    canvas.text("Monthly Profit and Loss", 298, 282, 13, "watermark");
+
+    canvas.rect(48, 516, 50, 46, "surface");
+    if (!drawFittedImage(canvas, tenantLogo, 52, 520, 42, 38)) canvas.text(initials(report.businessName), 60, 534, 16, "blue", true);
+    canvas.text(report.businessName, 112, 548, 17, "navy", true);
+    canvas.wrap(`${report.businessLocation}${report.kraPin ? ` | KRA PIN: ${report.kraPin}` : ""}`, 112, 529, 332, 7.8, "slate");
+    canvas.text("PROFIT AND LOSS ACCOUNT", 468, 548, 16, "navy", true);
+    canvas.text(`${startMonth} to ${endMonth}`, 468, 532, 8.2, "slate");
+    canvas.text(`Generated: ${report.generatedAt}`, 468, 518, 7.6, "muted");
+    if (!drawFittedImage(canvas, solvaLogo, 704, 522, 82, 22)) {
+      canvas.text("SOLVA", 704, 532, 11, "blue", true);
+      canvas.text("TRADE", 748, 532, 8, "cyan", true);
+    }
+
+    kpis.forEach(([label, value, tone], index) => {
+      const x = 48 + index * 151;
+      canvas.rect(x, 470, 136, 32, "surface");
+      canvas.text(label.toUpperCase(), x + 9, 490, 6.1, "muted", true);
+      canvas.fitText(money(value), x + 9, 476, 114, 9.2, tone, true, 5.8);
+    });
+
+    const tableX = 48;
+    let y = 440;
+    canvas.rect(tableX, y - 22, 746, 24, "navy");
+    let headerX = tableX;
+    headers.forEach((header, index) => {
+      canvas.wrap(header, headerX + 6, y - 8, widths[index] - 10, 7.1, "white", true, 8, 1);
+      headerX += widths[index];
+    });
+    y -= 32;
+
+    pageRows.forEach((line, rowIndex) => {
+      const gross = detailAmount(line.details?.["Gross profit"]);
+      const net = detailAmount(line.details?.["Net profit / loss"]);
+      if (rowIndex % 2 === 0) canvas.rect(tableX, y - 14, 746, 22, "soft");
+      const values = [
+        line.details?.Month ?? line.description,
+        line.details?.Sales ?? money(line.unitPrice),
+        line.details?.["Cost of goods sold"] ?? money(line.discount),
+        money(gross),
+        line.details?.["Operating expenses"] ?? money(line.taxAmount),
+        money(net),
+        line.details?.["Net margin"] ?? line.taxRate,
+      ];
+      let cellX = tableX;
+      values.forEach((value, cellIndex) => {
+        const tone = cellIndex === 5 && net < 0 ? "gold" : cellIndex === 3 && gross < 0 ? "gold" : "slate";
+        canvas.fitText(value, cellX + 6, y, widths[cellIndex] - 12, 7.4, tone, cellIndex > 0, 5.8);
+        cellX += widths[cellIndex];
+      });
+      y -= 22;
+    });
+
+    if (pageIndex === pageCount - 1) {
+      canvas.line(tableX, y + 4, 794, y + 4, "navy", 0.8);
+      const totals = ["Total", money(totalSales), money(totalCost), money(totalGross), money(totalExpenses), money(totalNet), totalSales ? `${((totalNet / totalSales) * 100).toFixed(1)}%` : "0.0%"];
+      let totalX = tableX;
+      totals.forEach((value, index) => {
+        canvas.fitText(value, totalX + 6, y - 10, widths[index] - 12, 8, index === 0 || index === 5 ? "navy" : "slate", true, 5.8);
+        totalX += widths[index];
+      });
+    }
+
+    canvas.line(48, 66, 794, 66, "border", 0.5);
+    canvas.text(`${report.businessName} | Monthly Profit and Loss Account`, 48, 48, 7.2, "muted");
+    canvas.text("Sales are posted invoices. Cost of goods sold comes from received-stock allocation costs. Expenses come from recorded office expenses.", 286, 48, 7.2, "muted");
+    canvas.text(`Page ${pageIndex + 1} of ${pageCount}`, 740, 48, 7.2, "muted");
+    return canvas.output();
+  });
+
+  return pdfDocumentPages(pages, 842, 595, assets);
+}
+
 async function profitAndLossPdf(report: Report) {
+  if (isMonthlyProfitLossReport(report)) return monthlyProfitAndLossPdf(report);
+
   const canvas = new PdfCanvas();
   const assets = await pdfAssets(report, "landscape");
   const tenantLogo = assets.find((asset) => asset.name === "TenantLogo");
