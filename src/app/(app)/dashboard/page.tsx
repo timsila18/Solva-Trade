@@ -205,6 +205,7 @@ export default async function DashboardPage() {
   const yearStartIso = startOfYearIso(today);
   const weekStartDate = weekStartIso.slice(0, 10);
   const monthStartDate = startOfMonthDate(today);
+  const monthStartIso = new Date(`${monthStartDate}T00:00:00+03:00`).toISOString();
   const yearStartDate = today.slice(0, 4) + "-01-01";
   let todaySales = 0;
   let todayInvoiceCount = 0;
@@ -226,6 +227,7 @@ export default async function DashboardPage() {
   let grnsToday = 0;
   let todayProfit = 0;
   let weekProfit = 0;
+  let monthProfit = 0;
   let annualProfit = 0;
   let recentActivity: { time: string; module: string; title: string; quickAction: string }[] = [];
 
@@ -362,6 +364,7 @@ export default async function DashboardPage() {
     expenseCountToday = expenseRows.filter((row) => String(row.expense_date ?? "") === today).length;
     todayProfit = profitForPeriod(profitRows, todayStartIso, tomorrowIso) - expensesToday;
     weekProfit = profitForPeriod(profitRows, weekStartIso, tomorrowIso) - expensesWeek;
+    monthProfit = profitForPeriod(profitRows, monthStartIso, tomorrowIso) - expensesMonth;
     annualProfit = profitForPeriod(profitRows, yearStartIso, tomorrowIso) - expensesYear;
   }
 
@@ -369,6 +372,7 @@ export default async function DashboardPage() {
   const profitPeriods = [
     { label: "Today", value: "today", amount: todayProfit, caption: profitCaption(todayProfit, "Today") },
     { label: "This week", value: "week", amount: weekProfit, caption: profitCaption(weekProfit, "This week") },
+    { label: "This month", value: "month", amount: monthProfit, caption: profitCaption(monthProfit, "This month") },
     { label: "This year", value: "year", amount: annualProfit, caption: profitCaption(annualProfit, "This year") },
   ];
 

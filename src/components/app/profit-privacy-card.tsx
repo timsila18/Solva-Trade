@@ -73,7 +73,7 @@ export function ProfitPrivacyCard({
       {open ? (
         <div className="mt-3">
           <p className="text-sm text-slate-500">{current?.caption}</p>
-          <div className="mt-3 grid grid-cols-3 gap-1">
+          <div className="mt-3 grid grid-cols-2 gap-1">
             {periods.map((period) => (
               <button
                 key={period.value}
