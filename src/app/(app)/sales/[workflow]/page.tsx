@@ -85,7 +85,13 @@ export default async function SalesWorkflowPage({
       </div>
       <p className="mt-2 max-w-3xl text-slate-600">{config.description}</p>
 
-      <PersistedForm action={completeProcessAction} draftKey={`solva-trade:workflow-draft:sales:${workflow}`} preserveHiddenFields className="mt-6 rounded-lg border border-slate-200 bg-white p-5">
+      <PersistedForm
+        action={completeProcessAction}
+        draftKey={`solva-trade:workflow-draft:sales:${workflow}`}
+        preserveHiddenFields
+        confirmRestoreMessage={workflow === "invoices" ? "Do you want to continue from where you left in this sale?" : undefined}
+        className="mt-6 rounded-lg border border-slate-200 bg-white p-5"
+      >
         <input type="hidden" name="module" value="Sales" />
         <input type="hidden" name="process" value={config.title} />
         <input type="hidden" name="document" value={primaryDocument[workflow] ?? config.title} />

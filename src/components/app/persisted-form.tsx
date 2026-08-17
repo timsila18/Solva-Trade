@@ -12,6 +12,7 @@ type SavedForm = {
 type Props = Omit<React.FormHTMLAttributes<HTMLFormElement>, "onChange" | "onInput"> & {
   draftKey?: string;
   preserveHiddenFields?: boolean;
+  confirmRestoreMessage?: string;
 };
 
 const SKIP_NAMES = new Set(["module", "process", "document", "intent", "returnTo", "next", "draftKey"]);
@@ -55,9 +56,17 @@ function writeSaved(key: string, form: HTMLFormElement) {
   }
 }
 
-function restoreSaved(key: string, form: HTMLFormElement, preserveHiddenFields: boolean) {
+function restoreSaved(key: string, form: HTMLFormElement, preserveHiddenFields: boolean, confirmRestoreMessage?: string) {
   const saved = readSaved(key);
   if (!saved) return;
+  if (confirmRestoreMessage && !window.confirm(confirmRestoreMessage)) {
+    try {
+      window.localStorage.removeItem(key);
+    } catch {
+      // Ignore storage failures; the owner simply starts a fresh form.
+    }
+    return;
+  }
 
   const elements = Array.from(form.elements);
   for (const element of elements) {
@@ -85,7 +94,7 @@ function restoreSaved(key: string, form: HTMLFormElement, preserveHiddenFields: 
   form.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
-export function PersistedForm({ draftKey, preserveHiddenFields = false, children, ...props }: Props) {
+export function PersistedForm({ draftKey, preserveHiddenFields = false, confirmRestoreMessage, children, ...props }: Props) {
   const pathname = usePathname();
   const formRef = useRef<HTMLFormElement>(null);
   const resolvedDraftKey = useMemo(() => draftKey || `solva-trade:form-draft:${pathname}`, [draftKey, pathname]);
@@ -93,7 +102,7 @@ export function PersistedForm({ draftKey, preserveHiddenFields = false, children
   useEffect(() => {
     const form = formRef.current;
     if (!form) return;
-    restoreSaved(resolvedDraftKey, form, preserveHiddenFields);
+    restoreSaved(resolvedDraftKey, form, preserveHiddenFields, confirmRestoreMessage);
 
     let timer: number | null = null;
     const save = () => {
@@ -108,7 +117,7 @@ export function PersistedForm({ draftKey, preserveHiddenFields = false, children
       form.removeEventListener("input", save);
       form.removeEventListener("change", save);
     };
-  }, [preserveHiddenFields, resolvedDraftKey]);
+  }, [confirmRestoreMessage, preserveHiddenFields, resolvedDraftKey]);
 
   return (
     <form ref={formRef} {...props}>

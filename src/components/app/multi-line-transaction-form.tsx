@@ -16,6 +16,12 @@ type Props = {
   today: string;
 };
 
+type DraftRestoreDetail = {
+  draftKey?: string;
+  values?: Record<string, string>;
+  checks?: Record<string, boolean>;
+};
+
 function money(value: number) {
   return value.toLocaleString("en-KE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
@@ -220,14 +226,52 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
   }, [products]);
 
   useEffect(() => {
-    function handleDraftRestore() {
+    function handleDraftRestore(event: Event) {
       const form = containerRef.current?.closest("form");
-      if (form instanceof HTMLFormElement) recalculate(form);
+      if (!(form instanceof HTMLFormElement)) return;
+
+      const detail = event instanceof CustomEvent ? (event.detail as DraftRestoreDetail | undefined) : undefined;
+      const restoredChecks = detail?.checks ?? {};
+      const restoredIndexes = new Set<number>();
+      products.forEach((_, index) => {
+        const checkbox = form.elements.namedItem(`field_line_${index}_selected`);
+        if ((checkbox instanceof HTMLInputElement && checkbox.checked) || restoredChecks[`field_line_${index}_selected`]) {
+          restoredIndexes.add(index);
+        }
+      });
+      setSelectedIndexes(restoredIndexes);
+
+      const partyField = form.elements.namedItem(partyName);
+      if (partyField instanceof HTMLSelectElement) {
+        const nextPartyId = partyField.value;
+        setSelectedPartyId(nextPartyId);
+        const selectedParty = partyOptions.find((party) => party.id === nextPartyId);
+        if (selectedParty) setPartySearch(selectedParty.name);
+      }
+
+      if (mode === "sale") {
+        const customerNameField = form.elements.namedItem("field_customer_name");
+        const restoredPartyId = partyField instanceof HTMLSelectElement ? partyField.value : "";
+        if (customerNameField instanceof HTMLInputElement) {
+          setNewCustomerName(customerNameField.value);
+          if (!restoredPartyId && customerNameField.value) setPartySearch(customerNameField.value);
+        }
+
+        const sourceSupplierField = form.elements.namedItem("field_sale_source_supplier_id");
+        if (sourceSupplierField instanceof HTMLSelectElement) {
+          const nextSupplierId = sourceSupplierField.value;
+          setSaleSourceSupplierId(nextSupplierId);
+          const supplier = suppliers.find((item) => item.id === nextSupplierId);
+          if (supplier) setSaleSourceSearch(supplier.name);
+        }
+      }
+
+      window.setTimeout(() => recalculate(form), 0);
     }
 
     window.addEventListener("solva:form-draft-restored", handleDraftRestore);
     return () => window.removeEventListener("solva:form-draft-restored", handleDraftRestore);
-  });
+  }, [mode, partyName, partyOptions, products, suppliers]);
 
   const returnTo = encodeURIComponent(pathname);
   const addPartyHref = mode === "sale" ? `/customers/new?returnTo=${returnTo}` : `/suppliers/new?returnTo=${returnTo}`;
