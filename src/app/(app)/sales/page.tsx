@@ -13,6 +13,7 @@ export const dynamic = "force-dynamic";
 
 type SalesInvoiceRow = {
   id: string;
+  customer_id: string | null;
   invoice_number: string | null;
   invoice_date: string | null;
   created_at?: string | null;
@@ -224,7 +225,7 @@ async function recentSales() {
 
     const { data, error } = await admin
       .from("sales_invoices")
-      .select("id, invoice_number, invoice_date, created_at, total_amount, amount_paid, balance_due, status, customers(customer_name, phone)")
+      .select("id, customer_id, invoice_number, invoice_date, created_at, total_amount, amount_paid, balance_due, status, customers(customer_name, phone)")
       .eq("business_id", businessId)
       .order("created_at", { ascending: false })
       .limit(5000);
@@ -313,6 +314,25 @@ export default async function SalesPage({
   const kraWindow = kraEtrWindowLabel(today);
   const activeInvoices = invoices.filter((invoice) => !isReversedSale(invoice));
   const invoicesNeedingFollowUp = activeInvoices.filter((invoice) => asNumber(invoice.balance_due) > 0).sort(newestInvoiceFirst);
+  const customerCollections = Array.from(
+    invoicesNeedingFollowUp.reduce((groups, invoice) => {
+      if (!invoice.customer_id) return groups;
+      const current = groups.get(invoice.customer_id) ?? {
+        customerId: invoice.customer_id,
+        customerName: customerName(invoice),
+        invoiceCount: 0,
+        outstanding: 0,
+        oldestDate: invoice.invoice_date,
+      };
+      current.invoiceCount += 1;
+      current.outstanding += asNumber(invoice.balance_due);
+      if (invoice.invoice_date && (!current.oldestDate || invoice.invoice_date < current.oldestDate)) current.oldestDate = invoice.invoice_date;
+      groups.set(invoice.customer_id, current);
+      return groups;
+    }, new Map<string, { customerId: string; customerName: string; invoiceCount: number; outstanding: number; oldestDate: string | null }>()),
+  )
+    .map(([, collection]) => collection)
+    .sort((a, b) => b.outstanding - a.outstanding);
   const completedInvoices = activeInvoices.filter((invoice) => asNumber(invoice.balance_due) <= 0).sort(newestInvoiceFirst);
   const visibleCompletedInvoices = completedInvoices.filter((invoice) => matchesSalesHistorySearch(invoice, historyCustomerQuery));
 
@@ -573,6 +593,55 @@ export default async function SalesPage({
       </section>
 
       <section id="invoice-history" className="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <details className="mb-5 rounded-lg border border-cyan-200 bg-cyan-50/40">
+          <summary className="flex min-h-12 cursor-pointer items-center justify-between gap-3 px-4 text-sm font-black text-slate-950">
+            <span className="inline-flex items-center gap-2">
+              <ReceiptText className="h-4 w-4 text-cyan-700" />
+              Customer Collections
+            </span>
+            <span className="rounded-full bg-cyan-100 px-2.5 py-1 text-xs text-cyan-900">{customerCollections.length}</span>
+          </summary>
+          <div className="border-t border-cyan-100 p-4">
+            <p className="mb-3 text-sm text-slate-600">Record one amount against a customer. It is applied to their oldest unpaid invoice first, then forward.</p>
+            {customerCollections.length ? (
+              <div className="grid gap-3 lg:grid-cols-2">
+                {customerCollections.map((collection) => (
+                  <article key={collection.customerId} className="rounded-md border border-slate-200 bg-white p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <h3 className="font-semibold text-slate-950">{collection.customerName}</h3>
+                        <p className="mt-1 text-xs text-slate-500">{collection.invoiceCount} open invoice{collection.invoiceCount === 1 ? "" : "s"} · oldest {collection.oldestDate || "not dated"}</p>
+                      </div>
+                      <strong className="text-sm text-amber-800">{money(collection.outstanding)}</strong>
+                    </div>
+                    <PersistedForm action={completeProcessAction} draftKey={`solva-trade:customer-collection:${collection.customerId}:${collection.outstanding.toFixed(2)}`} className="mt-3 grid gap-2">
+                      <input type="hidden" name="module" value="Sales" />
+                      <input type="hidden" name="process" value="Customer Payments" />
+                      <input type="hidden" name="document" value="Sales Receipt" />
+                      <input type="hidden" name="intent" value="Submitted" />
+                      <input type="hidden" name="returnTo" value="/sales" />
+                      <input type="hidden" name="next" value="Back to sales" />
+                      <input type="hidden" name="field_customer_id" value={collection.customerId} />
+                      <input type="hidden" name="field_customer" value={collection.customerName} />
+                      <input type="hidden" name="field_payment_method" value="Cash" />
+                      <input type="hidden" name="field_require_owner_pin" value="1" />
+                      <input type="hidden" name="field_payment_request_id" value={`collection:${collection.customerId}:${collection.outstanding.toFixed(2)}:${collection.invoiceCount}`} />
+                      <label className="text-xs font-semibold text-slate-600" htmlFor={`collection-amount-${collection.customerId}`}>Amount received</label>
+                      <input id={`collection-amount-${collection.customerId}`} name="field_amount" type="number" min="0.01" max={collection.outstanding.toFixed(2)} step="0.01" required className="min-h-10 rounded-md border border-slate-300 px-3 text-sm font-semibold" />
+                      <details className="rounded-md border border-slate-200 bg-slate-50 p-2">
+                        <summary className="flex cursor-pointer items-center justify-center gap-2 text-xs font-black text-slate-800"><Eye className="h-3.5 w-3.5" /> Confirm & receipt</summary>
+                        <div className="mt-2 grid gap-2">
+                          <input name="field_payment_pin" type="password" inputMode="numeric" pattern="[0-9]*" required placeholder="Owner PIN" className="min-h-10 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold" />
+                          <button type="submit" className="min-h-10 rounded-md bg-emerald-700 px-4 text-sm font-semibold text-white">Apply payment & receipt</button>
+                        </div>
+                      </details>
+                    </PersistedForm>
+                  </article>
+                ))}
+              </div>
+            ) : <p className="rounded-md bg-white p-3 text-sm text-slate-600">No customer has an open balance.</p>}
+          </div>
+        </details>
         <div className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
           <div>
             <p className="text-sm font-semibold text-emerald-700">Sales and payments</p>
@@ -681,22 +750,17 @@ export default async function SalesPage({
                         <input type="hidden" name="field_payment_status" value="Paid" />
                         <input type="hidden" name="label_payment_method" value="Payment method" />
                         <input type="hidden" name="field_payment_method" value="Cash" />
+                        <input type="hidden" name="field_require_owner_pin" value="1" />
+                        <input type="hidden" name="field_payment_request_id" value={`invoice:${invoice.id}:${paid.toFixed(2)}:${balance.toFixed(2)}`} />
                         <label className="text-xs font-semibold text-slate-600" htmlFor={`amount-${invoice.id}`}>Amount received</label>
-                        <div className="flex gap-2">
-                          <input
-                            id={`amount-${invoice.id}`}
-                            name="field_amount"
-                            type="number"
-                            min="0.01"
-                            max={balance.toFixed(2)}
-                            step="0.01"
-                            defaultValue={balance.toFixed(2)}
-                            className="min-h-11 w-full rounded-md border border-slate-300 px-3 text-sm font-semibold"
-                          />
-                          <button type="submit" className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-md bg-[var(--solva-blue-700)] px-4 text-sm font-semibold text-white">
-                            Confirm & receipt
-                          </button>
-                        </div>
+                        <input id={`amount-${invoice.id}`} name="field_amount" type="number" min="0.01" max={balance.toFixed(2)} step="0.01" defaultValue={balance.toFixed(2)} className="min-h-11 w-full rounded-md border border-slate-300 px-3 text-sm font-semibold" />
+                        <details className="rounded-md border border-slate-200 bg-white p-2">
+                          <summary className="flex cursor-pointer items-center justify-center gap-2 text-xs font-black text-slate-800"><Eye className="h-3.5 w-3.5" /> Confirm & receipt</summary>
+                          <div className="mt-2 grid gap-2">
+                            <input name="field_payment_pin" type="password" inputMode="numeric" pattern="[0-9]*" required placeholder="Owner PIN" className="min-h-10 rounded-md border border-slate-300 px-3 text-sm font-semibold" />
+                            <button type="submit" className="min-h-10 rounded-md bg-[var(--solva-blue-700)] px-4 text-sm font-semibold text-white">Confirm payment</button>
+                          </div>
+                        </details>
                         <p className="text-xs leading-5 text-slate-500">Use the full balance for paid, or a smaller amount for part payment.</p>
                       </PersistedForm>
                     )}

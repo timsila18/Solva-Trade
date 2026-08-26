@@ -700,9 +700,10 @@ async function postCustomerPayment(
   invoiceIdOverride?: string,
   amountOverride?: number,
 ) {
-  const admin = await createSupabaseServerClient();
+  const admin = createSupabaseAdminClient();
   const { businessId, branchId } = await getWorkspaceContextForClient(admin, userId, fallbackBusinessId);
   const invoiceId = invoiceIdOverride ?? getField(formData, "invoice_id");
+  const customerId = getField(formData, "customer_id") || null;
   const amount = amountOverride ?? getNumber(formData, "amount");
   const paymentNumber = getField(formData, "payment_number") || `RCPT-${Date.now().toString().slice(-8)}`;
   const paymentDate = getField(formData, "payment_date") || new Date().toISOString();
@@ -712,76 +713,50 @@ async function postCustomerPayment(
       .replace(/[^a-z0-9]+/g, "_")
       .replace(/^_+|_+$/g, "") || "cash";
 
-  if (!invoiceId) throw new Error("Select the unpaid invoice to receive payment against.");
+  const requiresOwnerPin = getField(formData, "require_owner_pin") === "1";
+  if (requiresOwnerPin && getField(formData, "payment_pin") !== "2027") {
+    throw new Error("Enter the owner PIN to confirm this payment and produce the receipt.");
+  }
+  if (!invoiceId && !customerId) throw new Error("Select an unpaid invoice or customer account.");
   if (amount <= 0) throw new Error("Enter the amount received.");
-
-  const { data: invoice } = await admin
-    .from("sales_invoices")
-    .select("id, customer_id, balance_due, amount_paid, total_amount")
-    .eq("business_id", businessId)
-    .eq("id", invoiceId)
-    .maybeSingle();
-  if (!invoice) throw new Error("Selected invoice was not found.");
-  if (amount > Number(invoice.balance_due ?? 0)) throw new Error(`Payment exceeds invoice balance of KES ${Number(invoice.balance_due ?? 0).toLocaleString("en-KE")}.`);
-
-  const { data: method } = await admin
-    .from("payment_methods")
-    .select("id")
-    .eq("business_id", businessId)
-    .eq("active", true)
-    .eq("code", methodCode)
-    .limit(1)
-    .maybeSingle();
-
-  const { data: payment, error: paymentError } = await admin
-    .from("customer_payments")
-    .insert({
-      business_id: businessId,
-      branch_id: branchId,
-      customer_id: invoice.customer_id,
-      payment_number: paymentNumber,
-      payment_date: paymentDate,
-      payment_method_id: method?.id ?? null,
-      amount_received: amount,
-      currency: "KES",
-      transaction_reference: getField(formData, "reference") || null,
-      payer_name: getField(formData, "payer_name") || null,
-      collected_by: userId,
-      status: "allocated",
-      source_document_type: "sales_invoice",
-      source_document_id: invoiceId,
-    })
-    .select("id")
-    .single();
-  if (paymentError || !payment) throw new Error(paymentError?.message ?? "Could not post customer payment.");
-
-  const { error: allocationError } = await admin.from("customer_payment_allocations").insert({
-    business_id: businessId,
-    customer_payment_id: payment.id,
-    invoice_id: invoiceId,
-    allocated_amount: amount,
+  const requestKey =
+    getField(formData, "payment_request_id") ||
+    `payment:${invoiceId || customerId}:${amount.toFixed(2)}:${getField(formData, "reference") || paymentNumber}`;
+  const { data, error } = await admin.rpc("post_customer_payment_atomic", {
+    target_business_id: businessId,
+    target_branch_id: branchId,
+    target_customer_id: customerId,
+    target_invoice_id: invoiceId || null,
+    target_amount: amount,
+    target_payment_number: paymentNumber,
+    target_payment_date: paymentDate,
+    target_method_code: methodCode,
+    target_reference: getField(formData, "reference"),
+    target_payer_name: getField(formData, "payer_name"),
+    target_collected_by: userId,
+    target_idempotency_key: requestKey,
   });
-  if (allocationError) throw new Error(allocationError.message);
+  if (error) throw new Error(error.message);
 
-  const nextPaid = Number(invoice.amount_paid ?? 0) + amount;
-  const nextBalance = Math.max(0, Number(invoice.total_amount ?? 0) - nextPaid);
-  await admin
-    .from("sales_invoices")
-    .update({
-      amount_paid: nextPaid,
-      balance_due: nextBalance,
-      status: nextBalance <= 0 ? "paid" : "partially_paid",
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", invoiceId);
+  const result = (data ?? {}) as {
+    paymentId?: string;
+    paymentNumber?: string;
+    amountReceived?: number | string;
+    allocatedAmount?: number | string;
+    allocations?: { invoiceId?: string; invoiceNumber?: string; amount?: number | string; balanceDue?: number | string }[];
+  };
+  const allocations = Array.isArray(result.allocations) ? result.allocations : [];
+  const remainingBalance = allocations.reduce((sum, allocation) => sum + Number(allocation.balanceDue ?? 0), 0);
 
   return {
-    paymentNumber,
-    amountReceived: amount,
-    amountPaid: nextPaid,
-    balanceDue: nextBalance,
-    totalAmount: Number(invoice.total_amount ?? 0),
+    paymentId: String(result.paymentId ?? ""),
+    paymentNumber: String(result.paymentNumber ?? paymentNumber),
+    amountReceived: Number(result.amountReceived ?? amount),
+    amountPaid: Number(result.allocatedAmount ?? amount),
+    balanceDue: remainingBalance,
+    totalAmount: Number(result.allocatedAmount ?? amount),
     paymentDate,
+    allocations,
   };
 }
 
@@ -811,88 +786,23 @@ export async function reverseSalesInvoiceAction(formData: FormData) {
       (typeof user?.app_metadata?.active_business_id === "string" ? user.app_metadata.active_business_id : null);
     if (!user || !businessId) throw new Error("Sign in to reverse an invoice.");
 
-    const { data: invoice, error: invoiceError } = await admin
-      .from("sales_invoices")
-      .select("id, business_id, branch_id, customer_id, invoice_number, invoice_date, status, total_amount, amount_paid, balance_due")
-      .eq("business_id", businessId)
-      .eq("id", invoiceId)
-      .maybeSingle();
-    if (invoiceError) throw new Error(invoiceError.message);
-    if (!invoice) throw new Error("That invoice was not found in this business.");
-
-    const status = String(invoice.status ?? "").toLowerCase();
-    if (status === "reversed" || status === "cancelled") {
-      throw new Error("This invoice has already been reversed.");
-    }
-
-    const reversalNumber = `REV-${String(invoice.invoice_number || Date.now()).replace(/[^A-Za-z0-9-]+/g, "-")}`;
-    const { data: movements, error: movementLoadError } = await admin
-      .from("stock_movements")
-      .select(
-        "id, branch_id, warehouse_id, product_id, variant_id, batch_id, display_unit_id, quantity_base, display_quantity, unit_conversion_factor, unit_cost, total_cost",
-      )
-      .eq("business_id", businessId)
-      .eq("reference_document_type", "sales_invoice")
-      .eq("reference_document_id", invoiceId)
-      .eq("direction", "out");
-    if (movementLoadError) throw new Error(movementLoadError.message);
-
-    const reversalMovements = (movements ?? []).map((movement) => ({
-      business_id: businessId,
-      branch_id: movement.branch_id,
-      warehouse_id: movement.warehouse_id,
-      product_id: movement.product_id,
-      variant_id: movement.variant_id,
-      batch_id: movement.batch_id,
-      display_unit_id: movement.display_unit_id,
-      movement_type: "reversal",
-      direction: "in",
-      quantity_base: Number(movement.quantity_base ?? 0),
-      display_quantity: Number(movement.display_quantity ?? movement.quantity_base ?? 0),
-      unit_conversion_factor: Number(movement.unit_conversion_factor ?? 1) || 1,
-      unit_cost: Number(movement.unit_cost ?? 0),
-      total_cost: Number(movement.total_cost ?? 0),
-      reference_document_type: "sales_invoice_reversal",
-      reference_document_id: invoiceId,
-      reference_number: reversalNumber,
-      reason,
-      notes: `Reversal of stock issue ${movement.id} for invoice ${invoice.invoice_number}.`,
-      movement_date: new Date().toISOString(),
-      created_by: user.id,
-      approval_status: "posted",
-      reversal_reference_id: movement.id,
-      is_reversal: true,
-    }));
-
-    if (reversalMovements.length) {
-      const { error: reversalError } = await admin.from("stock_movements").insert(reversalMovements);
-      if (reversalError) throw new Error(reversalError.message);
-    }
-
-    const { data: allocations } = await admin
-      .from("customer_payment_allocations")
-      .select("customer_payment_id")
-      .eq("business_id", businessId)
-      .eq("invoice_id", invoiceId);
-    const paymentIds = [...new Set((allocations ?? []).map((allocation) => String(allocation.customer_payment_id)).filter(Boolean))];
-    if (paymentIds.length) {
-      await admin.from("customer_payments").update({ status: "reversed", notes: `Reversed with invoice ${invoice.invoice_number}: ${reason}` }).eq("business_id", businessId).in("id", paymentIds);
-    }
-
-    await admin.from("sales_source_allocations").delete().eq("business_id", businessId).eq("sales_invoice_id", invoiceId);
-
-    const { error: updateError } = await admin
-      .from("sales_invoices")
-      .update({
-        status: "reversed",
-        delivery_status: "cancelled",
-        amount_paid: 0,
-        balance_due: 0,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("business_id", businessId)
-      .eq("id", invoiceId);
-    if (updateError) throw new Error(updateError.message);
+    const { data: reversalData, error: reversalError } = await admin.rpc("reverse_sales_invoice_atomic", {
+      target_business_id: businessId,
+      target_invoice_id: invoiceId,
+      target_user_id: user.id,
+      target_reason: reason,
+    });
+    if (reversalError) throw new Error(reversalError.message);
+    const reversal = (reversalData ?? {}) as {
+      performed?: boolean;
+      invoiceNumber?: string;
+      reversalNumber?: string;
+      stockMovements?: number;
+      totalAmount?: number | string;
+    };
+    const reversalNumber = String(reversal.reversalNumber ?? `REV-${invoiceId}`);
+    const invoiceNumber = String(reversal.invoiceNumber ?? invoiceId);
+    if (!reversal.performed) throw new Error("This invoice has already been reversed.");
 
     const reversalForm = new FormData();
     reversalForm.set("module", "Sales");
@@ -901,37 +811,21 @@ export async function reverseSalesInvoiceAction(formData: FormData) {
     reversalForm.set("intent", "Reversed");
     reversalForm.set("returnTo", "/sales");
     reversalForm.set("next", "Back to sales");
-    reversalForm.set("field_invoice_number", String(invoice.invoice_number ?? invoiceId));
+    reversalForm.set("field_invoice_number", invoiceNumber);
     reversalForm.set("label_invoice_number", "Original invoice");
     reversalForm.set("field_credit_note_number", reversalNumber);
     reversalForm.set("label_credit_note_number", "Reversal number");
     reversalForm.set("field_reason", reason);
     reversalForm.set("label_reason", "Reason");
-    reversalForm.set("field_total", Number(invoice.total_amount ?? 0).toFixed(2));
+    reversalForm.set("field_total", Number(reversal.totalAmount ?? 0).toFixed(2));
     reversalForm.set("label_total", "Reversed invoice amount");
     await persistWorkflowRecord(reversalForm, user.id, businessId, { table: "sales_invoices", id: invoiceId }, reversalNumber);
 
-    await admin.from("audit_logs").insert({
-      business_id: businessId,
-      user_id: user.id,
-      action: "invoice.reversed",
-      module: "Sales",
-      entity_type: "sales_invoice",
-      entity_id: invoiceId,
-      new_value: {
-        invoice_number: invoice.invoice_number,
-        reversal_number: reversalNumber,
-        reason,
-        stock_movements_reversed: reversalMovements.length,
-        related_payments_reversed: paymentIds.length,
-      },
-    });
-
     params.set("invoiceId", invoiceId);
-    appendGeneratedDocumentField(params, "invoice_number", "Original invoice", String(invoice.invoice_number ?? invoiceId));
+    appendGeneratedDocumentField(params, "invoice_number", "Original invoice", invoiceNumber);
     appendGeneratedDocumentField(params, "credit_note_number", "Reversal number", reversalNumber);
     appendGeneratedDocumentField(params, "reason", "Reason", reason);
-    appendGeneratedDocumentField(params, "total", "Reversed invoice amount", Number(invoice.total_amount ?? 0).toFixed(2));
+    appendGeneratedDocumentField(params, "total", "Reversed invoice amount", Number(reversal.totalAmount ?? 0).toFixed(2));
   } catch (error) {
     params.set("error", error instanceof Error ? error.message : "The invoice could not be reversed.");
   }
@@ -2280,6 +2174,7 @@ export async function completeProcessAction(formData: FormData) {
       if (intent.toLowerCase().includes("submit") && moduleName === "Sales" && processName === "Customer Payments") {
         const result = await postCustomerPayment(formData, user.id, businessId);
         generatedReference = result.paymentNumber;
+        params.set("paymentId", result.paymentId);
         appendGeneratedDocumentField(params, "payment_number", "Payment number", generatedReference);
         appendGeneratedDocumentField(params, "receipt_number", "Receipt number", generatedReference);
         appendGeneratedDocumentField(params, "amount_received", "Amount received", result.amountReceived.toFixed(2));
@@ -2288,6 +2183,14 @@ export async function completeProcessAction(formData: FormData) {
         appendGeneratedDocumentField(params, "balance_due", "Balance due", result.balanceDue.toFixed(2));
         appendGeneratedDocumentField(params, "payment_status", "Payment status", result.balanceDue <= 0 ? "Paid" : "Part paid");
         appendGeneratedDocumentField(params, "payment_date", "Payment date", result.paymentDate);
+        appendGeneratedDocumentField(
+          params,
+          "allocations",
+          "Applied to",
+          result.allocations
+            .map((allocation) => `${allocation.invoiceNumber || allocation.invoiceId}: KES ${Number(allocation.amount ?? 0).toFixed(2)}`)
+            .join("; "),
+        );
       }
       if (moduleName === "Purchasing" && processName === "Goods Received Notes" && intent.toLowerCase().includes("posted")) {
         const result = await postGoodsReceived(formData, user.id, businessId);
