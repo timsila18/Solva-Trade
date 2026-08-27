@@ -4,7 +4,7 @@ import { completeProcessAction, reverseSalesInvoiceAction } from "@/app/(app)/ac
 import { PersistedForm } from "@/components/app/persisted-form";
 import { PinProtectedSubmitButton } from "@/components/app/pin-protected-export";
 import { EmptyState, MetricCard, PageHero, PlainCard } from "@/components/ui/premium";
-import { salesSummary, salesWorkflows } from "@/lib/sales-data";
+import { salesWorkflows } from "@/lib/sales-data";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getActiveBusinessId } from "@/lib/tenant";
@@ -21,6 +21,7 @@ type SalesInvoiceRow = {
   amount_paid: number | string | null;
   balance_due: number | string | null;
   status: string | null;
+  delivery_status?: string | null;
   customers: { customer_name: string | null; phone: string | null } | { customer_name: string | null; phone: string | null }[] | null;
 };
 
@@ -36,29 +37,6 @@ type SupplierOption = {
   legal_name: string | null;
   supplier_code: string | null;
 };
-
-const storyCards = [
-  {
-    label: "Customers buying from you",
-    value: salesSummary.activeCustomers.toString(),
-    story: "Add customers once, then reuse them for orders, deliveries and payments.",
-  },
-  {
-    label: "Orders ready to deliver",
-    value: salesSummary.approvedOrdersReadyForDelivery.toString(),
-    story: "Approved orders will flow into route planning when you start selling.",
-  },
-  {
-    label: "Unpaid invoices",
-    value: salesSummary.openInvoices.toString(),
-    story: "This tells you who still needs a follow-up.",
-  },
-  {
-    label: "Money customers owe you",
-    value: salesSummary.customerBalance,
-    story: "Plain view of customer balances without accounting jargon.",
-  },
-];
 
 const plainWorkflows = salesWorkflows.map((workflow) => {
   const labels: Record<string, { title: string; description: string; action: string }> = {
@@ -233,7 +211,7 @@ async function recentSales(businessId: string | null) {
 
     const { data, error } = await admin
       .from("sales_invoices")
-      .select("id, customer_id, invoice_number, invoice_date, created_at, total_amount, amount_paid, balance_due, status, customers(customer_name, phone)")
+      .select("id, customer_id, invoice_number, invoice_date, created_at, total_amount, amount_paid, balance_due, status, delivery_status, customers(customer_name, phone)")
       .eq("business_id", businessId)
       .order("created_at", { ascending: false })
       .limit(5000);
@@ -323,6 +301,28 @@ export default async function SalesPage({
   const kraWindow = kraEtrWindowLabel(today);
   const activeInvoices = invoices.filter((invoice) => !isReversedSale(invoice));
   const invoicesNeedingFollowUp = activeInvoices.filter((invoice) => asNumber(invoice.balance_due) > 0).sort(newestInvoiceFirst);
+  const storyCards = [
+    {
+      label: "Customers buying from you",
+      value: customers.length.toLocaleString("en-KE"),
+      story: customers.length ? "Customer list is active." : "Add customers once, then reuse them for sales and payments.",
+    },
+    {
+      label: "Orders ready to deliver",
+      value: activeInvoices.filter((invoice) => String(invoice.delivery_status ?? "").toLowerCase() === "ready").length.toLocaleString("en-KE"),
+      story: "Posted invoices ready for customer delivery.",
+    },
+    {
+      label: "Unpaid invoices",
+      value: invoicesNeedingFollowUp.length.toLocaleString("en-KE"),
+      story: invoicesNeedingFollowUp.length ? "These customers still need payment follow-up." : "No unpaid invoice needs follow-up.",
+    },
+    {
+      label: "Money customers owe you",
+      value: money(invoicesNeedingFollowUp.reduce((sum, invoice) => sum + asNumber(invoice.balance_due), 0)),
+      story: "Live total of unpaid and part-paid invoice balances.",
+    },
+  ];
   const customerCollections = Array.from(
     invoicesNeedingFollowUp.reduce((groups, invoice) => {
       if (!invoice.customer_id) return groups;
