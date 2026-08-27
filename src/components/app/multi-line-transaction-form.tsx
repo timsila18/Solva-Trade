@@ -132,6 +132,12 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
       { quantity: 0, subtotal: 0, tax: 0, total: 0 },
     );
 
+    if (mode === "sale") {
+      const charges = fieldNumber(form, "field_transport_charge") + fieldNumber(form, "field_other_charge");
+      summary.subtotal += charges;
+      summary.total += charges;
+    }
+
     setField(form, "field_subtotal", summary.subtotal.toFixed(2));
     setField(form, "field_tax", summary.tax.toFixed(2));
     setField(form, "field_total", summary.total.toFixed(2));
@@ -660,6 +666,37 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
           </tbody>
         </table>
       </section>
+
+      {mode === "sale" ? (
+        <section className="grid gap-3 rounded-md border border-slate-200 bg-white p-4 md:grid-cols-2">
+          <label className="grid gap-2 text-sm font-semibold text-slate-800">
+            Transport charge (optional)
+            <input
+              name="field_transport_charge"
+              type="number"
+              min="0"
+              step="0.01"
+              inputMode="decimal"
+              placeholder="0.00"
+              onChange={(event) => recalculate(event.currentTarget)}
+              className="min-h-11 rounded-md border border-slate-300 px-3 text-sm font-normal"
+            />
+          </label>
+          <label className="grid gap-2 text-sm font-semibold text-slate-800">
+            Other charge (optional)
+            <input
+              name="field_other_charge"
+              type="number"
+              min="0"
+              step="0.01"
+              inputMode="decimal"
+              placeholder="0.00"
+              onChange={(event) => recalculate(event.currentTarget)}
+              className="min-h-11 rounded-md border border-slate-300 px-3 text-sm font-normal"
+            />
+          </label>
+        </section>
+      ) : null}
 
       {mode === "sale" ? (
         <section className="rounded-md border border-slate-200 bg-white p-4">

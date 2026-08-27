@@ -510,9 +510,13 @@ async function postSalesInvoice(formData: FormData, userId: string, fallbackBusi
   let customerId = getField(formData, "customer_id");
   const quickCustomerName = getField(formData, "customer_name");
   const lines = salesInvoiceLinesFromForm(formData);
-  const subtotal = lines.reduce((sum, line) => sum + line.lineSubtotal, 0);
+  const transportCharge = getNumber(formData, "transport_charge");
+  const otherCharge = getNumber(formData, "other_charge");
+  if (transportCharge < 0 || otherCharge < 0) throw new Error("Additional sale charges cannot be negative.");
+  const charges = transportCharge + otherCharge;
+  const subtotal = lines.reduce((sum, line) => sum + line.lineSubtotal, 0) + charges;
   const tax = lines.reduce((sum, line) => sum + line.taxAmount, 0);
-  const total = lines.reduce((sum, line) => sum + line.lineTotal, 0);
+  const total = lines.reduce((sum, line) => sum + line.lineTotal, 0) + charges;
   const paid = getNumber(formData, "amount_paid") || getNumber(formData, "amount_received");
   const invoiceNumber = getField(formData, "invoice_number") || `INV-${Date.now().toString().slice(-8)}`;
   const invoiceDate = getField(formData, "invoice_date") || new Date().toISOString().slice(0, 10);
@@ -591,6 +595,8 @@ async function postSalesInvoice(formData: FormData, userId: string, fallbackBusi
       subtotal,
       tax_total: tax,
       total_amount: total,
+      transport_charge: transportCharge,
+      other_charge: otherCharge,
       amount_paid: 0,
       balance_due: total,
       created_by: userId,
@@ -704,6 +710,11 @@ async function postCustomerPayment(
   const { businessId, branchId } = await getWorkspaceContextForClient(admin, userId, fallbackBusinessId);
   const invoiceId = invoiceIdOverride ?? getField(formData, "invoice_id");
   const customerId = getField(formData, "customer_id") || null;
+  const collectionCustomerIds = getField(formData, "collection_customer_ids")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const collectionName = getField(formData, "collection_name");
   const amount = amountOverride ?? getNumber(formData, "amount");
   const paymentNumber = getField(formData, "payment_number") || `RCPT-${Date.now().toString().slice(-8)}`;
   const paymentDate = getField(formData, "payment_date") || new Date().toISOString();
@@ -717,25 +728,39 @@ async function postCustomerPayment(
   if (requiresOwnerPin && getField(formData, "payment_pin") !== "2027") {
     throw new Error("Enter the owner PIN to confirm this payment and produce the receipt.");
   }
-  if (!invoiceId && !customerId) throw new Error("Select an unpaid invoice or customer account.");
+  if (!invoiceId && !customerId && !collectionCustomerIds.length) throw new Error("Select an unpaid invoice or customer account.");
   if (amount <= 0) throw new Error("Enter the amount received.");
   const requestKey =
     getField(formData, "payment_request_id") ||
     `payment:${invoiceId || customerId}:${amount.toFixed(2)}:${getField(formData, "reference") || paymentNumber}`;
-  const { data, error } = await admin.rpc("post_customer_payment_atomic", {
-    target_business_id: businessId,
-    target_branch_id: branchId,
-    target_customer_id: customerId,
-    target_invoice_id: invoiceId || null,
-    target_amount: amount,
-    target_payment_number: paymentNumber,
-    target_payment_date: paymentDate,
-    target_method_code: methodCode,
-    target_reference: getField(formData, "reference"),
-    target_payer_name: getField(formData, "payer_name"),
-    target_collected_by: userId,
-    target_idempotency_key: requestKey,
-  });
+  const { data, error } = collectionCustomerIds.length > 1
+    ? await admin.rpc("post_customer_collection_atomic", {
+        target_business_id: businessId,
+        target_branch_id: branchId,
+        target_customer_ids: collectionCustomerIds,
+        target_collection_name: collectionName || getField(formData, "customer"),
+        target_amount: amount,
+        target_payment_number: paymentNumber,
+        target_payment_date: paymentDate,
+        target_method_code: methodCode,
+        target_reference: getField(formData, "reference"),
+        target_collected_by: userId,
+        target_idempotency_key: requestKey,
+      })
+    : await admin.rpc("post_customer_payment_atomic", {
+        target_business_id: businessId,
+        target_branch_id: branchId,
+        target_customer_id: customerId || collectionCustomerIds[0] || null,
+        target_invoice_id: invoiceId || null,
+        target_amount: amount,
+        target_payment_number: paymentNumber,
+        target_payment_date: paymentDate,
+        target_method_code: methodCode,
+        target_reference: getField(formData, "reference"),
+        target_payer_name: getField(formData, "payer_name") || collectionName,
+        target_collected_by: userId,
+        target_idempotency_key: requestKey,
+      });
   if (error) throw new Error(error.message);
 
   const result = (data ?? {}) as {

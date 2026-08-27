@@ -140,6 +140,17 @@ function customerName(invoice: SalesInvoiceRow) {
   return customer?.customer_name || "Walk-in customer";
 }
 
+function collectionAccount(customer: string, customerId: string) {
+  const normalized = normaliseSearch(customer).replace(/[^a-z0-9]+/g, " ").trim();
+  const groupedAccounts = [
+    { key: "bodega", name: "Bodega", branches: ["bodega syokimau", "bodega jamhuri", "bodega makongeni"] },
+    { key: "saape", name: "Saape", branches: ["saape trm", "saape lv", "saape ciata mall"] },
+    { key: "post-bank", name: "Post Bank", branches: ["post bank 3rd floor", "post bank 4th floor", "post bank 5th floor", "post bank 7th floor"] },
+  ];
+  const grouped = groupedAccounts.find((account) => account.branches.includes(normalized));
+  return grouped ?? { key: `customer:${customerId}`, name: customer, branches: [normalized] };
+}
+
 function daysSince(dateValue: string | null) {
   if (!dateValue) return 0;
   const then = new Date(dateValue);
@@ -317,19 +328,22 @@ export default async function SalesPage({
   const customerCollections = Array.from(
     invoicesNeedingFollowUp.reduce((groups, invoice) => {
       if (!invoice.customer_id) return groups;
-      const current = groups.get(invoice.customer_id) ?? {
-        customerId: invoice.customer_id,
-        customerName: customerName(invoice),
+      const account = collectionAccount(customerName(invoice), invoice.customer_id);
+      const current = groups.get(account.key) ?? {
+        collectionKey: account.key,
+        customerIds: [] as string[],
+        customerName: account.name,
         invoiceCount: 0,
         outstanding: 0,
         oldestDate: invoice.invoice_date,
       };
+      if (!current.customerIds.includes(invoice.customer_id)) current.customerIds.push(invoice.customer_id);
       current.invoiceCount += 1;
       current.outstanding += asNumber(invoice.balance_due);
       if (invoice.invoice_date && (!current.oldestDate || invoice.invoice_date < current.oldestDate)) current.oldestDate = invoice.invoice_date;
-      groups.set(invoice.customer_id, current);
+      groups.set(account.key, current);
       return groups;
-    }, new Map<string, { customerId: string; customerName: string; invoiceCount: number; outstanding: number; oldestDate: string | null }>()),
+    }, new Map<string, { collectionKey: string; customerIds: string[]; customerName: string; invoiceCount: number; outstanding: number; oldestDate: string | null }>()),
   )
     .map(([, collection]) => collection)
     .sort((a, b) => b.outstanding - a.outstanding);
@@ -606,7 +620,7 @@ export default async function SalesPage({
             {customerCollections.length ? (
               <div className="grid gap-3 lg:grid-cols-2">
                 {customerCollections.map((collection) => (
-                  <article key={collection.customerId} className="rounded-md border border-slate-200 bg-white p-4">
+                  <article key={collection.collectionKey} className="rounded-md border border-slate-200 bg-white p-4">
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div>
                         <h3 className="font-semibold text-slate-950">{collection.customerName}</h3>
@@ -614,20 +628,22 @@ export default async function SalesPage({
                       </div>
                       <strong className="text-sm text-amber-800">{money(collection.outstanding)}</strong>
                     </div>
-                    <PersistedForm action={completeProcessAction} draftKey={`solva-trade:customer-collection:${collection.customerId}:${collection.outstanding.toFixed(2)}`} className="mt-3 grid gap-2">
+                    <PersistedForm action={completeProcessAction} draftKey={`solva-trade:customer-collection:${collection.collectionKey}:${collection.outstanding.toFixed(2)}`} className="mt-3 grid gap-2">
                       <input type="hidden" name="module" value="Sales" />
                       <input type="hidden" name="process" value="Customer Payments" />
                       <input type="hidden" name="document" value="Sales Receipt" />
                       <input type="hidden" name="intent" value="Submitted" />
                       <input type="hidden" name="returnTo" value="/sales" />
                       <input type="hidden" name="next" value="Back to sales" />
-                      <input type="hidden" name="field_customer_id" value={collection.customerId} />
+                      <input type="hidden" name="field_customer_id" value={collection.customerIds[0]} />
+                      <input type="hidden" name="field_collection_customer_ids" value={collection.customerIds.join(",")} />
+                      <input type="hidden" name="field_collection_name" value={collection.customerName} />
                       <input type="hidden" name="field_customer" value={collection.customerName} />
                       <input type="hidden" name="field_payment_method" value="Cash" />
                       <input type="hidden" name="field_require_owner_pin" value="1" />
-                      <input type="hidden" name="field_payment_request_id" value={`collection:${collection.customerId}:${collection.outstanding.toFixed(2)}:${collection.invoiceCount}`} />
-                      <label className="text-xs font-semibold text-slate-600" htmlFor={`collection-amount-${collection.customerId}`}>Amount received</label>
-                      <input id={`collection-amount-${collection.customerId}`} name="field_amount" type="number" min="0.01" max={collection.outstanding.toFixed(2)} step="0.01" required className="min-h-10 rounded-md border border-slate-300 px-3 text-sm font-semibold" />
+                      <input type="hidden" name="field_payment_request_id" value={`collection:${collection.collectionKey}:${collection.outstanding.toFixed(2)}:${collection.invoiceCount}`} />
+                      <label className="text-xs font-semibold text-slate-600" htmlFor={`collection-amount-${collection.collectionKey}`}>Amount received</label>
+                      <input id={`collection-amount-${collection.collectionKey}`} name="field_amount" type="number" min="0.01" max={collection.outstanding.toFixed(2)} step="0.01" required className="min-h-10 rounded-md border border-slate-300 px-3 text-sm font-semibold" />
                       <details className="rounded-md border border-slate-200 bg-slate-50 p-2">
                         <summary className="flex cursor-pointer items-center justify-center gap-2 text-xs font-black text-slate-800"><Eye className="h-3.5 w-3.5" /> Confirm & receipt</summary>
                         <div className="mt-2 grid gap-2">

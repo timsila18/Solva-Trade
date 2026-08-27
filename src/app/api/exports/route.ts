@@ -2196,6 +2196,8 @@ type SalesInvoiceRow = {
   total_amount?: number | string | null;
   amount_paid?: number | string | null;
   balance_due?: number | string | null;
+  transport_charge?: number | string | null;
+  other_charge?: number | string | null;
   status?: string | null;
   delivery_status?: string | null;
   created_at?: string | null;
@@ -2626,6 +2628,9 @@ function productSizeGroup(description: string) {
 
 function sortInvoiceLinesForPrint(lines: ReportLine[]) {
   return [...lines].sort((a, b) => {
+    const aCharge = a.sku === "TRANSPORT" ? 1 : a.sku === "OTHER-CHARGE" ? 2 : 0;
+    const bCharge = b.sku === "TRANSPORT" ? 1 : b.sku === "OTHER-CHARGE" ? 2 : 0;
+    if (aCharge || bCharge) return aCharge && bCharge ? aCharge - bCharge : aCharge ? 1 : -1;
     const aGroup = productSizeGroup(`${a.description} ${a.sku}`);
     const bGroup = productSizeGroup(`${b.description} ${b.sku}`);
     if (aGroup.rank !== bGroup.rank) return aGroup.rank - bGroup.rank;
@@ -2641,7 +2646,7 @@ async function salesInvoiceDocumentLines(invoiceId: string | null): Promise<Repo
   const [invoiceResult, itemResult] = await Promise.all([
     supabase
       .from("sales_invoices")
-      .select("id, invoice_number, invoice_date, subtotal, tax_total, total_amount, amount_paid, balance_due, status, delivery_status, created_at, customers(customer_name, customer_code), branches(branch_name, branch_code)")
+      .select("id, invoice_number, invoice_date, subtotal, tax_total, total_amount, amount_paid, balance_due, transport_charge, other_charge, status, delivery_status, created_at, customers(customer_name, customer_code), branches(branch_name, branch_code)")
       .eq("business_id", businessId)
       .eq("id", invoiceId)
       .limit(1),
@@ -2674,7 +2679,45 @@ async function salesInvoiceDocumentLines(invoiceId: string | null): Promise<Repo
     console.error("Sales invoice export invoice not found", { invoiceId, businessId });
     throw new Error("This invoice was not found in the current business workspace. Open Sales History and try downloading it again.");
   }
-  return sortInvoiceLinesForPrint(((itemResult.data ?? []) as SalesItemRow[]).map((item, index) => itemBaseLine(item, invoice, index)));
+  const lines = ((itemResult.data ?? []) as SalesItemRow[]).map((item, index) => itemBaseLine(item, invoice, index));
+  const addChargeLine = (sku: string, description: string, amount: number) => {
+    if (amount <= 0) return;
+    lines.push({
+      sku,
+      description,
+      unit: "Charge",
+      quantity: 1,
+      unitPrice: amount,
+      discount: 0,
+      taxRate: "Included",
+      taxAmount: 0,
+      lineTotal: amount,
+      warehouse: dateKey(invoice.invoice_date),
+      batch: String(invoice.invoice_number ?? "Invoice"),
+      notes: description,
+      details: {
+        "Item no": sku,
+        "Item name": description,
+        "Item description": description,
+        "Inclusive Unit Price": money(amount),
+        "Unit Price": money(amount),
+        Price: money(amount),
+        Qty: "1",
+        Amount: money(amount),
+        "Amount Payable": money(amount),
+        "Total payable": money(amount),
+        "Invoice no.": String(invoice.invoice_number ?? ""),
+        Date: dateKey(invoice.invoice_date),
+        Customer: String(relatedOne(invoice.customers)?.customer_name ?? "Walk-in customer"),
+        "Invoice total": money(numberValue(invoice.total_amount)),
+        "Amount paid": money(numberValue(invoice.amount_paid)),
+        "Balance due": money(numberValue(invoice.balance_due)),
+      },
+    });
+  };
+  addChargeLine("TRANSPORT", "Transport charge", numberValue(invoice.transport_charge));
+  addChargeLine("OTHER-CHARGE", "Other charge", numberValue(invoice.other_charge));
+  return sortInvoiceLinesForPrint(lines);
 }
 
 async function goodsReceivedDocumentLines(grnId: string | null): Promise<ReportLine[]> {
