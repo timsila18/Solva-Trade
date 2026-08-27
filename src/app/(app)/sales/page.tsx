@@ -143,7 +143,7 @@ function customerName(invoice: SalesInvoiceRow) {
 function collectionAccount(customer: string, customerId: string) {
   const normalized = normaliseSearch(customer).replace(/[^a-z0-9]+/g, " ").trim();
   const groupedAccounts = [
-    { key: "bodega", name: "Bodega", branches: ["bodega syokimau", "bodega jamhuri", "bodega makongeni"] },
+    { key: "bodega", name: "Bodega", branches: ["bodega syokimau", "bodega jamhuri", "bodega makongeni", "bodega thika makongeni"] },
     { key: "saape", name: "Saape", branches: ["saape trm", "saape lv", "saape ciata mall"] },
     { key: "post-bank", name: "Post Bank", branches: ["post bank 3rd floor", "post bank 4th floor", "post bank 5th floor", "post bank 7th floor"] },
   ];
