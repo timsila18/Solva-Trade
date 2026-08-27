@@ -226,12 +226,9 @@ function salesDocumentHref(invoice: SalesInvoiceRow, process: "Sales Receipt" | 
   return `/api/exports?${params.toString()}`;
 }
 
-async function recentSales() {
+async function recentSales(businessId: string | null) {
   try {
-    const supabase = await createSupabaseServerClient();
     const admin = createSupabaseAdminClient();
-    const { data: userData } = await supabase.auth.getUser();
-    const businessId = await activeSalesBusinessId(userData.user?.id, userData.user?.app_metadata?.active_business_id);
     if (!businessId) return [];
 
     const { data, error } = await admin
@@ -272,12 +269,9 @@ async function activeSalesBusinessId(userId: string | undefined, metadataBusines
   );
 }
 
-async function salesCustomers() {
+async function salesCustomers(businessId: string | null) {
   try {
-    const supabase = await createSupabaseServerClient();
     const admin = createSupabaseAdminClient();
-    const { data: userData } = await supabase.auth.getUser();
-    const businessId = await activeSalesBusinessId(userData.user?.id, userData.user?.app_metadata?.active_business_id);
     if (!businessId) return [] as CustomerOption[];
     const { data } = await admin
       .from("customers")
@@ -292,12 +286,9 @@ async function salesCustomers() {
   }
 }
 
-async function salesSuppliers() {
+async function salesSuppliers(businessId: string | null) {
   try {
-    const supabase = await createSupabaseServerClient();
     const admin = createSupabaseAdminClient();
-    const { data: userData } = await supabase.auth.getUser();
-    const businessId = await activeSalesBusinessId(userData.user?.id, userData.user?.app_metadata?.active_business_id);
     if (!businessId) return [] as SupplierOption[];
     const { data } = await admin
       .from("suppliers")
@@ -319,7 +310,14 @@ export default async function SalesPage({
 }) {
   const params = searchParams ? await searchParams : {};
   const historyCustomerQuery = typeof params.historyCustomer === "string" ? params.historyCustomer : "";
-  const [invoices, customers, suppliers] = await Promise.all([recentSales(), salesCustomers(), salesSuppliers()]);
+  const supabase = await createSupabaseServerClient();
+  const { data: userData } = await supabase.auth.getUser();
+  const businessId = await activeSalesBusinessId(userData.user?.id, userData.user?.app_metadata?.active_business_id);
+  const [invoices, customers, suppliers] = await Promise.all([
+    recentSales(businessId),
+    salesCustomers(businessId),
+    salesSuppliers(businessId),
+  ]);
   const today = todayIsoDate();
   const monthStart = `${today.slice(0, 7)}-01`;
   const kraWindow = kraEtrWindowLabel(today);
