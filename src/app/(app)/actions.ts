@@ -487,25 +487,8 @@ type SolvaRpcClient = SupabaseWorkspaceClient & {
   ) => Promise<{ data: unknown; error: { message: string } | null }>;
 };
 
-async function availableStock(
-  admin: SupabaseWorkspaceClient,
-  businessId: string,
-  branchId: string,
-  warehouseId: string,
-  productId: string,
-) {
-  const { data } = await admin
-    .from("stock_balances")
-    .select("available_quantity")
-    .eq("business_id", businessId)
-    .eq("branch_id", branchId)
-    .eq("warehouse_id", warehouseId)
-    .eq("product_id", productId);
-  return (data ?? []).reduce((sum, row) => sum + Number(row.available_quantity ?? 0), 0);
-}
-
 async function postSalesInvoice(formData: FormData, userId: string, fallbackBusinessId?: string | null) {
-  const admin = await createSupabaseServerClient();
+  const admin = createSupabaseAdminClient();
   const { businessId, branchId, warehouseId } = await getWorkspaceContextForClient(admin, userId, fallbackBusinessId);
   let customerId = getField(formData, "customer_id");
   const quickCustomerName = getField(formData, "customer_name");
@@ -564,9 +547,34 @@ async function postSalesInvoice(formData: FormData, userId: string, fallbackBusi
   for (const line of lines) {
     const product = productsById.get(line.productId);
     if (!product) throw new Error("One selected product was not found.");
-    if (product.track_inventory) {
-      const available = await availableStock(admin, businessId, branchId, warehouseId, line.productId);
-      if (available < line.quantity) throw new Error(`Insufficient stock for ${product.product_name}. Available: ${available}.`);
+  }
+
+  const trackedProductIds = productIds.filter((productId) => productsById.get(productId)?.track_inventory);
+  if (trackedProductIds.length) {
+    const { data: balances, error: balancesError } = await admin
+      .from("stock_balances")
+      .select("product_id, available_quantity")
+      .eq("business_id", businessId)
+      .eq("branch_id", branchId)
+      .eq("warehouse_id", warehouseId)
+      .in("product_id", trackedProductIds);
+    if (balancesError) throw new Error(`Could not check available stock. ${balancesError.message}`);
+
+    const availableByProduct = new Map<string, number>();
+    for (const balance of balances ?? []) {
+      const productId = String(balance.product_id);
+      availableByProduct.set(productId, (availableByProduct.get(productId) ?? 0) + Number(balance.available_quantity ?? 0));
+    }
+    const requiredByProduct = new Map<string, number>();
+    for (const line of lines) {
+      if (!productsById.get(line.productId)?.track_inventory) continue;
+      requiredByProduct.set(line.productId, (requiredByProduct.get(line.productId) ?? 0) + line.quantity);
+    }
+    for (const [productId, required] of requiredByProduct) {
+      const available = availableByProduct.get(productId) ?? 0;
+      if (available < required) {
+        throw new Error(`Insufficient stock for ${productsById.get(productId)?.product_name ?? "a selected product"}. Available: ${available}.`);
+      }
     }
   }
 
@@ -623,77 +631,85 @@ async function postSalesInvoice(formData: FormData, userId: string, fallbackBusi
     items.push(...(chunkItems as { id: string; product_id: string }[]));
   }
 
-  for (const [linePosition, line] of lines.entries()) {
-    const product = productsById.get(line.productId);
-    if (!product?.track_inventory) continue;
-    const unitCost = Number(product.standard_cost ?? 0);
-    const lineSource = await sourceOverrideForSaleLine(admin, businessId, line.sourceChoice, saleSourceOverride, saleSourceSupplierId, saleSourceSupplierName);
-    const { data: movement, error: movementError } = await admin.from("stock_movements").insert({
-      business_id: businessId,
-      branch_id: branchId,
-      warehouse_id: warehouseId,
-      product_id: line.productId,
-      movement_type: "sale",
-      direction: "out",
-      quantity_base: line.quantity,
-      display_quantity: line.quantity,
-      unit_conversion_factor: 1,
-      unit_cost: unitCost,
-      total_cost: unitCost * line.quantity,
-      reference_document_type: "sales_invoice",
-      reference_document_id: invoice.id,
-      reference_number: invoiceNumber,
-      reason: "Sale submitted from Solva Trade workflow",
-      source_type: lineSource.sourceType || null,
-      source_supplier_id: lineSource.supplierId,
-      source_supplier_name: lineSource.supplierName,
-      created_by: userId,
-    }).select("id").single();
-    if (movementError || !movement) throw new Error(movementError?.message ?? "Could not post stock movement.");
+  const trackedLines = lines
+    .map((line, linePosition) => ({ line, linePosition, product: productsById.get(line.productId) }))
+    .filter(({ product }) => product?.track_inventory);
+  const movementWork = await Promise.all(
+    trackedLines.map(async ({ line, linePosition, product }) => {
+      const unitCost = Number(product?.standard_cost ?? 0);
+      const lineSource = await sourceOverrideForSaleLine(admin, businessId, line.sourceChoice, saleSourceOverride, saleSourceSupplierId, saleSourceSupplierName);
+      const { data: movement, error: movementError } = await admin.from("stock_movements").insert({
+        business_id: businessId,
+        branch_id: branchId,
+        warehouse_id: warehouseId,
+        product_id: line.productId,
+        movement_type: "sale",
+        direction: "out",
+        quantity_base: line.quantity,
+        display_quantity: line.quantity,
+        unit_conversion_factor: 1,
+        unit_cost: unitCost,
+        total_cost: unitCost * line.quantity,
+        reference_document_type: "sales_invoice",
+        reference_document_id: invoice.id,
+        reference_number: invoiceNumber,
+        reason: "Sale submitted from Solva Trade workflow",
+        source_type: lineSource.sourceType || null,
+        source_supplier_id: lineSource.supplierId,
+        source_supplier_name: lineSource.supplierName,
+        created_by: userId,
+      }).select("id").single();
+      if (movementError || !movement) throw new Error(movementError?.message ?? "Could not post stock movement.");
+      return { line, linePosition, unitCost, lineSource, movementId: String(movement.id) };
+    }),
+  );
 
-    const invoiceItem = items[linePosition] ?? items.find((item) => String(item.product_id) === line.productId);
-    if (!invoiceItem?.id) continue;
-    const saleUnitPrice = line.quantity > 0 ? line.lineTotal / line.quantity : 0;
-    const { error: allocationError } = await (admin as SolvaRpcClient).rpc("allocate_sale_fifo_source", {
-      target_business_id: businessId,
-      target_invoice_id: invoice.id,
-      target_invoice_item_id: invoiceItem.id,
-      target_stock_movement_id: movement.id,
-      target_product_id: line.productId,
-      target_branch_id: branchId,
-      target_warehouse_id: warehouseId,
-      target_quantity: line.quantity,
-      target_sale_unit_price: saleUnitPrice,
-    });
-    if (allocationError) {
-      console.warn("Solva Trade FIFO sale allocation fell back", allocationError);
-      await insertSaleAllocationFallback(admin, {
-        businessId,
-        invoiceId: String(invoice.id),
-        invoiceItemId: String(invoiceItem.id),
-        stockMovementId: String(movement.id),
-        productId: line.productId,
-        quantity: line.quantity,
-        unitCost,
-        saleUnitPrice,
-        sourceType: lineSource.sourceType || null,
-        supplierId: lineSource.supplierId,
-        supplierName: lineSource.supplierName,
+  await Promise.all(
+    movementWork.map(async ({ line, linePosition, unitCost, lineSource, movementId }) => {
+      const invoiceItem = items[linePosition] ?? items.find((item) => String(item.product_id) === line.productId);
+      if (!invoiceItem?.id) throw new Error("Could not match a posted invoice item to its stock movement.");
+      const saleUnitPrice = line.quantity > 0 ? line.lineTotal / line.quantity : 0;
+      const { error: allocationError } = await (admin as SolvaRpcClient).rpc("allocate_sale_fifo_source", {
+        target_business_id: businessId,
+        target_invoice_id: invoice.id,
+        target_invoice_item_id: invoiceItem.id,
+        target_stock_movement_id: movementId,
+        target_product_id: line.productId,
+        target_branch_id: branchId,
+        target_warehouse_id: warehouseId,
+        target_quantity: line.quantity,
+        target_sale_unit_price: saleUnitPrice,
       });
-    } else if (lineSource.sourceType || lineSource.supplierId) {
-      const { error: allocationSourceError } = await admin
-        .from("sales_source_allocations")
-        .update({
-          source_type: lineSource.sourceType || "unspecified",
-          source_supplier_id: lineSource.supplierId,
-          source_supplier_name: lineSource.supplierName,
-        })
-        .eq("business_id", businessId)
-        .eq("sales_invoice_id", invoice.id)
-        .eq("sales_invoice_item_id", invoiceItem.id);
-      if (allocationSourceError) console.warn("Solva Trade sale source override skipped", allocationSourceError);
-    }
-  }
+      if (allocationError) {
+        console.warn("Solva Trade FIFO sale allocation fell back", allocationError);
+        await insertSaleAllocationFallback(admin, {
+          businessId,
+          invoiceId: String(invoice.id),
+          invoiceItemId: String(invoiceItem.id),
+          stockMovementId: movementId,
+          productId: line.productId,
+          quantity: line.quantity,
+          unitCost,
+          saleUnitPrice,
+          sourceType: lineSource.sourceType || null,
+          supplierId: lineSource.supplierId,
+          supplierName: lineSource.supplierName,
+        });
+      } else if (lineSource.sourceType || lineSource.supplierId) {
+        const { error: allocationSourceError } = await admin
+          .from("sales_source_allocations")
+          .update({
+            source_type: lineSource.sourceType || "unspecified",
+            source_supplier_id: lineSource.supplierId,
+            source_supplier_name: lineSource.supplierName,
+          })
+          .eq("business_id", businessId)
+          .eq("sales_invoice_id", invoice.id)
+          .eq("sales_invoice_item_id", invoiceItem.id);
+        if (allocationSourceError) console.warn("Solva Trade sale source override skipped", allocationSourceError);
+      }
+    }),
+  );
 
   const payment = paid > 0 ? await postCustomerPayment(formData, userId, fallbackBusinessId, invoice.id, paid) : null;
   return { invoiceId: String(invoice.id), invoiceNumber, paymentNumber: payment?.paymentNumber ?? null };
