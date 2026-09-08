@@ -74,6 +74,7 @@ type WorkflowPayload = {
 };
 
 type ProfitAllocationRow = {
+  id: string;
   allocated_at: string | null;
   quantity: number | string | null;
   unit_cost: number | string | null;
@@ -85,6 +86,26 @@ type ProfitAllocationRow = {
     | { invoice_quantity?: number | string | null; line_total?: number | string | null }[]
     | null;
 };
+
+type ExpenseRow = {
+  id: string;
+  expense_date: string | null;
+  total_paid: number | string | null;
+};
+
+async function fetchAllPages<T>(
+  fetchPage: (from: number, to: number) => Promise<{ data: T[]; error: { message: string } | null }>,
+) {
+  const pageSize = 1000;
+  const rows: T[] = [];
+
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await fetchPage(from, from + pageSize - 1);
+    if (error) throw new Error(`Unable to load dashboard profit data: ${error.message}`);
+    rows.push(...data);
+    if (data.length < pageSize) return rows;
+  }
+}
 
 function firstRelated<T>(value: T | T[] | null | undefined) {
   return Array.isArray(value) ? value[0] : value ?? null;
@@ -262,20 +283,30 @@ export default async function DashboardPage() {
         .from("stock_balances")
         .select("product_id, quantity_on_hand, available_quantity, total_inventory_value, reorder_status")
         .eq("business_id", businessId),
-      admin
-        .from("sales_source_allocations")
-        .select("allocated_at, quantity, unit_cost, total_cost, sale_unit_price, sale_value, sales_invoice_items(invoice_quantity, line_total)")
-        .eq("business_id", businessId)
-        .gte("allocated_at", yearStartIso)
-        .lt("allocated_at", tomorrowIso)
-        .limit(5000),
-      admin
-        .from("expenses")
-        .select("expense_date, total_paid, amount, tax_amount, expense_category, payee, created_at")
-        .eq("business_id", businessId)
-        .gte("expense_date", yearStartDate)
-        .lte("expense_date", today)
-        .limit(5000),
+      fetchAllPages<ProfitAllocationRow>(async (from, to) => {
+        const result = await admin
+          .from("sales_source_allocations")
+          .select("id, allocated_at, quantity, unit_cost, total_cost, sale_unit_price, sale_value, sales_invoice_items(invoice_quantity, line_total)")
+          .eq("business_id", businessId)
+          .gte("allocated_at", yearStartIso)
+          .lt("allocated_at", tomorrowIso)
+          .order("allocated_at", { ascending: true })
+          .order("id", { ascending: true })
+          .range(from, to);
+        return { data: (result.data ?? []) as ProfitAllocationRow[], error: result.error };
+      }),
+      fetchAllPages<ExpenseRow>(async (from, to) => {
+        const result = await admin
+          .from("expenses")
+          .select("id, expense_date, total_paid")
+          .eq("business_id", businessId)
+          .gte("expense_date", yearStartDate)
+          .lte("expense_date", today)
+          .order("expense_date", { ascending: true })
+          .order("id", { ascending: true })
+          .range(from, to);
+        return { data: (result.data ?? []) as ExpenseRow[], error: result.error };
+      }),
       admin
         .from("workflow_records")
         .select("module_name, process_name, document_name, reference_number, record_payload, created_at")
@@ -355,8 +386,8 @@ export default async function DashboardPage() {
       quickAction: record.module_name === "Sales" ? "Open sales" : record.module_name === "Purchasing" ? "Open purchases" : "Open record",
     }));
 
-    const profitRows = (profitAllocationsResult.data ?? []) as ProfitAllocationRow[];
-    const expenseRows = (expensesResult.data ?? []) as { expense_date: string | null; total_paid: number | string | null }[];
+    const profitRows = profitAllocationsResult;
+    const expenseRows = expensesResult;
     expensesToday = expenseTotalForPeriod(expenseRows, today, today);
     expensesWeek = expenseTotalForPeriod(expenseRows, weekStartDate, today);
     expensesMonth = expenseTotalForPeriod(expenseRows, monthStartDate, today);
