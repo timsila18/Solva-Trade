@@ -93,7 +93,7 @@ const ownerReportCards = [
     question: "What do I need for VAT?",
     report: "KRA ETR Sales Report",
     category: "Tax",
-    description: "VAT-ready sales from the 1st to 19th for return preparation before the 20th.",
+    description: "VAT-ready sales for a date range selected by the accountant.",
     icon: FileText,
   },
 ] as const;

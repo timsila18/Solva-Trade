@@ -2281,14 +2281,17 @@ function monthKey(value: string | null | undefined) {
   return new Intl.DateTimeFormat("en-KE", { month: "short", year: "numeric", timeZone: "Africa/Nairobi" }).format(new Date(`${dateKey(value)}T00:00:00.000Z`));
 }
 
-function kraEtrMonthlyWindow() {
+function kraEtrReportWindow(searchParams?: URLSearchParams) {
+  const selected = salesPeriodWindow(null, searchParams);
+  if (cleanDateParam(searchParams?.get("from")) || cleanDateParam(searchParams?.get("to"))) return selected;
+
   const today = todayIsoDate();
-  const [year, month] = today.split("-");
-  return {
-    label: `1-${19} ${new Intl.DateTimeFormat("en-KE", { month: "long", year: "numeric", timeZone: "Africa/Nairobi" }).format(new Date(`${year}-${month}-01T00:00:00.000Z`))}`,
-    start: `${year}-${month}-01`,
-    end: `${year}-${month}-19`,
-  };
+  const firstOfThisMonth = new Date(`${today.slice(0, 7)}-01T00:00:00.000Z`);
+  const lastOfPreviousMonth = new Date(firstOfThisMonth);
+  lastOfPreviousMonth.setUTCDate(0);
+  const start = `${lastOfPreviousMonth.getUTCFullYear()}-${String(lastOfPreviousMonth.getUTCMonth() + 1).padStart(2, "0")}-01`;
+  const end = lastOfPreviousMonth.toISOString().slice(0, 10);
+  return { label: `${start} to ${end}`, start, end };
 }
 
 function quarterKey(value: string | null | undefined) {
@@ -2391,12 +2394,12 @@ async function salesOperationalData(searchParams?: URLSearchParams) {
   };
 }
 
-async function kraEtrSalesReportLines(): Promise<ReportLine[]> {
+async function kraEtrSalesReportLines(searchParams?: URLSearchParams): Promise<ReportLine[]> {
   const businessId = await activeReportBusinessId();
   if (!businessId) return [];
 
   const supabase = await createSupabaseServerClient();
-  const period = kraEtrMonthlyWindow();
+  const period = kraEtrReportWindow(searchParams);
   const [{ data: invoices }, { data: taxConfig }] = await Promise.all([
     supabase
       .from("sales_invoices")
@@ -2434,7 +2437,7 @@ async function kraEtrSalesReportLines(): Promise<ReportLine[]> {
         lineTotal: 0,
         warehouse: "Tax workspace",
         batch: period.label,
-        notes: "Post sales invoices for customers with KRA PINs dated within the 1st to 19th VAT-preparation window to populate this report.",
+        notes: "Post sales invoices for customers with KRA PINs dated within the selected VAT period to populate this report.",
         details: {
           "Sr. No": "-",
           "Customer KRA PIN": "No KRA PIN customer sales",
@@ -4130,15 +4133,15 @@ function blueprintFromTerms(report: Report): DocumentBlueprint {
       accent: "#1455D9",
       soft: "#EEF6FF",
       label: "KRA ETR monthly sales register",
-      table: "ETR sales from the 1st to 19th for VAT return preparation",
+      table: "ETR sales for the selected VAT return period",
       intro: [
-        ["VAT Period", "Sales dated from the 1st to the 19th, ready for review before the 20th filing deadline.", "meta"],
+        ["VAT Period", "Sales dated within the period selected by the accountant.", "meta"],
         ["Taxpayer", "Tenant KRA PIN, customer PINs and configured ETR/eTIMS device reference.", "party"],
         ["Control Note", "Use this report to reconcile ETR sales before filing VAT. It does not submit to KRA automatically.", "note"],
       ],
       headers: ["Sr. No", "Customer KRA PIN", "Customer Name", "KRA Device No.", "Invoice Date", "CUI Invoice No.", "Item Description", "Exclusive Amount", "VAT", "Inclusive Amount"],
       signatures: ["Prepared by", "Tax review", "Owner approval"],
-      footerNote: "This KRA ETR sales report supports monthly VAT preparation for sales dated 1st to 19th. Confirm CUI and device details before filing on the 20th.",
+      footerNote: "This KRA ETR sales report supports VAT preparation for the selected period. Confirm CUI and device details before filing.",
       emphasis: "control",
     };
   }
@@ -4480,7 +4483,7 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
           : isFinancialStatementReport(moduleName, processName)
           ? await financialStatementReportLines(processName)
           : isKraEtrSalesReport(moduleName, processName)
-            ? await kraEtrSalesReportLines()
+            ? await kraEtrSalesReportLines(searchParams)
             : isExpenseOperationalReport(moduleName, processName)
               ? await expenseOperationalReportLines(processName)
             : isSalesOperationalReport(moduleName, processName)
@@ -4627,7 +4630,7 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
       processStatus = "Live sales report from posted invoices, invoice items, customers and source-cost allocations";
       sourceAuditNote = "Sales report values come from posted invoices, invoice items, customers, branches and FIFO/source-cost allocations where available.";
     } else if (isKraEtrSalesReport(moduleName, processName)) {
-      const period = kraEtrMonthlyWindow();
+      const period = kraEtrReportWindow(searchParams);
       processStatus = "Live KRA ETR sales register for VAT preparation";
       sourceAuditNote = `KRA ETR rows come from posted sales invoice items dated ${period.start} to ${period.end}, customer KRA PINs, tenant tax device settings and recorded external CUI references where available.`;
     } else if (isExpenseOperationalReport(moduleName, processName)) {

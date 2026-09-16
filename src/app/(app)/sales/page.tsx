@@ -107,10 +107,23 @@ function todayIsoDate() {
   return `${value.year}-${value.month}-${value.day}`;
 }
 
-function kraEtrWindowLabel(today: string) {
-  const date = new Date(`${today.slice(0, 7)}-01T00:00:00+03:00`);
-  const month = new Intl.DateTimeFormat("en-KE", { month: "long", year: "numeric", timeZone: "Africa/Nairobi" }).format(date);
-  return `1 to 19 ${month}`;
+function previousMonthWindow(today: string) {
+  const firstOfThisMonth = new Date(`${today.slice(0, 7)}-01T00:00:00+03:00`);
+  const lastOfPreviousMonth = new Date(firstOfThisMonth);
+  lastOfPreviousMonth.setDate(0);
+  const firstOfPreviousMonth = new Date(lastOfPreviousMonth);
+  firstOfPreviousMonth.setDate(1);
+  const format = (date: Date) => {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      day: "2-digit",
+      month: "2-digit",
+      timeZone: "Africa/Nairobi",
+      year: "numeric",
+    }).formatToParts(date);
+    const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    return `${value.year}-${value.month}-${value.day}`;
+  };
+  return { from: format(firstOfPreviousMonth), to: format(lastOfPreviousMonth) };
 }
 
 function customerName(invoice: SalesInvoiceRow) {
@@ -298,7 +311,7 @@ export default async function SalesPage({
   ]);
   const today = todayIsoDate();
   const monthStart = `${today.slice(0, 7)}-01`;
-  const kraWindow = kraEtrWindowLabel(today);
+  const vatPeriod = previousMonthWindow(today);
   const activeInvoices = invoices.filter((invoice) => !isReversedSale(invoice));
   const invoicesNeedingFollowUp = activeInvoices.filter((invoice) => asNumber(invoice.balance_due) > 0).sort(newestInvoiceFirst);
   const storyCards = [
@@ -468,7 +481,7 @@ export default async function SalesPage({
           <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
             <p className="text-sm font-semibold text-rose-700">Accountant VAT Report</p>
             <h2 className="mt-1 text-xl font-semibold text-slate-950">KRA PIN sales</h2>
-            <p className="mt-2 text-sm leading-6 text-slate-600">Sales to customers with KRA PINs for {kraWindow}.</p>
+            <p className="mt-2 text-sm leading-6 text-slate-600">Choose the VAT reporting dates before generating.</p>
             <a
               href="#vat-filing-report"
               className="mt-4 inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-slate-950 px-5 text-sm font-semibold text-white"
@@ -584,18 +597,22 @@ export default async function SalesPage({
             <p className="text-sm font-semibold text-rose-700">Accountant VAT report</p>
             <h2 className="mt-1 text-xl font-semibold text-slate-950">KRA ETR sales for VAT filing</h2>
             <p className="mt-2 text-sm leading-6 text-slate-600">
-              Includes only sales to customers with KRA PINs for {kraWindow}, ready for the accountant before the 20th.
+              Includes sales to customers with KRA PINs within the dates selected by the accountant.
             </p>
           </div>
           <Link href="/reports" className="text-sm font-semibold text-[var(--solva-blue-700)]">Full report centre</Link>
         </div>
-        <form action="/api/exports" className="mt-4 flex flex-col gap-3 rounded-md bg-slate-50 p-4 md:flex-row md:items-end md:justify-between">
+        <form action="/api/exports" className="mt-4 grid gap-3 rounded-md bg-slate-50 p-4 md:grid-cols-[1fr_1fr_auto] md:items-end">
           <input type="hidden" name="module" value="Tax" />
           <input type="hidden" name="process" value="KRA ETR Sales Report" />
-          <div>
-            <p className="text-sm font-semibold text-slate-700">VAT preparation period</p>
-            <p className="mt-1 text-lg font-semibold text-slate-950">{kraWindow}</p>
-          </div>
+          <label className="text-sm font-semibold text-slate-700">
+            From
+            <input name="from" type="date" defaultValue={vatPeriod.from} required className="mt-2 min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-sm" />
+          </label>
+          <label className="text-sm font-semibold text-slate-700">
+            To
+            <input name="to" type="date" defaultValue={vatPeriod.to} required className="mt-2 min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-sm" />
+          </label>
           <div className="grid gap-2 sm:grid-cols-3 md:min-w-72">
             <button name="format" value="pdf" className="min-h-11 rounded-md bg-[var(--solva-blue-700)] px-4 text-sm font-semibold text-white">PDF</button>
             <button name="format" value="excel" className="min-h-11 rounded-md border border-cyan-200 bg-cyan-50 px-4 text-sm font-semibold text-[var(--solva-blue-700)]">Excel</button>
