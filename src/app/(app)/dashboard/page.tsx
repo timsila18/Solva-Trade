@@ -75,16 +75,17 @@ type WorkflowPayload = {
 
 type ProfitAllocationRow = {
   id: string;
-  allocated_at: string | null;
+  sales_invoice_id: string;
   quantity: number | string | null;
   unit_cost: number | string | null;
-  sale_value: number | string | null;
-  sale_unit_price: number | string | null;
   total_cost: number | string | null;
-  sales_invoice_items?:
-    | { invoice_quantity?: number | string | null; line_total?: number | string | null }
-    | { invoice_quantity?: number | string | null; line_total?: number | string | null }[]
-    | null;
+};
+
+type ProfitInvoiceRow = {
+  id: string;
+  invoice_date: string | null;
+  total_amount: number | string | null;
+  status: string | null;
 };
 
 type ExpenseRow = {
@@ -107,50 +108,39 @@ async function fetchAllPages<T>(
   }
 }
 
-function firstRelated<T>(value: T | T[] | null | undefined) {
-  return Array.isArray(value) ? value[0] : value ?? null;
-}
-
-function allocationSaleValue(row: ProfitAllocationRow) {
-  const invoiceItem = firstRelated(row.sales_invoice_items);
-  const itemQuantity = numeric(invoiceItem?.invoice_quantity);
-  const itemTotal = numeric(invoiceItem?.line_total);
-  if (itemQuantity > 0 && itemTotal > 0) return numeric(row.quantity) * (itemTotal / itemQuantity);
-  return numeric(row.sale_value) || numeric(row.quantity) * numeric(row.sale_unit_price);
-}
-
 function workflowAmount(payload: WorkflowPayload | null | undefined) {
   const fields = payload?.fields ?? {};
   return numeric(fields.total?.value ?? fields.amount?.value ?? fields.subtotal?.value);
 }
 
-function startOfWeekIso(today: string) {
-  const date = new Date(`${today}T00:00:00+03:00`);
+function startOfWeekDate(today: string) {
+  const date = new Date(`${today}T12:00:00.000Z`);
   const day = date.getUTCDay();
   const daysFromMonday = day === 0 ? 6 : day - 1;
   date.setUTCDate(date.getUTCDate() - daysFromMonday);
-  return date.toISOString();
-}
-
-function startOfYearIso(today: string) {
-  const year = today.slice(0, 4);
-  return new Date(`${year}-01-01T00:00:00+03:00`).toISOString();
+  return date.toISOString().slice(0, 10);
 }
 
 function startOfMonthDate(today: string) {
   return `${today.slice(0, 7)}-01`;
 }
 
-function profitForPeriod(rows: ProfitAllocationRow[], startIso: string, endIso: string) {
-  return rows
-    .filter((row) => {
-      const value = String(row.allocated_at ?? "");
-      return value >= startIso && value < endIso;
+function profitForPeriod(
+  invoices: ProfitInvoiceRow[],
+  costByInvoice: Map<string, number>,
+  startDate: string,
+  endDate: string,
+) {
+  return invoices
+    .filter((invoice) => {
+      const status = String(invoice.status ?? "").toLowerCase();
+      const date = String(invoice.invoice_date ?? "");
+      return !["draft", "reversed", "cancelled"].includes(status) && date >= startDate && date <= endDate;
     })
-    .reduce((sum, row) => {
-      const saleValue = allocationSaleValue(row);
-      const cost = numeric(row.total_cost) || numeric(row.quantity) * numeric(row.unit_cost);
-      return sum + saleValue - cost;
+    .reduce((sum, invoice) => {
+      // Only recognize profit where the received-stock FIFO cost is recorded.
+      if (!costByInvoice.has(invoice.id)) return sum;
+      return sum + numeric(invoice.total_amount) - (costByInvoice.get(invoice.id) ?? 0);
     }, 0);
 }
 
@@ -222,12 +212,10 @@ export default async function DashboardPage() {
   tomorrow.setDate(tomorrow.getDate() + 1);
   const tomorrowIso = tomorrow.toISOString();
   const todayStartIso = new Date(`${today}T00:00:00+03:00`).toISOString();
-  const weekStartIso = startOfWeekIso(today);
-  const yearStartIso = startOfYearIso(today);
-  const weekStartDate = weekStartIso.slice(0, 10);
+  const weekStartDate = startOfWeekDate(today);
   const monthStartDate = startOfMonthDate(today);
-  const monthStartIso = new Date(`${monthStartDate}T00:00:00+03:00`).toISOString();
   const yearStartDate = today.slice(0, 4) + "-01-01";
+  const yearStartIso = new Date(`${yearStartDate}T00:00:00+03:00`).toISOString();
   let todaySales = 0;
   let todayInvoiceCount = 0;
   let cashCollected = 0;
@@ -263,10 +251,27 @@ export default async function DashboardPage() {
       expensesResult,
       workflowResult,
     ] = await Promise.all([
-      admin
-        .from("sales_invoices")
-        .select("id, invoice_number, invoice_date, subtotal, tax_total, total_amount, amount_paid, balance_due, status, created_at")
-        .eq("business_id", businessId),
+      fetchAllPages<{
+        id: string;
+        invoice_number: string | null;
+        invoice_date: string | null;
+        subtotal: number | string | null;
+        tax_total: number | string | null;
+        total_amount: number | string | null;
+        amount_paid: number | string | null;
+        balance_due: number | string | null;
+        status: string | null;
+        created_at: string;
+      }>(async (from, to) => {
+        const result = await admin
+          .from("sales_invoices")
+          .select("id, invoice_number, invoice_date, subtotal, tax_total, total_amount, amount_paid, balance_due, status, created_at")
+          .eq("business_id", businessId)
+          .order("created_at", { ascending: true })
+          .order("id", { ascending: true })
+          .range(from, to);
+        return { data: result.data ?? [], error: result.error };
+      }),
       admin
         .from("customer_payments")
         .select("id, payment_number, payment_date, amount_received, status, created_at")
@@ -286,7 +291,7 @@ export default async function DashboardPage() {
       fetchAllPages<ProfitAllocationRow>(async (from, to) => {
         const result = await admin
           .from("sales_source_allocations")
-          .select("id, allocated_at, quantity, unit_cost, total_cost, sale_unit_price, sale_value, sales_invoice_items(invoice_quantity, line_total)")
+          .select("id, sales_invoice_id, quantity, unit_cost, total_cost")
           .eq("business_id", businessId)
           .gte("allocated_at", yearStartIso)
           .lt("allocated_at", tomorrowIso)
@@ -315,7 +320,7 @@ export default async function DashboardPage() {
         .limit(20),
     ]);
 
-    const invoices = (invoicesResult.data ?? []).filter((invoice) => {
+    const invoices = invoicesResult.filter((invoice) => {
       const status = String(invoice.status ?? "").toLowerCase();
       return status !== "reversed" && status !== "cancelled";
     });
@@ -386,17 +391,21 @@ export default async function DashboardPage() {
       quickAction: record.module_name === "Sales" ? "Open sales" : record.module_name === "Purchasing" ? "Open purchases" : "Open record",
     }));
 
-    const profitRows = profitAllocationsResult;
+    const costByInvoice = new Map<string, number>();
+    for (const allocation of profitAllocationsResult) {
+      const cost = numeric(allocation.total_cost) || numeric(allocation.quantity) * numeric(allocation.unit_cost);
+      costByInvoice.set(allocation.sales_invoice_id, (costByInvoice.get(allocation.sales_invoice_id) ?? 0) + cost);
+    }
     const expenseRows = expensesResult;
     expensesToday = expenseTotalForPeriod(expenseRows, today, today);
     expensesWeek = expenseTotalForPeriod(expenseRows, weekStartDate, today);
     expensesMonth = expenseTotalForPeriod(expenseRows, monthStartDate, today);
     expensesYear = expenseTotalForPeriod(expenseRows, yearStartDate, today);
     expenseCountToday = expenseRows.filter((row) => String(row.expense_date ?? "") === today).length;
-    todayProfit = profitForPeriod(profitRows, todayStartIso, tomorrowIso) - expensesToday;
-    weekProfit = profitForPeriod(profitRows, weekStartIso, tomorrowIso) - expensesWeek;
-    monthProfit = profitForPeriod(profitRows, monthStartIso, tomorrowIso) - expensesMonth;
-    annualProfit = profitForPeriod(profitRows, yearStartIso, tomorrowIso) - expensesYear;
+    todayProfit = profitForPeriod(invoices, costByInvoice, today, today) - expensesToday;
+    weekProfit = profitForPeriod(invoices, costByInvoice, weekStartDate, today) - expensesWeek;
+    monthProfit = profitForPeriod(invoices, costByInvoice, monthStartDate, today) - expensesMonth;
+    annualProfit = profitForPeriod(invoices, costByInvoice, yearStartDate, today) - expensesYear;
   }
 
   const profitPin = businessName.toLowerCase().includes("cymereg") ? "2027" : "2027";
