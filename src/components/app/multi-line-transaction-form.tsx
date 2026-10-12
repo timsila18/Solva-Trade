@@ -305,7 +305,22 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
             <input
               type="search"
               value={partySearch}
-              onChange={(event) => setPartySearch(event.currentTarget.value)}
+              onChange={(event) => {
+                const nextSearch = event.currentTarget.value;
+                setPartySearch(nextSearch);
+                const selectedParty = partyOptions.find((party) => party.id === selectedPartyId);
+                if (selectedParty && normalizeSearch(nextSearch) !== normalizeSearch(selectedParty.name)) {
+                  setSelectedPartyId("");
+                }
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" || !partySearch.trim() || !filteredPartyOptions.length) return;
+                event.preventDefault();
+                const firstMatch = filteredPartyOptions[0];
+                setSelectedPartyId(firstMatch.id);
+                setPartySearch(firstMatch.name);
+                setNewCustomerName("");
+              }}
               placeholder={`Search saved ${partyLabel.toLowerCase()}`}
               className="w-full rounded-md border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm font-normal"
             />
@@ -329,7 +344,7 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
           </select>
           {partySearch.trim() ? (
             <div className="max-h-44 overflow-y-auto rounded-md border border-slate-200 bg-white p-1 shadow-sm">
-              {filteredPartyOptions.slice(0, 8).map((party) => (
+              {filteredPartyOptions.slice(0, 20).map((party) => (
                 <button
                   key={party.id}
                   type="button"

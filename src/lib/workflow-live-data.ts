@@ -125,6 +125,21 @@ export async function getSalesWorkflowLookups(): Promise<SalesWorkflowLookups> {
   if (!businessId) return { customers: [], products: [], unpaidInvoices: [], suppliers: [] };
 
   const admin = await createSupabaseServerClient();
+  const [{ data: branch }, { data: warehouse }] = await Promise.all([
+    admin.from("branches").select("id").eq("business_id", businessId).eq("active", true).order("is_default", { ascending: false }).limit(1).maybeSingle(),
+    admin
+      .from("warehouses")
+      .select("id")
+      .eq("business_id", businessId)
+      .eq("active", true)
+      .eq("allow_sales_dispatch", true)
+      .order("is_default", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+  let balanceQuery = admin.from("stock_balances").select("product_id, available_quantity").eq("business_id", businessId);
+  if (branch?.id) balanceQuery = balanceQuery.eq("branch_id", branch.id);
+  if (warehouse?.id) balanceQuery = balanceQuery.eq("warehouse_id", warehouse.id);
   const [{ data: customers }, { data: products }, { data: balances }, { data: invoices }, { data: suppliers }] = await Promise.all([
     admin
       .from("customers")
@@ -132,7 +147,7 @@ export async function getSalesWorkflowLookups(): Promise<SalesWorkflowLookups> {
       .eq("business_id", businessId)
       .eq("active", true)
       .order("customer_name", { ascending: true })
-      .limit(200),
+      .limit(1000),
     admin
       .from("products")
       .select("id, product_name, product_code, sku, track_inventory, default_selling_price_placeholder, default_sales_tax_id, vat_status, tax_category")
@@ -141,7 +156,7 @@ export async function getSalesWorkflowLookups(): Promise<SalesWorkflowLookups> {
       .eq("archived", false)
       .order("product_name", { ascending: true })
       .limit(300),
-    admin.from("stock_balances").select("product_id, available_quantity").eq("business_id", businessId),
+    balanceQuery,
     admin
       .from("sales_invoices")
       .select("id, invoice_number, customer_id, total_amount, balance_due, customers(customer_name)")

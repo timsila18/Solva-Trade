@@ -627,47 +627,61 @@ async function postSalesInvoice(formData: FormData, userId: string, fallbackBusi
   const items: { id: string; product_id: string }[] = [];
   for (const chunk of chunkArray(invoiceItems)) {
     const { data: chunkItems, error: itemError } = await admin.from("sales_invoice_items").insert(chunk).select("id, product_id");
-    if (itemError || !chunkItems?.length) throw new Error(itemError?.message ?? "Could not post invoice items.");
+    if (itemError || !chunkItems?.length) {
+      await admin.from("sales_invoices").delete().eq("business_id", businessId).eq("id", invoice.id);
+      throw new Error(itemError?.message ?? "Could not post invoice items.");
+    }
     items.push(...(chunkItems as { id: string; product_id: string }[]));
   }
 
   const trackedLines = lines
     .map((line, linePosition) => ({ line, linePosition, product: productsById.get(line.productId) }))
     .filter(({ product }) => product?.track_inventory);
-  const movementWork = await Promise.all(
+  const preparedMovements = await Promise.all(
     trackedLines.map(async ({ line, linePosition, product }) => {
       const unitCost = Number(product?.standard_cost ?? 0);
       const lineSource = await sourceOverrideForSaleLine(admin, businessId, line.sourceChoice, saleSourceOverride, saleSourceSupplierId, saleSourceSupplierName);
-      const { data: movement, error: movementError } = await admin.from("stock_movements").insert({
-        business_id: businessId,
-        branch_id: branchId,
-        warehouse_id: warehouseId,
-        product_id: line.productId,
-        movement_type: "sale",
-        direction: "out",
-        quantity_base: line.quantity,
-        display_quantity: line.quantity,
-        unit_conversion_factor: 1,
-        unit_cost: unitCost,
-        total_cost: unitCost * line.quantity,
-        reference_document_type: "sales_invoice",
-        reference_document_id: invoice.id,
-        reference_number: invoiceNumber,
-        reason: "Sale submitted from Solva Trade workflow",
-        source_type: lineSource.sourceType || null,
-        source_supplier_id: lineSource.supplierId,
-        source_supplier_name: lineSource.supplierName,
-        created_by: userId,
-      }).select("id").single();
-      if (movementError || !movement) throw new Error(movementError?.message ?? "Could not post stock movement.");
-      return { line, linePosition, unitCost, lineSource, movementId: String(movement.id) };
+      const invoiceItem = items[linePosition] ?? items.find((item) => String(item.product_id) === line.productId);
+      if (!invoiceItem?.id) throw new Error("Could not match a posted invoice item to its stock movement.");
+      return { line, unitCost, lineSource, invoiceItem };
     }),
   );
 
+  const movementPayloads = preparedMovements.map(({ line, unitCost, lineSource }) => ({
+    business_id: businessId,
+    branch_id: branchId,
+    warehouse_id: warehouseId,
+    product_id: line.productId,
+    movement_type: "sale",
+    direction: "out",
+    quantity_base: line.quantity,
+    display_quantity: line.quantity,
+    unit_conversion_factor: 1,
+    unit_cost: unitCost,
+    total_cost: unitCost * line.quantity,
+    reference_document_type: "sales_invoice",
+    reference_document_id: invoice.id,
+    reference_number: invoiceNumber,
+    reason: "Sale submitted from Solva Trade workflow",
+    source_type: lineSource.sourceType || "unspecified",
+    source_supplier_id: lineSource.supplierId,
+    source_supplier_name: lineSource.supplierName,
+    created_by: userId,
+  }));
+  const movementWork: Array<(typeof preparedMovements)[number] & { movementId: string }> = [];
+  if (movementPayloads.length) {
+    const { data: movements, error: movementError } = await admin.from("stock_movements").insert(movementPayloads).select("id");
+    if (movementError || movements?.length !== movementPayloads.length) {
+      await admin.from("sales_invoices").delete().eq("business_id", businessId).eq("id", invoice.id);
+      throw new Error(movementError?.message ?? "Could not post every stock movement for this sale. No invoice was saved.");
+    }
+    preparedMovements.forEach((prepared, index) => {
+      movementWork.push({ ...prepared, movementId: String(movements[index].id) });
+    });
+  }
+
   await Promise.all(
-    movementWork.map(async ({ line, linePosition, unitCost, lineSource, movementId }) => {
-      const invoiceItem = items[linePosition] ?? items.find((item) => String(item.product_id) === line.productId);
-      if (!invoiceItem?.id) throw new Error("Could not match a posted invoice item to its stock movement.");
+    movementWork.map(async ({ line, unitCost, lineSource, invoiceItem, movementId }) => {
       const saleUnitPrice = line.quantity > 0 ? line.lineTotal / line.quantity : 0;
       const { error: allocationError } = await (admin as SolvaRpcClient).rpc("allocate_sale_fifo_source", {
         target_business_id: businessId,
