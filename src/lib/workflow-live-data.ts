@@ -55,69 +55,39 @@ async function currentBusinessId() {
   );
 }
 
-async function vatRateForProduct(
+async function loadProductTaxes(
   admin: Awaited<ReturnType<typeof createSupabaseServerClient>>,
   businessId: string,
-  product: { id: string; default_sales_tax_id: string | null; vat_status: string | null; tax_category: string | null },
 ) {
-  const treatment = `${product.vat_status ?? product.tax_category ?? ""}`.toLowerCase();
-  if (/(zero|exempt|out|none|no tax)/.test(treatment)) return { rate: 0, code: product.vat_status ?? product.tax_category ?? "NO_VAT" };
-
-  if (product.default_sales_tax_id) {
-    const today = new Date().toISOString().slice(0, 10);
-    const { data } = await admin
-      .from("tax_rates")
-      .select("tax_code, rate")
-      .eq("id", product.default_sales_tax_id)
-      .eq("active", true)
-      .lte("effective_start_date", today)
-      .or(`effective_end_date.is.null,effective_end_date.gte.${today}`)
-      .maybeSingle();
-    if (data) return { rate: Number(data.rate ?? 0), code: String(data.tax_code ?? "VAT_STD") };
+  const today = new Date().toISOString().slice(0, 10);
+  const [rates, mappings, codes] = await Promise.all([
+    admin.from("tax_rates").select("id, tax_code, rate").eq("business_id", businessId).eq("active", true)
+      .lte("effective_start_date", today).or(`effective_end_date.is.null,effective_end_date.gte.${today}`),
+    admin.from("product_tax_mappings").select("product_id, sales_vat_code_id").eq("business_id", businessId)
+      .eq("active", true).not("product_id", "is", null).order("precedence", { ascending: true }),
+    admin.from("vat_codes").select("id, business_id, vat_code, rate").or(`business_id.eq.${businessId},business_id.is.null`)
+      .eq("active", true).order("effective_start_date", { ascending: false }),
+  ]);
+  for (const result of [rates, mappings, codes]) {
+    if (result.error) throw new Error(`Could not load product tax settings. ${result.error.message}`);
   }
-
-  const { data: mapping } = await admin
-    .from("product_tax_mappings")
-    .select("sales_vat_code_id")
-    .eq("business_id", businessId)
-    .eq("product_id", product.id)
-    .eq("active", true)
-    .order("precedence", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
-  if (mapping?.sales_vat_code_id) {
-    const { data } = await admin
-      .from("vat_codes")
-      .select("vat_code, rate")
-      .eq("id", mapping.sales_vat_code_id)
-      .eq("active", true)
-      .maybeSingle();
-    if (data) return { rate: Number(data.rate ?? 0), code: String(data.vat_code ?? "VAT_STD") };
+  const rateById = new Map((rates.data ?? []).map((rate) => [String(rate.id), rate]));
+  const codeById = new Map((codes.data ?? []).map((code) => [String(code.id), code]));
+  const mappingByProduct = new Map<string, string | null>();
+  for (const mapping of mappings.data ?? []) {
+    if (!mappingByProduct.has(String(mapping.product_id))) mappingByProduct.set(String(mapping.product_id), mapping.sales_vat_code_id);
   }
-
-  const { data: businessVat } = await admin
-    .from("vat_codes")
-    .select("vat_code, rate")
-    .eq("business_id", businessId)
-    .eq("vat_code", "VAT_STD")
-    .eq("active", true)
-    .order("effective_start_date", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (businessVat) return { rate: Number(businessVat.rate ?? 0), code: String(businessVat.vat_code ?? "VAT_STD") };
-
-  const { data: globalVat } = await admin
-    .from("vat_codes")
-    .select("vat_code, rate")
-    .is("business_id", null)
-    .eq("vat_code", "VAT_STD")
-    .eq("active", true)
-    .order("effective_start_date", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  return { rate: Number(globalVat?.rate ?? 16), code: String(globalVat?.vat_code ?? "VAT_STD") };
+  const fallback = codes.data?.find((code) => code.business_id === businessId && code.vat_code === "VAT_STD")
+    ?? codes.data?.find((code) => code.business_id === null && code.vat_code === "VAT_STD");
+  return (product: { id: string; default_sales_tax_id: string | null; vat_status: string | null; tax_category: string | null }) => {
+    const treatment = `${product.vat_status ?? product.tax_category ?? ""}`.toLowerCase();
+    if (/(zero|exempt|out|none|no tax)/.test(treatment)) return { rate: 0, code: product.vat_status ?? product.tax_category ?? "NO_VAT" };
+    const direct = rateById.get(product.default_sales_tax_id ?? "");
+    if (direct) return { rate: Number(direct.rate ?? 0), code: String(direct.tax_code ?? "VAT_STD") };
+    const mapped = codeById.get(mappingByProduct.get(product.id) ?? "");
+    const resolved = mapped ?? fallback;
+    return { rate: Number(resolved?.rate ?? 16), code: String(resolved?.vat_code ?? "VAT_STD") };
+  };
 }
 
 export async function getSalesWorkflowLookups(): Promise<SalesWorkflowLookups> {
@@ -125,7 +95,7 @@ export async function getSalesWorkflowLookups(): Promise<SalesWorkflowLookups> {
   if (!businessId) return { customers: [], products: [], unpaidInvoices: [], suppliers: [] };
 
   const admin = await createSupabaseServerClient();
-  const [{ data: branch }, { data: warehouse }] = await Promise.all([
+  const [{ data: branch }, { data: warehouse }, taxForProduct] = await Promise.all([
     admin.from("branches").select("id").eq("business_id", businessId).eq("active", true).order("is_default", { ascending: false }).limit(1).maybeSingle(),
     admin
       .from("warehouses")
@@ -136,6 +106,7 @@ export async function getSalesWorkflowLookups(): Promise<SalesWorkflowLookups> {
       .order("is_default", { ascending: false })
       .limit(1)
       .maybeSingle(),
+    loadProductTaxes(admin, businessId),
   ]);
   let balanceQuery = admin.from("stock_balances").select("product_id, available_quantity").eq("business_id", businessId);
   if (branch?.id) balanceQuery = balanceQuery.eq("branch_id", branch.id);
@@ -179,26 +150,24 @@ export async function getSalesWorkflowLookups(): Promise<SalesWorkflowLookups> {
     stockByProduct.set(String(row.product_id), (stockByProduct.get(String(row.product_id)) ?? 0) + Number(row.available_quantity ?? 0));
   }
 
-  const productLookups = await Promise.all(
-    (products ?? []).map(async (product) => {
-      const tax = await vatRateForProduct(admin, businessId, {
-        id: product.id,
-        default_sales_tax_id: product.default_sales_tax_id,
-        vat_status: product.vat_status,
-        tax_category: product.tax_category,
-      });
-      return {
-        id: String(product.id),
-        name: String(product.product_name ?? product.sku ?? product.product_code ?? "Unnamed product"),
-        code: String(product.sku ?? product.product_code ?? ""),
-        price: Number(product.default_selling_price_placeholder ?? 0),
-        available: stockByProduct.get(String(product.id)) ?? 0,
-        vatRate: tax.rate,
-        vatCode: tax.code,
-        trackInventory: Boolean(product.track_inventory),
-      };
-    }),
-  );
+  const productLookups = (products ?? []).map((product) => {
+    const tax = taxForProduct({
+      id: product.id,
+      default_sales_tax_id: product.default_sales_tax_id,
+      vat_status: product.vat_status,
+      tax_category: product.tax_category,
+    });
+    return {
+      id: String(product.id),
+      name: String(product.product_name ?? product.sku ?? product.product_code ?? "Unnamed product"),
+      code: String(product.sku ?? product.product_code ?? ""),
+      price: Number(product.default_selling_price_placeholder ?? 0),
+      available: stockByProduct.get(String(product.id)) ?? 0,
+      vatRate: tax.rate,
+      vatCode: tax.code,
+      trackInventory: Boolean(product.track_inventory),
+    };
+  });
 
   return {
     customers: (customers ?? []).map((customer) => ({
