@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { AlertTriangle, CheckCircle2, Clock3, Eye, FileText, ReceiptText, Search, UserPlus } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock3, Eye, FileText, ReceiptText, UserPlus } from "lucide-react";
+import { CustomerInvoiceSearch } from "@/components/app/customer-invoice-search";
 import { completeProcessAction, reverseSalesInvoiceAction } from "@/app/(app)/actions";
 import { PersistedForm } from "@/components/app/persisted-form";
 import { PinProtectedSubmitButton } from "@/components/app/pin-protected-export";
@@ -162,22 +163,6 @@ function newestInvoiceFirst(a: SalesInvoiceRow, b: SalesInvoiceRow) {
 
 function normaliseSearch(value: unknown) {
   return String(value ?? "").toLowerCase().replace(/\s+/g, " ").trim();
-}
-
-function matchesSalesHistorySearch(invoice: SalesInvoiceRow, query: string) {
-  const cleanQuery = normaliseSearch(query);
-  if (!cleanQuery) return true;
-  const haystack = [
-    invoice.invoice_number,
-    invoice.invoice_date,
-    customerName(invoice),
-    Array.isArray(invoice.customers) ? invoice.customers[0]?.phone : invoice.customers?.phone,
-    invoice.total_amount,
-    invoice.amount_paid,
-  ]
-    .map(normaliseSearch)
-    .join(" ");
-  return haystack.includes(cleanQuery);
 }
 
 function receiptHref(invoice: SalesInvoiceRow) {
@@ -359,7 +344,6 @@ export default async function SalesPage({
     .map(([, collection]) => collection)
     .sort((a, b) => b.outstanding - a.outstanding);
   const completedInvoices = activeInvoices.filter((invoice) => asNumber(invoice.balance_due) <= 0).sort(newestInvoiceFirst);
-  const visibleCompletedInvoices = completedInvoices.filter((invoice) => matchesSalesHistorySearch(invoice, historyCustomerQuery));
 
   return (
     <div className="pb-24">
@@ -407,23 +391,13 @@ export default async function SalesPage({
                 <span className="rounded-full bg-white/15 px-2 py-1 text-xs">{completedInvoices.length}</span>
               </summary>
               <div className="max-h-[72vh] overflow-auto p-4">
-                <form action="/sales" className="mb-3 grid gap-2 sm:grid-cols-[1fr_auto]">
-                  <label className="relative block">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                    <input
-                      name="historyCustomer"
-                      defaultValue={historyCustomerQuery}
-                      placeholder="Search customer, invoice number, phone or amount"
-                      className="min-h-11 w-full rounded-md border border-slate-300 bg-white pl-9 pr-3 text-sm font-semibold text-slate-800"
-                    />
-                  </label>
-                  <button className="inline-flex min-h-11 items-center justify-center rounded-md bg-slate-950 px-4 text-sm font-semibold text-white">
-                    Search
-                  </button>
-                </form>
-                {visibleCompletedInvoices.length ? (
-                  <div className="grid gap-2">
-                    {visibleCompletedInvoices.map((invoice) => (
+                <CustomerInvoiceSearch label="Search Sales History" initialQuery={historyCustomerQuery}
+                  items={completedInvoices.map((invoice) => ({
+                    id: invoice.id,
+                    customerName: customerName(invoice),
+                    invoiceNumber: invoice.invoice_number ?? "",
+                    otherDetails: `${invoice.invoice_date ?? ""} ${asNumber(invoice.total_amount)} ${asNumber(invoice.amount_paid)} ${Array.isArray(invoice.customers) ? invoice.customers[0]?.phone ?? "" : invoice.customers?.phone ?? ""}`,
+                    content: (
                       <div key={invoice.id} className="grid gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div>
@@ -444,13 +418,9 @@ export default async function SalesPage({
                           </div>
                         </div>
                       </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="rounded-md bg-slate-50 p-3 text-sm text-slate-600">
-                    {completedInvoices.length ? "No paid sale matches that search." : "No paid sales are archived yet."}
-                  </p>
-                )}
+                    ),
+                  }))}
+                />
               </div>
             </details>
           </div>
@@ -695,8 +665,9 @@ export default async function SalesPage({
         </div>
 
         {invoicesNeedingFollowUp.length ? (
-          <div className="mt-4 divide-y divide-slate-200 overflow-hidden rounded-lg border border-slate-200">
-            {invoicesNeedingFollowUp.map((invoice) => {
+          <div className="mt-4">
+            <CustomerInvoiceSearch label="Search pending invoices" listClassName="divide-y divide-slate-200 overflow-hidden rounded-lg border border-slate-200"
+              items={invoicesNeedingFollowUp.map((invoice) => {
               const total = asNumber(invoice.total_amount);
               const paid = asNumber(invoice.amount_paid);
               const balance = asNumber(invoice.balance_due);
@@ -705,7 +676,7 @@ export default async function SalesPage({
               const isPartPaid = !isPaid && paid > 0;
               const age = daysSince(invoice.invoice_date);
               const shouldRemind = balance > 0 && age >= 3;
-              return (
+              return { id: invoice.id, customerName: customerName(invoice), invoiceNumber: invoice.invoice_number ?? "", otherDetails: `${invoice.invoice_date ?? ""} ${total} ${balance}`, content: (
                 <article key={invoice.id} className="grid gap-4 bg-white p-4 lg:grid-cols-[1.35fr_1fr_1.25fr] lg:items-center">
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
@@ -836,8 +807,8 @@ export default async function SalesPage({
                     ) : null}
                   </div>
                 </article>
-              );
-            })}
+              ) };
+            })} />
           </div>
         ) : (
           <div className="mt-4">
