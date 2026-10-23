@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import Link from "next/link";
 import { FileText, Printer } from "lucide-react";
 import { completeProcessAction } from "@/app/(app)/actions";
 import { MultiLineTransactionForm } from "@/components/app/multi-line-transaction-form";
@@ -100,7 +101,7 @@ export default async function PurchasingWorkflowPage({
   const { workflow } = await params;
   const config = workflows[workflow];
   if (!config) notFound();
-  const lookups = await getSalesWorkflowLookups();
+  const lookups = await getSalesWorkflowLookups({ includeCustomers: false, includeInvoices: false });
   const today = new Date().toISOString().slice(0, 10);
 
   return (
@@ -109,9 +110,9 @@ export default async function PurchasingWorkflowPage({
       <div className="mt-1 flex flex-col justify-between gap-3 md:flex-row md:items-start">
         <h1 className="text-3xl font-semibold">{config.title}</h1>
         {workflow === "goods-received" ? (
-          <a href="/purchases#grn-history" className="inline-flex min-h-10 items-center justify-center rounded-md border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm">
+          <Link href="/purchases#grn-history" className="inline-flex min-h-10 items-center justify-center rounded-md border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm">
             GRN History
-          </a>
+          </Link>
         ) : null}
       </div>
       <p className="mt-2 max-w-3xl text-slate-600">{config.description}</p>

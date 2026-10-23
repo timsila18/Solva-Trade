@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { Eye, FileText, Pencil, Phone, Search, Trash2, UserPlus } from "lucide-react";
+import { Eye, FileText, Pencil, Phone, Trash2, UserPlus } from "lucide-react";
+import { LiveRecordList } from "@/components/app/live-record-list";
 import { deleteCustomerAction } from "@/app/(app)/actions";
 import { EmptyState, MetricCard, PageHero } from "@/components/ui/premium";
 import { customerSetupSections, salesSummary } from "@/lib/sales-data";
@@ -45,21 +46,6 @@ function searchText(value: unknown) {
   return String(value ?? "").toLowerCase();
 }
 
-function matchesCustomerSearch(customer: CustomerRow, query: string) {
-  if (!query) return true;
-  const address = customer.customer_addresses?.find((item) => item.is_default) ?? customer.customer_addresses?.[0];
-  const haystack = [
-    customer.customer_name,
-    customer.customer_code,
-    customer.phone,
-    customer.email,
-    customer.kra_pin,
-    address?.town,
-    address?.delivery_instructions,
-  ].map(searchText).join(" ");
-  return haystack.includes(query);
-}
-
 async function loadCustomers() {
   const supabase = await createSupabaseServerClient();
   const { data: userData } = await supabase.auth.getUser();
@@ -75,7 +61,7 @@ async function loadCustomers() {
     .eq("active", true)
     .neq("status", "archived")
     .order("updated_at", { ascending: false })
-    .limit(200);
+    .limit(1000);
 
   return (data ?? []) as unknown as CustomerRow[];
 }
@@ -87,7 +73,7 @@ export default async function CustomersPage({
 }) {
   const params = searchParams ? await searchParams : {};
   const query = searchText(Array.isArray(params.q) ? params.q[0] : params.q).trim();
-  const customers = (await loadCustomers()).filter((customer) => matchesCustomerSearch(customer, query));
+  const customers = await loadCustomers();
   const activeCount = customers.filter((customer) => customer.active !== false && customer.status !== "archived").length;
   const customerBalance = customers.reduce((sum, customer) => sum + Math.max(0, Number(customer.current_balance ?? 0) || 0), 0);
 
@@ -126,30 +112,6 @@ export default async function CustomersPage({
         />
       </section>
 
-      <section className="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex items-center gap-3">
-          <span className="grid h-10 w-10 place-items-center rounded-md bg-emerald-50 text-emerald-800">
-            <Search className="h-5 w-5" />
-          </span>
-          <div>
-            <h2 className="font-semibold">Find a customer instantly</h2>
-            <p className="mt-1 text-sm text-slate-600">Search by name, phone, route, town or KRA PIN.</p>
-          </div>
-        </div>
-        <form className="mt-5 grid gap-3 md:grid-cols-[1fr_170px_170px]" action="/customers">
-          <input name="q" defaultValue={query} className="min-h-11 rounded-md border border-slate-300 px-3 py-2 text-sm" placeholder="Search customer, phone, route or town" />
-          <select className="min-h-11 rounded-md border border-slate-300 px-3 py-2 text-sm" defaultValue="all">
-            <option value="all">All routes</option>
-          </select>
-          <select className="min-h-11 rounded-md border border-slate-300 px-3 py-2 text-sm" defaultValue="all">
-            <option value="all">All balances</option>
-            <option value="overdue">Owes money</option>
-            <option value="packaging">Crates owed</option>
-          </select>
-          <button className="sr-only">Search</button>
-        </form>
-      </section>
-
       <section className="mt-6 grid gap-4 lg:grid-cols-[300px_1fr]">
         <aside className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
           <h2 className="px-1 font-semibold">What Solva remembers</h2>
@@ -184,8 +146,8 @@ export default async function CustomersPage({
             </div>
           </div>
           {customers.length > 0 ? (
-            <div className="mt-5 overflow-x-auto">
-              <div className="min-w-[920px]">
+            <LiveRecordList label="Search customer, code, phone, town or KRA PIN" initialQuery={query}
+              header={
                 <div className="grid grid-cols-[1.4fr_0.8fr_1fr_0.9fr_0.85fr_0.85fr_1fr] gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">
                   <span>Customer</span>
                   <span>Phone</span>
@@ -195,10 +157,10 @@ export default async function CustomersPage({
                   <span>Status</span>
                   <span className="text-right">Actions</span>
                 </div>
-                {customers.map((customer) => {
+              } items={customers.map((customer) => {
                   const address = customer.customer_addresses?.find((item) => item.is_default) ?? customer.customer_addresses?.[0];
                   const route = address?.delivery_instructions?.replace(/^Preferred route:\s*/i, "") || "-";
-                  return (
+                  return { id: customer.id, name: customer.customer_name, terms: [customer.customer_code, customer.phone, customer.email, customer.kra_pin, address?.town, route].filter((value): value is string => Boolean(value)), content: (
                     <div key={customer.id} className="grid grid-cols-[1.4fr_0.8fr_1fr_0.9fr_0.85fr_0.85fr_1fr] items-center gap-3 border-b border-slate-100 px-4 py-3 text-sm last:border-b-0">
                       <div>
                         <p className="font-semibold text-slate-950">{customer.customer_name}</p>
@@ -212,14 +174,14 @@ export default async function CustomersPage({
                         {customer.active !== false && customer.status !== "archived" ? "Active" : "Archived"}
                       </span>
                       <div className="flex justify-end gap-2">
-                        <Link href={`/customers/${customer.id}/edit`} className="inline-flex min-h-9 items-center gap-1.5 rounded-[6px] border border-slate-300 px-3 text-xs font-semibold text-slate-700">
+                        <Link href={`/customers/${customer.id}/edit`} prefetch={false} className="inline-flex min-h-9 items-center gap-1.5 rounded-[6px] border border-slate-300 px-3 text-xs font-semibold text-slate-700">
                           <Pencil className="h-3.5 w-3.5" />
                           Edit
                         </Link>
-                        <Link href={`/api/exports?module=Customers&process=Customer%20Profile&format=pdf&customerId=${customer.id}`} className="inline-flex min-h-9 items-center gap-1.5 rounded-[6px] bg-slate-950 px-3 text-xs font-semibold text-white">
+                        <a href={`/api/exports?module=Customers&process=Customer%20Profile&format=pdf&customerId=${customer.id}`} className="inline-flex min-h-9 items-center gap-1.5 rounded-[6px] bg-slate-950 px-3 text-xs font-semibold text-white">
                           <Eye className="h-3.5 w-3.5" />
                           PDF
-                        </Link>
+                        </a>
                         <details className="relative">
                           <summary className="inline-flex min-h-9 cursor-pointer list-none items-center gap-1.5 rounded-[6px] border border-red-200 px-3 text-xs font-semibold text-red-700 marker:hidden">
                             <Trash2 className="h-3.5 w-3.5" />
@@ -235,10 +197,8 @@ export default async function CustomersPage({
                         </details>
                       </div>
                     </div>
-                  );
-                })}
-              </div>
-            </div>
+                  ) };
+                })} />
           ) : (
             <div className="mt-5">
               <EmptyState

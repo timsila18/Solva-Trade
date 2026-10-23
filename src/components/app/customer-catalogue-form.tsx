@@ -34,7 +34,7 @@ function moneyValue(value: unknown) {
 
 function productMatches(product: ProductOption, query: string) {
   if (!query) return true;
-  const haystack = [product.product_name, product.product_code, product.sku, product.vat_status, product.tax_category]
+  const haystack = [product.product_name, product.product_code, product.sku]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
@@ -99,7 +99,10 @@ export function CustomerCatalogueForm({ customers, products }: CustomerCatalogue
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                   <input
                     value={draftQuery}
-                    onChange={(event) => setDraftQuery(event.target.value)}
+                    onChange={(event) => {
+                      setDraftQuery(event.target.value);
+                      setQuery(event.target.value);
+                    }}
                     onKeyDown={(event) => {
                       if (event.key === "Enter") {
                         event.preventDefault();

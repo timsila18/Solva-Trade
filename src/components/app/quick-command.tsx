@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import type { GlobalSearchResult } from "@/lib/global-search";
 import {
   Banknote,
   Boxes,
@@ -43,6 +44,25 @@ const commands: Command[] = [
 export function QuickCommand() {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [recordSearch, setRecordSearch] = useState<{ query: string; results: GlobalSearchResult[]; error?: string; partial?: boolean }>({ query: "", results: [] });
+  const currentQuery = query.trim();
+  const searching = Boolean(currentQuery && recordSearch.query !== currentQuery);
+
+  useEffect(() => {
+    if (!open || !currentQuery) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      try {
+        const response = await fetch(`/api/search?q=${encodeURIComponent(currentQuery)}`, { signal: controller.signal, cache: "no-store" });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Search is unavailable.");
+        if (!controller.signal.aborted) setRecordSearch({ query: currentQuery, results: data.results, partial: data.partial });
+      } catch (error) {
+        if (!controller.signal.aborted) setRecordSearch({ query: currentQuery, results: [], error: error instanceof Error ? error.message : "Search is unavailable." });
+      }
+    }, 250);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [open, currentQuery]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -85,6 +105,8 @@ export function QuickCommand() {
               <Search className="h-5 w-5 text-[var(--solva-blue-700)]" />
               <input
                 autoFocus
+                type="search"
+                aria-label="Search workspace records"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="Try customer, M-Pesa, stock, report..."
@@ -100,6 +122,18 @@ export function QuickCommand() {
               </button>
             </div>
             <div className="max-h-[60vh] overflow-y-auto p-2">
+              {currentQuery ? <div aria-live="polite">
+                {searching ? <p className="px-3 py-2 text-sm text-slate-500">Searching records...</p> : null}
+                {!searching && recordSearch.error ? <p role="alert" className="px-3 py-2 text-sm text-red-700">{recordSearch.error}</p> : null}
+                {!searching && recordSearch.partial ? <p className="px-3 py-2 text-xs text-amber-700">Some records could not be loaded. Try again.</p> : null}
+                {!searching ? recordSearch.results.map((result) => {
+                  const content = <><span className="min-w-0"><span className="block text-sm font-semibold text-slate-950">{result.label}</span><span className="block truncate text-xs text-slate-500">{result.hint}</span></span><span className="text-xs text-slate-500">{result.group}</span></>;
+                  const className = "flex items-center justify-between gap-3 border-b border-slate-100 px-3 py-3 hover:bg-slate-50";
+                  return result.href.startsWith("/api/")
+                    ? <a key={result.id} href={result.href} onClick={() => setOpen(false)} className={className}>{content}</a>
+                    : <Link key={result.id} href={result.href} prefetch={false} onClick={() => setOpen(false)} className={className}>{content}</Link>;
+                }) : null}
+              </div> : null}
               {results.length ? (
                 results.map((command) => {
                   const Icon = command.icon;
@@ -107,6 +141,7 @@ export function QuickCommand() {
                     <Link
                       key={`${command.group}-${command.label}`}
                       href={command.href}
+                      prefetch={false}
                       onClick={() => setOpen(false)}
                       className="flex items-center gap-3 border-b border-slate-100 px-3 py-3 transition last:border-b-0 hover:bg-slate-50"
                     >
@@ -123,12 +158,12 @@ export function QuickCommand() {
                     </Link>
                   );
                 })
-              ) : (
+              ) : !searching && !recordSearch.results.length && !recordSearch.error ? (
                 <div className="px-4 py-10 text-center">
                   <p className="font-semibold text-slate-950">No match yet</p>
                   <p className="mt-2 text-sm text-slate-500">Try a customer, product, payment, report or command.</p>
                 </div>
-              )}
+              ) : null}
             </div>
           </div>
         </div>

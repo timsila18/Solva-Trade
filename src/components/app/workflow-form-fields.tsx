@@ -68,9 +68,10 @@ function searchScore(values: unknown[], query: string) {
   return tokens.every((token) => haystack.some((value) => value.startsWith(token))) ? 2 : 1;
 }
 
-function rankedOptions<T>(items: T[], query: string, values: (item: T) => unknown[], label: (item: T) => string) {
+function rankedOptions<T>(items: T[], query: string, values: (item: T) => unknown[], label: (item: T) => string, prefixOnly = false) {
+  const needle = normalizeSearch(query);
   return items
-    .map((item) => ({ item, score: searchScore(values(item), query) }))
+    .map((item) => ({ item, score: prefixOnly && needle ? (values(item).some((value) => normalizeSearch(value).startsWith(needle)) ? 2 : -1) : searchScore(values(item), query) }))
     .filter(({ score }) => score >= 0)
     .sort((a, b) => b.score - a.score || label(a.item).localeCompare(label(b.item)))
     .map(({ item }) => item);
@@ -121,6 +122,13 @@ export function WorkflowFormFields({
   }, [fields]);
   const keys = useMemo(() => normalizedFields.map((field) => ({ label: field, key: fieldKey(field), type: fieldType(field) })), [normalizedFields]);
   const [values, setValues] = useState<Record<string, string>>(defaultValues);
+  const customerOptions = useMemo(() => rankedOptions(customers, values.customer ?? "", (item) => [item.name, item.code, item.phone], (item) => item.name, true), [customers, values.customer]);
+  const supplierOptions = useMemo(() => rankedOptions(suppliers, values.supplier ?? "", (item) => [item.name, item.code, item.phone], (item) => item.name, true), [suppliers, values.supplier]);
+  const preferredSupplierOptions = useMemo(() => rankedOptions(suppliers, values.preferred_supplier ?? "", (item) => [item.name, item.code, item.phone], (item) => item.name, true), [suppliers, values.preferred_supplier]);
+  const productOptions = useMemo(() => rankedOptions(products, values.product ?? "", (item) => [item.name, item.code], (item) => item.name), [products, values.product]);
+  const selectedProduct = products.find((product) => product.name === values.product || product.id === values.product_id);
+  const selectedCustomer = customers.find((customer) => customer.name === values.customer || customer.id === values.customer_id);
+  const selectedInvoice = unpaidInvoices.find((invoice) => invoice.number === values.invoice || invoice.id === values.invoice_id);
 
   useEffect(() => {
     function restoreControlledValues(event: Event) {
@@ -179,18 +187,12 @@ export function WorkflowFormFields({
         </span>
       ))}
       {keys.map(({ label, key, type }) => {
-        const selectedProduct = products.find((product) => product.name === values.product || product.id === values.product_id);
-        const selectedCustomer = customers.find((customer) => customer.name === values.customer || customer.id === values.customer_id);
-        const selectedInvoice = unpaidInvoices.find((invoice) => invoice.number === values.invoice || invoice.id === values.invoice_id);
         const isCustomerField = key === "customer";
         const isSupplierField = key === "supplier" || key === "preferred_supplier";
         const isProductField = key === "product";
         const isInvoiceField = key === "invoice";
         const supplierIdKey = key === "preferred_supplier" ? "preferred_supplier_id" : "supplier_id";
         const selectedSupplier = suppliers.find((supplier) => supplier.id === values[supplierIdKey] || supplier.name === values[key]);
-        const customerOptions = rankedOptions(customers, values[key] ?? "", (customer) => [customer.name, customer.code, customer.phone], (customer) => customer.name);
-        const supplierOptions = rankedOptions(suppliers, values[key] ?? "", (supplier) => [supplier.name, supplier.code, supplier.phone, supplier.type], (supplier) => supplier.name);
-        const productOptions = rankedOptions(products, values[key] ?? "", (product) => [product.name, product.code, product.vatCode], (product) => product.name);
         const resolvedType =
           type === "text" && /^(subtotal|total|tax|amount|balance_due|discount|price|unit_price|quantity)$/.test(key) ? "number" : type;
         const isCalculated =
@@ -275,7 +277,7 @@ export function WorkflowFormFields({
                 placeholder="Search supplier by name, code or phone"
               />
               <datalist id={`${key}-supplier-options`}>
-                {supplierOptions.map((supplier) => (
+                {(key === "preferred_supplier" ? preferredSupplierOptions : supplierOptions).map((supplier) => (
                   <option key={supplier.id} value={supplier.name}>
                     {supplier.name} - {supplier.code}{supplier.phone ? ` - ${supplier.phone}` : ""}
                   </option>

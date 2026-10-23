@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { AlertTriangle, CheckCircle2, Clock3, Eye, FileText, ReceiptText, UserPlus } from "lucide-react";
 import { CustomerInvoiceSearch } from "@/components/app/customer-invoice-search";
+import { SearchableSelect } from "@/components/app/searchable-select";
 import { completeProcessAction, reverseSalesInvoiceAction } from "@/app/(app)/actions";
 import { PersistedForm } from "@/components/app/persisted-form";
 import { PinProtectedSubmitButton } from "@/components/app/pin-protected-export";
@@ -476,14 +477,7 @@ export default async function SalesPage({
           <input type="hidden" name="process" value="Customer Sales Statement" />
           <label className="text-sm font-semibold text-slate-700">
             Customer
-            <select name="customerId" className="mt-2 min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-sm">
-              <option value="">All customers</option>
-              {customers.map((customer) => (
-                <option key={customer.id} value={customer.id}>
-                  {customer.customer_name || customer.customer_code || "Unnamed customer"}
-                </option>
-              ))}
-            </select>
+            <SearchableSelect name="customerId" label="Report customer" allLabel="All customers" options={customers.map((customer) => ({ id: customer.id, label: customer.customer_name || customer.customer_code || "Unnamed customer" }))} />
           </label>
           <label className="text-sm font-semibold text-slate-700">
             From
@@ -514,14 +508,7 @@ export default async function SalesPage({
           <input type="hidden" name="process" value="Profit by Supplier and Source Report" />
           <label className="text-sm font-semibold text-slate-700">
             Supplier
-            <select name="supplierId" className="mt-2 min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-sm">
-              <option value="">All suppliers and sources</option>
-              {suppliers.map((supplier) => (
-                <option key={supplier.id} value={supplier.id}>
-                  {supplier.trading_name || supplier.legal_name || supplier.supplier_code || "Unnamed supplier"}
-                </option>
-              ))}
-            </select>
+            <SearchableSelect name="supplierId" label="Report supplier" allLabel="All suppliers and sources" options={suppliers.map((supplier) => ({ id: supplier.id, label: supplier.trading_name || supplier.legal_name || supplier.supplier_code || "Unnamed supplier" }))} />
             <span className="mt-1 block text-xs font-medium text-slate-500">
               {suppliers.length ? `${suppliers.length} saved supplier${suppliers.length === 1 ? "" : "s"} available` : "No saved suppliers yet. Add suppliers first or use all sources."}
             </span>
@@ -666,7 +653,7 @@ export default async function SalesPage({
 
         {invoicesNeedingFollowUp.length ? (
           <div className="mt-4">
-            <CustomerInvoiceSearch label="Search pending invoices" listClassName="divide-y divide-slate-200 overflow-hidden rounded-lg border border-slate-200"
+            <CustomerInvoiceSearch label="Search pending invoices" initialQuery={historyCustomerQuery} listClassName="divide-y divide-slate-200 overflow-hidden rounded-lg border border-slate-200"
               items={invoicesNeedingFollowUp.map((invoice) => {
               const total = asNumber(invoice.total_amount);
               const paid = asNumber(invoice.amount_paid);

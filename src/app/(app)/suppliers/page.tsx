@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { Trash2 } from "lucide-react";
 import { deleteSupplierAction } from "@/app/(app)/actions";
-import { supplierRiskChecks, supplierTypes } from "@/lib/purchasing-data";
+import { supplierRiskChecks } from "@/lib/purchasing-data";
+import { LiveRecordList } from "@/components/app/live-record-list";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getActiveBusinessId } from "@/lib/tenant";
 
@@ -37,21 +38,6 @@ function searchText(value: unknown) {
   return String(value ?? "").toLowerCase();
 }
 
-function matchesSupplierSearch(supplier: SupplierRow, query: string) {
-  if (!query) return true;
-  const haystack = [
-    supplier.legal_name,
-    supplier.trading_name,
-    supplier.supplier_code,
-    supplier.kra_pin,
-    supplier.primary_phone,
-    supplier.email,
-    supplier.supplier_type,
-    supplier.status,
-  ].map(searchText).join(" ");
-  return haystack.includes(query);
-}
-
 async function loadSuppliers() {
   const supabase = await createSupabaseServerClient();
   const { data: userData } = await supabase.auth.getUser();
@@ -67,7 +53,7 @@ async function loadSuppliers() {
     .eq("active", true)
     .neq("status", "archived")
     .order("updated_at", { ascending: false })
-    .limit(200);
+    .limit(1000);
 
   return (data ?? []) as unknown as SupplierRow[];
 }
@@ -79,7 +65,7 @@ export default async function SuppliersPage({
 }) {
   const params = searchParams ? await searchParams : {};
   const query = searchText(Array.isArray(params.q) ? params.q[0] : params.q).trim();
-  const suppliers = (await loadSuppliers()).filter((supplier) => matchesSupplierSearch(supplier, query));
+  const suppliers = await loadSuppliers();
   const approvedCount = suppliers.filter((supplier) => supplier.approved_supplier && !supplier.on_hold).length;
   const pendingCount = suppliers.filter((supplier) => supplier.status === "pending_approval" || supplier.status === "draft").length;
   const onHoldCount = suppliers.filter((supplier) => supplier.on_hold || supplier.status === "on_hold").length;
@@ -103,30 +89,6 @@ export default async function SuppliersPage({
         </Link>
       </div>
 
-      <section className="mt-6 rounded-lg border border-slate-200 bg-white p-5">
-        <form className="grid gap-3 md:grid-cols-[1fr_180px_180px_180px]" action="/suppliers">
-          <input name="q" defaultValue={query} className="rounded-md border border-slate-300 px-3 py-2 text-sm" placeholder="Search by name, code, KRA PIN, phone or email" />
-          <select className="rounded-md border border-slate-300 px-3 py-2 text-sm" defaultValue="all">
-            <option value="all">All types</option>
-            {supplierTypes.map((type) => (
-              <option key={type}>{type}</option>
-            ))}
-          </select>
-          <select className="rounded-md border border-slate-300 px-3 py-2 text-sm" defaultValue="all">
-            <option value="all">All statuses</option>
-            <option value="approved">Approved</option>
-            <option value="pending">Pending approval</option>
-            <option value="hold">On hold</option>
-          </select>
-          <select className="rounded-md border border-slate-300 px-3 py-2 text-sm" defaultValue="all">
-            <option value="all">All balances</option>
-            <option value="overdue">Overdue</option>
-            <option value="advance">Advance held</option>
-          </select>
-          <button className="sr-only">Search</button>
-        </form>
-      </section>
-
       <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {[
           ["Approved", approvedCount.toString()],
@@ -143,7 +105,7 @@ export default async function SuppliersPage({
 
       <section className="mt-6 rounded-lg border border-slate-200 bg-white p-5">
         <h2 className="font-semibold">Supplier list</h2>
-        <div className="mt-4 overflow-hidden rounded-md border border-slate-200">
+        <LiveRecordList label="Search supplier, code, KRA PIN, phone or email" initialQuery={query} minWidth="min-w-[760px]" header={
           <div className="grid grid-cols-[1.2fr_120px_140px_140px_170px] bg-slate-100 px-4 py-3 text-xs font-semibold uppercase text-slate-500">
             <span>Supplier</span>
             <span>Type</span>
@@ -151,11 +113,10 @@ export default async function SuppliersPage({
             <span>Balance</span>
             <span>Next action</span>
           </div>
-          {suppliers.length > 0 ? (
-            suppliers.map((supplier) => {
+          } items={suppliers.map((supplier) => {
               const balance = (supplier.supplier_balances ?? []).reduce((sum, row) => sum + (Number(row.current_balance ?? 0) || 0), 0);
               const displayName = supplier.trading_name || supplier.legal_name;
-              return (
+              return { id: supplier.id, name: displayName, terms: [supplier.legal_name, supplier.supplier_code, supplier.kra_pin, supplier.primary_phone, supplier.email].filter((value): value is string => Boolean(value)), content: (
                 <div key={supplier.id} className="grid grid-cols-[1.2fr_120px_140px_140px_170px] items-center gap-3 border-t border-slate-100 px-4 py-3 text-sm">
                   <div>
                     <p className="font-semibold text-slate-950">{displayName}</p>
@@ -169,9 +130,9 @@ export default async function SuppliersPage({
                   </span>
                   <span className="font-semibold">{money(balance)}</span>
                   <div className="flex justify-end gap-2">
-                    <Link href={`/api/exports?module=Suppliers&process=Supplier%20Profile&format=pdf&supplierId=${supplier.id}`} className="inline-flex min-h-9 items-center justify-center rounded-[6px] bg-slate-950 px-3 text-xs font-semibold text-white">
+                    <a href={`/api/exports?module=Suppliers&process=Supplier%20Profile&format=pdf&supplierId=${supplier.id}`} className="inline-flex min-h-9 items-center justify-center rounded-[6px] bg-slate-950 px-3 text-xs font-semibold text-white">
                       PDF
-                    </Link>
+                    </a>
                     <details className="relative">
                       <summary className="inline-flex min-h-9 cursor-pointer list-none items-center gap-1.5 rounded-[6px] border border-red-200 px-3 text-xs font-semibold text-red-700 marker:hidden">
                         <Trash2 className="h-3.5 w-3.5" />
@@ -187,12 +148,8 @@ export default async function SuppliersPage({
                     </details>
                   </div>
                 </div>
-              );
-            })
-          ) : (
-            <div className="px-4 py-8 text-sm text-slate-600">No suppliers have been created yet.</div>
-          )}
-        </div>
+              ) };
+            })} />
       </section>
 
       <section className="mt-6 grid gap-4 lg:grid-cols-2">

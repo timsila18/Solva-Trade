@@ -90,12 +90,12 @@ async function loadProductTaxes(
   };
 }
 
-export async function getSalesWorkflowLookups(): Promise<SalesWorkflowLookups> {
+export async function getSalesWorkflowLookups({ includeCustomers = true, includeInvoices = true }: { includeCustomers?: boolean; includeInvoices?: boolean } = {}): Promise<SalesWorkflowLookups> {
   const businessId = await currentBusinessId();
   if (!businessId) return { customers: [], products: [], unpaidInvoices: [], suppliers: [] };
 
   const admin = await createSupabaseServerClient();
-  const [{ data: branch }, { data: warehouse }, taxForProduct] = await Promise.all([
+  const balancesPromise = Promise.all([
     admin.from("branches").select("id").eq("business_id", businessId).eq("active", true).order("is_default", { ascending: false }).limit(1).maybeSingle(),
     admin
       .from("warehouses")
@@ -106,19 +106,20 @@ export async function getSalesWorkflowLookups(): Promise<SalesWorkflowLookups> {
       .order("is_default", { ascending: false })
       .limit(1)
       .maybeSingle(),
-    loadProductTaxes(admin, businessId),
-  ]);
-  let balanceQuery = admin.from("stock_balances").select("product_id, available_quantity").eq("business_id", businessId);
-  if (branch?.id) balanceQuery = balanceQuery.eq("branch_id", branch.id);
-  if (warehouse?.id) balanceQuery = balanceQuery.eq("warehouse_id", warehouse.id);
-  const [{ data: customers }, { data: products }, { data: balances }, { data: invoices }, { data: suppliers }] = await Promise.all([
-    admin
+  ]).then(async ([{ data: branch }, { data: warehouse }]) => {
+    let balanceQuery = admin.from("stock_balances").select("product_id, available_quantity").eq("business_id", businessId);
+    if (branch?.id) balanceQuery = balanceQuery.eq("branch_id", branch.id);
+    if (warehouse?.id) balanceQuery = balanceQuery.eq("warehouse_id", warehouse.id);
+    return await balanceQuery;
+  });
+  const [{ data: customers }, { data: products }, { data: balances }, { data: invoices }, { data: suppliers }, taxForProduct] = await Promise.all([
+    includeCustomers ? admin
       .from("customers")
       .select("id, customer_name, customer_code, phone, current_balance")
       .eq("business_id", businessId)
       .eq("active", true)
       .order("customer_name", { ascending: true })
-      .limit(1000),
+      .limit(1000) : Promise.resolve({ data: [] }),
     admin
       .from("products")
       .select("id, product_name, product_code, sku, track_inventory, default_selling_price_placeholder, default_sales_tax_id, vat_status, tax_category")
@@ -127,15 +128,15 @@ export async function getSalesWorkflowLookups(): Promise<SalesWorkflowLookups> {
       .eq("archived", false)
       .order("product_name", { ascending: true })
       .limit(300),
-    balanceQuery,
-    admin
+    balancesPromise,
+    includeInvoices ? admin
       .from("sales_invoices")
       .select("id, invoice_number, customer_id, total_amount, balance_due, customers(customer_name)")
       .eq("business_id", businessId)
       .gt("balance_due", 0)
       .in("status", ["posted", "partially_paid", "overdue"])
       .order("invoice_date", { ascending: false })
-      .limit(200),
+      .limit(200) : Promise.resolve({ data: [] }),
     admin
       .from("suppliers")
       .select("id, legal_name, trading_name, supplier_code, primary_phone, supplier_type")
@@ -143,6 +144,7 @@ export async function getSalesWorkflowLookups(): Promise<SalesWorkflowLookups> {
       .in("status", ["approved", "draft", "pending_approval"])
       .order("legal_name", { ascending: true })
       .limit(200),
+    loadProductTaxes(admin, businessId),
   ]);
 
   const stockByProduct = new Map<string, number>();

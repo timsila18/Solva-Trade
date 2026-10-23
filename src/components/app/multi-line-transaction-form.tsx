@@ -55,11 +55,15 @@ function normalizeSearch(value: unknown) {
     .trim();
 }
 
-function searchScore(values: unknown[], query: string) {
+function searchScore(values: unknown[], query: string, prefixOnly = false) {
   const tokens = normalizeSearch(query).split(/\s+/).filter(Boolean);
   if (!tokens.length) return 0;
   const haystack = values.map(normalizeSearch);
   const compactHaystack = haystack.map((value) => value.replace(/\s+/g, ""));
+  if (prefixOnly) {
+    const needle = normalizeSearch(query);
+    return haystack.some((value) => value.startsWith(needle)) || compactHaystack.some((value) => value.startsWith(needle.replace(/\s+/g, ""))) ? 2 : -1;
+  }
   const matched = tokens.every((token) => {
     const compactToken = token.replace(/\s+/g, "");
     return haystack.some((value) => value.includes(token)) || compactHaystack.some((value) => value.includes(compactToken));
@@ -167,7 +171,7 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
     return partyOptions
       .map((party) => ({
         party,
-        score: selectedPartyId && party.id === selectedPartyId ? 3 : searchScore([party.name, party.code, party.phone], partySearch),
+        score: selectedPartyId && party.id === selectedPartyId ? 3 : searchScore([party.name, party.code, party.phone], partySearch, true),
       }))
       .filter(({ score }) => score >= 0)
       .sort((a, b) => b.score - a.score || a.party.name.localeCompare(b.party.name))
@@ -177,28 +181,20 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
     return suppliers
       .map((supplier) => ({
         supplier,
-        score: saleSourceSupplierId && supplier.id === saleSourceSupplierId ? 3 : searchScore([supplier.name, supplier.code, supplier.phone, supplier.type], saleSourceSearch),
+        score: saleSourceSupplierId && supplier.id === saleSourceSupplierId ? 3 : searchScore([supplier.name, supplier.code, supplier.phone], saleSourceSearch, true),
       }))
       .filter(({ score }) => score >= 0)
       .sort((a, b) => b.score - a.score || a.supplier.name.localeCompare(b.supplier.name))
       .map(({ supplier }) => supplier);
   }, [saleSourceSearch, saleSourceSupplierId, suppliers]);
+  const productSearchIndex = useMemo(() => products.map((product, index) => {
+    const values = [product.name, product.code].map(normalizeSearch);
+    return { index, values: [...values, ...values.map((value) => value.replace(/\s+/g, ""))] };
+  }), [products]);
   const matchingIndexes = useMemo(() => {
-    const productSearchValues = (product: ProductLookup) => [
-      product.name,
-      product.code,
-      product.vatCode,
-      String(product.name ?? "").replace(/\s+/g, ""),
-      String(product.code ?? "").replace(/[-_\s]+/g, ""),
-    ];
-    return new Set(
-      products
-        .map((product, index) => ({ product, index }))
-        .filter(({ product }) => searchScore(productSearchValues(product), search) >= 0)
-        .sort((a, b) => searchScore(productSearchValues(b.product), search) - searchScore(productSearchValues(a.product), search))
-        .map(({ index }) => index),
-    );
-  }, [products, search]);
+    const tokens = normalizeSearch(search).split(/\s+/).filter(Boolean);
+    return new Set(productSearchIndex.filter(({ values }) => tokens.every((token) => values.some((value) => value.includes(token)))).map(({ index }) => index));
+  }, [productSearchIndex, search]);
   const visibleIndexes = useMemo(() => {
     return products.map((_, index) => index).filter((index) => matchingIndexes.has(index));
   }, [matchingIndexes, products]);

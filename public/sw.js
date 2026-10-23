@@ -1,7 +1,5 @@
-const CACHE_NAME = "solva-trade-shell-v1";
+const CACHE_NAME = "solva-trade-shell-v2";
 const SHELL_ASSETS = [
-  "/",
-  "/dashboard",
   "/manifest.webmanifest",
   "/solva-trade-icon.png",
   "/solva-trade-logo.png"
@@ -17,7 +15,7 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)))
+      Promise.all(keys.filter((key) => key.startsWith("solva-trade-shell-") && key !== CACHE_NAME).map((key) => caches.delete(key)))
     )
   );
   self.clients.claim();
@@ -29,14 +27,14 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith("/api/")) return;
-
-  event.respondWith(
-    fetch(request)
-      .then((response) => {
-        const copy = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(request, copy)).catch(() => undefined);
-        return response;
-      })
-      .catch(() => caches.match(request).then((cached) => cached || caches.match("/dashboard")))
-  );
+  const staticAsset = url.pathname.startsWith("/_next/static/") || SHELL_ASSETS.includes(url.pathname);
+  if (!staticAsset) return;
+  event.respondWith((async () => {
+    const cache = await caches.open(CACHE_NAME);
+    const cached = await cache.match(request);
+    if (cached) return cached;
+    const response = await fetch(request);
+    if (response.ok) event.waitUntil(cache.put(request, response.clone()).catch(() => undefined));
+    return response;
+  })());
 });
