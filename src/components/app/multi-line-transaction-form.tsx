@@ -3,7 +3,7 @@
 import { Search } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CustomerLookup, ProductLookup, SupplierLookup } from "@/lib/workflow-live-data";
 
 type Mode = "sale" | "goods-received";
@@ -31,6 +31,16 @@ function numberValue(value: unknown) {
   return Number.isFinite(number) ? number : 0;
 }
 
+function setField(form: HTMLFormElement, name: string, value: string) {
+  const field = form.elements.namedItem(name);
+  if (field instanceof HTMLInputElement) field.value = value;
+}
+
+function fieldNumber(form: HTMLFormElement, name: string) {
+  const field = form.elements.namedItem(name);
+  return field instanceof HTMLInputElement ? numberValue(field.value) : 0;
+}
+
 function inclusiveTaxAmount(inclusiveAmount: number, vatRate: number) {
   if (inclusiveAmount <= 0 || vatRate <= 0) return 0;
   return inclusiveAmount * (vatRate / (100 + vatRate));
@@ -43,10 +53,6 @@ function normalizeSearch(value: unknown) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
-}
-
-function matchesSearch(values: unknown[], query: string) {
-  return searchScore(values, query) >= 0;
 }
 
 function searchScore(values: unknown[], query: string) {
@@ -79,30 +85,27 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
   const pathname = usePathname();
   const containerRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
-  const summaryRefs = {
-    quantity: useRef<HTMLParagraphElement>(null),
-    subtotal: useRef<HTMLParagraphElement>(null),
-    tax: useRef<HTMLParagraphElement>(null),
-    total: useRef<HTMLParagraphElement>(null),
-  };
+  const lineSummaries = useRef(new Map<number, { quantity: number; subtotal: number; tax: number; total: number }>());
+  const quantitySummaryRef = useRef<HTMLParagraphElement>(null);
+  const subtotalSummaryRef = useRef<HTMLParagraphElement>(null);
+  const taxSummaryRef = useRef<HTMLParagraphElement>(null);
+  const totalSummaryRef = useRef<HTMLParagraphElement>(null);
 
-  function setField(form: HTMLFormElement, name: string, value: string) {
-    const field = form.elements.namedItem(name);
-    if (field instanceof HTMLInputElement) field.value = value;
-  }
-
-  function fieldNumber(form: HTMLFormElement, name: string) {
-    const field = form.elements.namedItem(name);
-    return field instanceof HTMLInputElement ? numberValue(field.value) : 0;
-  }
-
-  function recalculate(target: EventTarget | null) {
+  const recalculate = useCallback((target: EventTarget | null) => {
     const element = target instanceof HTMLElement ? target : null;
     const form = element?.closest("form");
     if (!(form instanceof HTMLFormElement)) return;
 
-    const summary = products.reduce(
-      (current, product, index) => {
+    const fieldName = element instanceof HTMLInputElement ? element.name : "";
+    const editedLine = /^field_line_(\d+)_/.exec(fieldName);
+    const editedIndex = editedLine ? Number(editedLine[1]) : null;
+    const refreshAll = !fieldName;
+    if (refreshAll) lineSummaries.current.clear();
+
+    const indexes = refreshAll ? products.map((_, index) => index) : editedIndex === null ? [] : [editedIndex];
+    indexes.forEach((index) => {
+        const product = products[index];
+        if (!product) return;
         const checkbox = form.elements.namedItem(`field_line_${index}_selected`);
         const isSelected = checkbox instanceof HTMLInputElement && checkbox.checked;
         const quantity = fieldNumber(form, `field_line_${index}_quantity`);
@@ -121,16 +124,24 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
         if (taxDisplay) taxDisplay.textContent = mode === "sale" ? "Included" : money(lineTax);
         const display = form.querySelector(`[data-line-total="${index}"]`);
         if (display) display.textContent = money(lineTotal);
-        if (!isSelected) return current;
-        return {
-          quantity: current.quantity + (mode === "sale" ? quantity : acceptedQuantity),
-          subtotal: current.subtotal + lineSubtotal,
-          tax: current.tax + lineTax,
-          total: current.total + lineTotal,
-        };
-      },
-      { quantity: 0, subtotal: 0, tax: 0, total: 0 },
-    );
+        if (isSelected) {
+          lineSummaries.current.set(index, {
+            quantity: mode === "sale" ? quantity : acceptedQuantity,
+            subtotal: lineSubtotal,
+            tax: lineTax,
+            total: lineTotal,
+          });
+        } else {
+          lineSummaries.current.delete(index);
+        }
+    });
+    const summary = { quantity: 0, subtotal: 0, tax: 0, total: 0 };
+    for (const line of lineSummaries.current.values()) {
+      summary.quantity += line.quantity;
+      summary.subtotal += line.subtotal;
+      summary.tax += line.tax;
+      summary.total += line.total;
+    }
 
     if (mode === "sale") {
       const charges = fieldNumber(form, "field_transport_charge") + fieldNumber(form, "field_other_charge");
@@ -141,11 +152,11 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
     setField(form, "field_subtotal", summary.subtotal.toFixed(2));
     setField(form, "field_tax", summary.tax.toFixed(2));
     setField(form, "field_total", summary.total.toFixed(2));
-    if (summaryRefs.quantity.current) summaryRefs.quantity.current.textContent = money(summary.quantity);
-    if (summaryRefs.subtotal.current) summaryRefs.subtotal.current.textContent = `KES ${money(summary.subtotal)}`;
-    if (summaryRefs.tax.current) summaryRefs.tax.current.textContent = `KES ${money(summary.tax)}`;
-    if (summaryRefs.total.current) summaryRefs.total.current.textContent = `KES ${money(summary.total)}`;
-  }
+    if (quantitySummaryRef.current) quantitySummaryRef.current.textContent = money(summary.quantity);
+    if (subtotalSummaryRef.current) subtotalSummaryRef.current.textContent = `KES ${money(summary.subtotal)}`;
+    if (taxSummaryRef.current) taxSummaryRef.current.textContent = `KES ${money(summary.tax)}`;
+    if (totalSummaryRef.current) totalSummaryRef.current.textContent = `KES ${money(summary.total)}`;
+  }, [mode, products]);
 
   const sharedDateName = mode === "sale" ? "field_invoice_date" : "field_received_date";
   const sharedDateLabel = mode === "sale" ? "Invoice date" : "Received date";
@@ -195,6 +206,7 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
 
   function setLineSelected(index: number, selected: boolean) {
     setSelectedIndexes((current) => {
+      if (current.has(index) === selected) return current;
       const next = new Set(current);
       if (selected) next.add(index);
       else next.delete(index);
@@ -216,15 +228,17 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
     function trimUnselectedLineFields(event: Event) {
       if (!("formData" in event)) return;
       const formData = (event as FormDataEvent).formData;
+      const includedIndexes = new Set<number>();
       products.forEach((_, index) => {
         const selected = formData.get(`field_line_${index}_selected`);
         const quantity = numberValue(formData.get(`field_line_${index}_quantity`));
         const productId = String(formData.get(`field_line_${index}_product_id`) ?? "");
-        if (productId && quantity > 0 && (selected === "yes" || selected === "on")) return;
-        for (const key of Array.from(formData.keys())) {
-          if (key.startsWith(`field_line_${index}_`)) formData.delete(key);
-        }
+        if (productId && quantity > 0 && (selected === "yes" || selected === "on")) includedIndexes.add(index);
       });
+      for (const key of Array.from(formData.keys())) {
+        const line = /^field_line_(\d+)_/.exec(key);
+        if (line && !includedIndexes.has(Number(line[1]))) formData.delete(key);
+      }
     }
 
     form.addEventListener("formdata", trimUnselectedLineFields);
@@ -277,7 +291,7 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
 
     window.addEventListener("solva:form-draft-restored", handleDraftRestore);
     return () => window.removeEventListener("solva:form-draft-restored", handleDraftRestore);
-  }, [mode, partyName, partyOptions, products, suppliers]);
+  }, [mode, partyName, partyOptions, products, suppliers, recalculate]);
 
   const returnTo = encodeURIComponent(pathname);
   const addPartyHref = mode === "sale" ? `/customers/new?returnTo=${returnTo}` : `/suppliers/new?returnTo=${returnTo}`;
@@ -288,9 +302,10 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
       <input type="hidden" name="field_line_count" value={products.length} />
       <input type="hidden" name={`label_${mode === "sale" ? "customer_id" : "supplier_id"}`} value={partyLabel} />
       <input type="hidden" name={`label_${mode === "sale" ? "invoice_date" : "received_date"}`} value={sharedDateLabel} />
-      <input type="hidden" name="field_subtotal" defaultValue="0.00" />
-      <input type="hidden" name="field_tax" defaultValue="0.00" />
-      <input type="hidden" name="field_total" defaultValue="0.00" />
+      {/* Calculated fields are written by recalculate; defaults would reset them on row selection. */}
+      <input type="hidden" name="field_subtotal" />
+      <input type="hidden" name="field_tax" />
+      <input type="hidden" name="field_total" />
 
       <section className="grid gap-4 rounded-md border border-slate-200 bg-slate-50 p-4 lg:grid-cols-4">
         <label className="grid gap-2 text-sm font-semibold lg:col-span-2">
@@ -541,14 +556,7 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
               const productName = product.name || "Unnamed product";
               const productCode = product.code || "";
               const defaultUnitValue = mode === "sale" && product.price > 0 ? product.price : 0;
-              const quantity = 0;
-              const unitValue = defaultUnitValue;
-              const discount = 0;
-              const saleTotal = Math.max(0, quantity * unitValue - discount);
-              const tax = inclusiveTaxAmount(saleTotal, product.vatRate ?? 0);
-              const saleSubtotal = saleTotal - tax;
-              const accepted = quantity;
-              const receiptTotal = accepted * unitValue;
+              const saleTotal = 0;
               return (
                 <tr
                   key={product.id || index}
@@ -571,9 +579,9 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
                     <input type="hidden" name={`field_line_${index}_product_name`} value={productName} />
                     <input type="hidden" name={`field_line_${index}_product_code`} value={productCode} />
                     <input type="hidden" name={`field_line_${index}_tax_rate`} value={product.vatRate ?? 0} />
-                    <input type="hidden" name={`field_line_${index}_tax_amount`} defaultValue={mode === "sale" ? tax.toFixed(2) : "0"} />
-                    <input type="hidden" name={`field_line_${index}_line_subtotal`} defaultValue={mode === "sale" ? saleSubtotal.toFixed(2) : "0"} />
-                    <input type="hidden" name={`field_line_${index}_line_total`} defaultValue={(mode === "sale" ? saleTotal : receiptTotal).toFixed(2)} />
+                    <input type="hidden" name={`field_line_${index}_tax_amount`} />
+                    <input type="hidden" name={`field_line_${index}_line_subtotal`} />
+                    <input type="hidden" name={`field_line_${index}_line_total`} />
                   </td>
                   <td className="px-3 py-2 align-middle">
                     <p className="font-semibold text-slate-950">{productName}</p>
@@ -769,19 +777,19 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
       <section className="grid gap-3 rounded-md border border-cyan-100 bg-cyan-50 p-4 text-sm md:grid-cols-4">
         <div>
           <p className="text-xs font-semibold uppercase text-slate-500">Selected qty</p>
-          <p ref={summaryRefs.quantity} className="mt-1 text-xl font-semibold">0.00</p>
+          <p ref={quantitySummaryRef} className="mt-1 text-xl font-semibold">0.00</p>
         </div>
         <div>
           <p className="text-xs font-semibold uppercase text-slate-500">{mode === "sale" ? "Exclusive amount" : "Stock value"}</p>
-          <p ref={summaryRefs.subtotal} className="mt-1 text-xl font-semibold">KES 0.00</p>
+          <p ref={subtotalSummaryRef} className="mt-1 text-xl font-semibold">KES 0.00</p>
         </div>
         <div>
           <p className="text-xs font-semibold uppercase text-slate-500">Tax</p>
-          <p ref={summaryRefs.tax} className="mt-1 text-xl font-semibold">KES 0.00</p>
+          <p ref={taxSummaryRef} className="mt-1 text-xl font-semibold">KES 0.00</p>
         </div>
         <div>
           <p className="text-xs font-semibold uppercase text-slate-500">Document total</p>
-          <p ref={summaryRefs.total} className="mt-1 text-xl font-semibold">KES 0.00</p>
+          <p ref={totalSummaryRef} className="mt-1 text-xl font-semibold">KES 0.00</p>
         </div>
       </section>
     </div>
