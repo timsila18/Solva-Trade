@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getActiveBusinessId } from "@/lib/tenant";
@@ -858,6 +859,9 @@ export async function reverseSalesInvoiceAction(formData: FormData) {
     const reversalNumber = String(reversal.reversalNumber ?? `REV-${invoiceId}`);
     const invoiceNumber = String(reversal.invoiceNumber ?? invoiceId);
     if (!reversal.performed) throw new Error("This invoice has already been reversed.");
+    revalidatePath("/dashboard");
+    revalidatePath("/sales");
+    revalidatePath("/sales/product-sales");
 
     const reversalForm = new FormData();
     reversalForm.set("module", "Sales");
@@ -2221,6 +2225,9 @@ export async function completeProcessAction(formData: FormData) {
     if (user && businessId) {
       if (intent.toLowerCase().includes("submit") && moduleName === "Sales" && processName === "Invoices") {
         const result = await postSalesInvoice(formData, user.id, businessId);
+        revalidatePath("/dashboard");
+        revalidatePath("/sales");
+        revalidatePath("/sales/product-sales");
         generatedReference = result.invoiceNumber;
         params.set("invoiceId", result.invoiceId);
         appendGeneratedDocumentField(params, "invoice_number", "Invoice number", result.invoiceNumber);
@@ -2228,6 +2235,8 @@ export async function completeProcessAction(formData: FormData) {
       }
       if (intent.toLowerCase().includes("submit") && moduleName === "Sales" && processName === "Customer Payments") {
         const result = await postCustomerPayment(formData, user.id, businessId);
+        revalidatePath("/dashboard");
+        revalidatePath("/sales");
         generatedReference = result.paymentNumber;
         params.set("paymentId", result.paymentId);
         appendGeneratedDocumentField(params, "payment_number", "Payment number", generatedReference);

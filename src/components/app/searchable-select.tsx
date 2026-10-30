@@ -2,11 +2,11 @@
 
 import { useMemo, useState } from "react";
 
-export function SearchableSelect({ name, label, allLabel, options }: {
-  name: string; label: string; allLabel: string; options: { id: string; label: string }[];
+export function SearchableSelect({ name, label, allLabel, options, defaultValue = "" }: {
+  name: string; label: string; allLabel: string; options: { id: string; label: string }[]; defaultValue?: string;
 }) {
   const [query, setQuery] = useState("");
-  const [selectedId, setSelectedId] = useState("");
+  const [selectedId, setSelectedId] = useState(defaultValue);
   const normalized = query.trim().toLocaleLowerCase();
   const visible = useMemo(() => options.filter((option) => option.id === selectedId || option.label.toLocaleLowerCase().startsWith(normalized)), [normalized, options, selectedId]);
   return <span className="mt-2 grid gap-2">

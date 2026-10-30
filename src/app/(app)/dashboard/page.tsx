@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ArrowRight, Banknote, CreditCard, Download, Eye, FileText, PackagePlus, ReceiptText, Search, ShieldCheck, ShoppingCart, SlidersHorizontal, Users } from "lucide-react";
 import { ProfitPrivacyCard } from "@/components/app/profit-privacy-card";
+import { DashboardRefresh } from "@/components/app/dashboard-refresh";
 import { DashboardPanel, DashboardTile, EmptyState, MetricCard, MiniBars, PageHero, PlainCard, ProgressRow } from "@/components/ui/premium";
 import {
   alertExamples,
@@ -13,6 +14,7 @@ import {
 import { generateRecommendations, rankAlerts } from "@/lib/business-intelligence";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { collectedPayments, RECEIVED_PAYMENT_STATUSES, type CollectedPayment } from "@/lib/sales-metrics";
 
 const alerts = rankAlerts(alertExamples);
 const recommendations = generateRecommendations(alertExamples).slice(0, 3);
@@ -61,7 +63,7 @@ function todayInNairobi() {
 }
 
 function money(value: number) {
-  return `KES ${Math.round(value).toLocaleString("en-KE")}`;
+  return `KES ${value.toLocaleString("en-KE", { maximumFractionDigits: 2 })}`;
 }
 
 function numeric(value: unknown) {
@@ -272,10 +274,15 @@ export default async function DashboardPage() {
           .range(from, to);
         return { data: result.data ?? [], error: result.error };
       }),
-      admin
-        .from("customer_payments")
-        .select("id, payment_number, payment_date, amount_received, status, created_at")
-        .eq("business_id", businessId),
+      fetchAllPages<CollectedPayment>(async (from, to) => {
+        const result = await admin.from("customer_payments")
+          .select("id, payment_date, amount_received, status, created_at")
+          .eq("business_id", businessId)
+          .in("status", RECEIVED_PAYMENT_STATUSES)
+          .gte("payment_date", todayStartIso).lt("payment_date", tomorrowIso)
+          .order("payment_date", { ascending: true }).order("id", { ascending: true }).range(from, to);
+        return { data: result.data ?? [], error: result.error };
+      }),
       admin
         .from("customers")
         .select("id, active, status, current_balance, created_at")
@@ -334,13 +341,9 @@ export default async function DashboardPage() {
     customersOwing = invoices.reduce((sum, invoice) => sum + Math.max(0, numeric(invoice.balance_due)), 0);
     overdueCustomers = invoices.filter((invoice) => numeric(invoice.balance_due) > 0).length;
 
-    const payments = paymentsResult.data ?? [];
-    const todayPayments = payments.filter((payment) => {
-      const value = String(payment.payment_date ?? payment.created_at ?? "");
-      return value >= todayStartIso && value < tomorrowIso;
-    });
-    cashCollected = todayPayments.reduce((sum, payment) => sum + numeric(payment.amount_received), 0);
-    paymentCount = todayPayments.length;
+    const collection = collectedPayments(paymentsResult, todayStartIso, tomorrowIso);
+    cashCollected = collection.amount;
+    paymentCount = collection.count;
 
     const customers = customersResult.data ?? [];
     activeCustomers = customers.filter((customer) => customer.active !== false && customer.status !== "archived").length;
@@ -442,6 +445,7 @@ export default async function DashboardPage() {
     <div className="pb-24">
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
         <DashboardTile label="Today sales" value={money(todaySales)} caption={todayInvoiceCount > 0 ? `${todayInvoiceCount} posted today` : "No sale posted today"} icon={ShoppingCart} tone="blue" />
+        <DashboardRefresh />
         <DashboardTile label="Cash collected" value={money(cashCollected)} caption={paymentCount > 0 ? `${paymentCount} receipt${paymentCount === 1 ? "" : "s"} today` : "No receipt posted today"} icon={Banknote} tone="green" />
         <DashboardTile label="Customers owing" value={money(customersOwing)} caption={customersOwing > 0 ? `${overdueCustomers} invoice${overdueCustomers === 1 ? "" : "s"} to follow up` : "Follow-up list is clean"} icon={CreditCard} tone="gold" />
         <DashboardTile label="Active customers" value={activeCustomers.toLocaleString("en-KE")} caption={activeCustomers > 0 ? "Customer list is active" : "Create the first customer"} icon={Users} tone="cyan" />

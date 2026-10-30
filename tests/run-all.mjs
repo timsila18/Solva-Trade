@@ -15,6 +15,7 @@ const suites = [
   "workflow-loading",
   "global-search",
   "service-worker",
+  "sales-metrics",
 ];
 
 for (const suite of suites) {

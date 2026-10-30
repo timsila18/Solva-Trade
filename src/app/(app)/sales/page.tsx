@@ -375,6 +375,7 @@ export default async function SalesPage({
         ))}
       </section>
 
+      <div className="mt-5"><Link href="/sales/product-sales" className="inline-flex min-h-11 items-center gap-2 rounded-md border border-blue-200 bg-white px-4 text-sm font-semibold text-blue-700"><FileText className="h-4 w-4" />Product sales report</Link></div>
       <section className="mt-6 rounded-lg border border-cyan-100 bg-white p-5 shadow-sm">
         <div className="grid gap-4 lg:grid-cols-4">
           <div>

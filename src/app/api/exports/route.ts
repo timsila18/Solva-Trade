@@ -5,6 +5,8 @@ import sharp from "sharp";
 import { getActiveBusinessId } from "@/lib/tenant";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { productSalesPeriod } from "@/lib/sales-metrics";
+import { loadProductSales } from "@/lib/product-sales-data";
 
 type ReportLine = {
   sku: string;
@@ -3040,6 +3042,20 @@ function customerSalesAndProfitLines(
   });
 }
 
+async function productQuantityReportLines(searchParams: URLSearchParams): Promise<ReportLine[]> {
+  const businessId = await activeReportBusinessId();
+  if (!businessId) return [];
+  const period = productSalesPeriod(searchParams.get("period") || "monthly", searchParams.get("date") || todayIsoDate(), searchParams.get("from"), searchParams.get("to"));
+  const client = await createSupabaseServerClient();
+  const rows = await loadProductSales(client, businessId, period.start, period.end, searchParams.get("productId"));
+  return rows.map((row, index) => ({
+    sku: row.sku, description: row.product, unit: row.unit, quantity: row.quantity,
+    unitPrice: row.quantity ? row.amount / row.quantity : 0, discount: 0, taxRate: "", taxAmount: 0,
+    lineTotal: row.amount, warehouse: row.customer, batch: row.invoice, notes: period.label,
+    details: { "#": String(index + 1), Date: row.date, "Invoice no.": row.invoice, Customer: row.customer, Product: row.product, SKU: row.sku, Unit: row.unit, "Quantity sold": String(row.quantity), Sales: money(row.amount), Period: period.label },
+  }));
+}
+
 async function salesOperationalReportLines(processName: string, searchParams?: URLSearchParams): Promise<ReportLine[]> {
   const { invoices, items, allocations, period } = await salesOperationalData(searchParams);
   const invoicesById = new Map(invoices.map((invoice) => [String(invoice.id), invoice]));
@@ -3174,6 +3190,7 @@ function personInitials(name: string) {
 }
 
 function titleFor(report: Report) {
+  if (report.processName === "Product Quantity Sales Report") return "PRODUCT SALES";
   if (isCustomerSalesStatementReport(report.moduleName, report.processName)) return "CUSTOMER SALES STATEMENT";
   if (isPlainCustomerInvoice(report)) return "INVOICE";
   return report.processName.toUpperCase();
@@ -3972,6 +3989,9 @@ function blueprintFromTerms(report: Report): DocumentBlueprint {
     emphasis: "control",
   };
 
+  if (report.processName === "Product Quantity Sales Report") {
+    return { ...base, label: "Product sales", table: "Product sales", intro: [["Period", report.lines[0]?.details?.Period || "Selected period", "meta"]], headers: ["#", "Date", "Invoice no.", "Customer", "Product", "SKU", "Unit", "Quantity sold", "Sales"], signatures: [], footerNote: "Quantities use the units recorded on each sale. Cancelled and reversed invoices are excluded.", emphasis: "report" };
+  }
   if (value.includes("purchase requisition")) {
     return { ...base, accent: "#7C3AED", soft: "#F5F3FF", label: "Internal purchase request", table: "Requested items and approval need", headers: ["Req #", "Requested Item", "Branch", "Needed By", "Qty", "Reason", "Approval"], signatures: ["Requested by", "Department head", "Purchasing approval"], footerNote: "Purchase requisitions authorise need, not supplier commitment.", emphasis: "control" };
   }
@@ -4444,6 +4464,8 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
   const moduleName = searchParams.get("module") ?? "Solva Trade";
   const processName = searchParams.get("process") ?? "Business Process";
   const productId = searchParams.get("productId");
+  const isProductQuantity = processName === "Product Quantity Sales Report";
+  const productPeriod = isProductQuantity ? productSalesPeriod(searchParams.get("period") || "monthly", searchParams.get("date") || todayIsoDate(), searchParams.get("from"), searchParams.get("to")) : null;
   const customerId = searchParams.get("customerId");
   const invoiceId = searchParams.get("invoiceId");
   const grnId = searchParams.get("grnId");
@@ -4465,7 +4487,9 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
       : "";
   const priceListCustomerName = isCustomerPriceListReport(moduleName, processName) ? selectedCustomerName : "";
   const submittedLines = isProfileDocument(moduleName, processName) ? profileLinesFromFields(fields, processName) : reportLineFromFields(fields, processName);
-  const liveSourceLines = invoiceId
+  const liveSourceLines = isProductQuantity
+    ? await productQuantityReportLines(searchParams)
+    : invoiceId
     ? await salesInvoiceDocumentLines(invoiceId)
     : grnId
       ? await goodsReceivedDocumentLines(grnId)
@@ -4499,7 +4523,7 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
           : isInventoryOperationalReport(moduleName, processName)
             ? await inventoryOperationalReportLines(processName)
             : [];
-  const workflowLines = !liveSourceLines.length && !submittedLines.length ? await workflowRecordReportLines(moduleName, processName) : [];
+  const workflowLines = !isProductQuantity && !liveSourceLines.length && !submittedLines.length ? await workflowRecordReportLines(moduleName, processName) : [];
   const lines = liveSourceLines.length ? liveSourceLines : submittedLines.length ? submittedLines : workflowLines;
   const liveInvoiceDetails = invoiceId ? lines[0]?.details ?? {} : {};
   const liveGrnDetails = grnId ? lines[0]?.details ?? {} : {};
@@ -4667,6 +4691,7 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
     generatedAt: generatedAt(),
     transaction: {
       "Report owner": effectivePartyName,
+      ...(productPeriod ? { Period: productPeriod.label, Product: productId && productId !== "all" ? lines[0]?.description || "Selected product" : "All products" } : {}),
       Business: tenant.businessName,
       "KRA PIN": tenant.kraPin || "Not provided",
       Customer: effectivePartyName,
@@ -4688,7 +4713,11 @@ async function buildReport(searchParams: URLSearchParams): Promise<Report> {
       ...Object.fromEntries(Object.values(fields).map((field) => [field.label, field.value])),
     },
     lines,
-    totals: {
+    totals: isProductQuantity ? {
+      "Quantity sold": Array.from(lines.reduce((units, line) => units.set(line.unit, (units.get(line.unit) || 0) + line.quantity), new Map<string, number>()), ([unit, quantity]) => `${quantity.toLocaleString("en-KE")} ${unit}`).join("; ") || "0",
+      Total: money(lineValueTotal),
+      Invoices: String(new Set(lines.map((line) => line.details?.["Invoice no."])).size),
+    } : {
       Subtotal: money(subtotal),
       Discount: money(discount),
       ...(isCustomerStatement ? { "Opening balance": money(customerStatementOpeningBalance), Invoices: money(customerStatementDebitTotal), Payments: money(customerStatementCreditTotal), "Closing balance": money(customerStatementClosingBalance) } : {}),
@@ -5073,6 +5102,7 @@ function approvalSummary(generatedBy: string, role: string): Record<string, stri
 }
 
 function signatureLabelsFor(report: Report) {
+  if (report.processName === "Product Quantity Sales Report") return [];
   if (isCustomerPriceListReport(report.moduleName, report.processName)) {
     return [];
   }
@@ -5232,6 +5262,9 @@ function templateIntro(report: Report) {
     `;
   }
 
+  if (report.processName === "Product Quantity Sales Report") {
+    return `<section class="report-kpis"><div><span>Period</span><strong>${htmlEscape(report.lines[0]?.details?.Period || report.transaction.Period || "Selected period")}</strong></div><div><span>Quantity sold</span><strong>${htmlEscape(report.totals["Quantity sold"])}</strong></div><div><span>Sales</span><strong>${htmlEscape(report.totals.Total)}</strong></div></section>`;
+  }
   if (blueprint.emphasis === "report") {
     return `
       <section class="report-kpis">
@@ -5289,6 +5322,7 @@ function htmlDocument(report: Report, print = false) {
   const headers = lineHeaders(report);
   const catalogueDocument = isCustomerPriceListReport(report.moduleName, report.processName);
   const customerSalesStatement = isCustomerSalesStatementReport(report.moduleName, report.processName);
+  const productQuantityDocument = report.processName === "Product Quantity Sales Report";
   const plainInvoice = isPlainCustomerInvoice(report);
   const lineRows = report.lines
     .map(
@@ -5495,7 +5529,7 @@ function htmlDocument(report: Report, print = false) {
         ? ""
         : `<section class="after-table${customerSalesStatement ? " customer-statement-after-table" : ""}">
       ${
-        customerSalesStatement
+        customerSalesStatement || productQuantityDocument
           ? `<div class="statement-spacer"></div>`
           : dailyDocument
           ? `<article class="panel audit compact-note"><h3>${htmlEscape(noteTitle)}</h3><p>${htmlEscape(noteBody)}</p></article>`
@@ -6666,8 +6700,11 @@ async function landscapePdf(report: Report) {
 
   canvas.rect(48, 444, 746, 42, "soft");
   const customerStatementDocument = isCustomerSalesStatementReport(report.moduleName, report.processName);
-  const statementPeriod = report.lines[0]?.details?.Period ?? `${report.transaction["Document date"]} to ${report.transaction["Due / action date"]}`;
-  const detailCards = catalogueDocument
+  const productQuantityDocument = report.processName === "Product Quantity Sales Report";
+  const statementPeriod = report.lines[0]?.details?.Period ?? report.transaction.Period ?? `${report.transaction["Document date"]} to ${report.transaction["Due / action date"]}`;
+  const detailCards = productQuantityDocument
+    ? [["Product", report.transaction.Product || (report.lines.length && new Set(report.lines.map((line) => line.description)).size === 1 ? report.lines[0].description : "All products")], ["Period", statementPeriod], ["Generated on", report.generatedAt], ["Sale rows", recordCount]]
+    : catalogueDocument
     ? [
         ["Prepared for", report.partyName],
         ["Price list date", report.transaction["Document date"]],
@@ -6700,7 +6737,7 @@ async function landscapePdf(report: Report) {
       isProductMasterReport(report.moduleName, report.processName) || isInventoryOperationalReport(report.moduleName, report.processName);
     const customerSalesStatementReport = isCustomerSalesStatementReport(report.moduleName, report.processName);
     const supplierProfitReport = isSupplierProfitReport(report.moduleName, report.processName);
-    const kpis = [
+    const kpis = productQuantityDocument ? [["Quantity sold", report.totals["Quantity sold"]], ["Invoices", report.totals.Invoices], ["Sales", report.totals.Total]] : [
       productOrInventoryReport
         ? ["Stock value", report.totals.Total]
         : customerSalesStatementReport
