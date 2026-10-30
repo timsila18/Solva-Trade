@@ -9,6 +9,15 @@ function load(path) {
   return exports;
 }
 const { collectedPayments, productSalesPeriod } = load("../src/lib/sales-metrics.ts");
+const { normalizeProductSearch, productSearchScore } = load("../src/lib/product-search.ts");
+for (const query of ["500 ml", "500ml", "500 millilitres", "KERINGET 500 ml", "500ml keringet", "ker-500"]) {
+  assert.ok(productSearchScore(normalizeProductSearch("Keringet Water 500ml - KER-500"), normalizeProductSearch(query)) >= 0, query);
+}
+for (const query of ["1 L", "1Lt", "1 litre", "1 liters"]) assert.equal(normalizeProductSearch(query), "1l");
+assert.equal(productSearchScore(normalizeProductSearch("Coke 2L"), normalizeProductSearch("500 ml")), -1);
+assert.equal(productSearchScore("keringet water 500ml", ""), 0);
+assert.ok(productSearchScore("keringet water", "ker") < productSearchScore("water keringet", "ker"));
+console.log("ok - product search accepts size variants, punctuation, reordered words and ranks closest matches");
 const start = "2026-10-28T21:00:00.000Z", end = "2026-10-29T21:00:00.000Z";
 const payment = (id, date, status = "allocated", amount = 100) => ({ id, payment_date: date, amount_received: amount, status });
 const rows = Array.from({ length: 1501 }, (_, index) => payment(String(index), "2026-10-29T12:00:00+00:00"));
