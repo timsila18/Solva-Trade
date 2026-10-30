@@ -18,7 +18,10 @@ export function SearchableSelect({ name, label, allLabel, options, defaultValue 
   return <span className="mt-2 grid gap-2">
     <input type="search" autoComplete="off" spellCheck={false} aria-label={`Search ${label.toLowerCase()}`} placeholder={`Search ${label.toLowerCase()}`} value={query}
       onChange={(event) => setQuery(event.currentTarget.value)} className="min-h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm font-normal" />
-    <select name={name} aria-label={label} size={searchMode === "contains" && normalized ? 6 : undefined} value={selectedId} onChange={(event) => setSelectedId(event.currentTarget.value)} className="min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-sm">
+    <select name={name} aria-label={label} size={searchMode === "contains" && normalized ? 6 : undefined} value={selectedId} onChange={(event) => {
+      setSelectedId(event.currentTarget.value);
+      if (searchMode === "contains") setQuery("");
+    }} className="min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-sm">
       <option value="">{allLabel}</option>
       {selected && !visible.some((option) => option.id === selectedId) ? <option value={selectedId} hidden>{selected.label}</option> : null}
       {visible.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
