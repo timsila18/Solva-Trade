@@ -9,7 +9,7 @@ export function ProductQuantityReportForm({ products, today }: { products: { id:
   return <form action="/api/exports" target="_blank" className="mt-4 grid gap-3 rounded-md bg-slate-50 p-4 md:grid-cols-2 xl:grid-cols-[1.4fr_1fr_1fr_auto] xl:items-end">
     <input type="hidden" name="module" value="Sales" />
     <input type="hidden" name="process" value="Product Quantity Sales Report" />
-    <label className="text-sm font-semibold text-slate-700">Product<SearchableSelect name="productId" label="Report product" allLabel="All products" options={products} /></label>
+    <label className="text-sm font-semibold text-slate-700">Product<SearchableSelect name="productId" label="Report product" allLabel="All products" options={products} searchMode="contains" /></label>
     <label className="text-sm font-semibold text-slate-700">Period<select name="period" value={period} onChange={(event) => setPeriod(event.currentTarget.value)} className={inputClass}>
       <option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option><option value="custom">Custom dates</option>
     </select></label>
