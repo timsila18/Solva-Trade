@@ -2,6 +2,7 @@ import Link from "next/link";
 import { AlertTriangle, CheckCircle2, Clock3, Eye, FileText, ReceiptText, UserPlus } from "lucide-react";
 import { CustomerInvoiceSearch } from "@/components/app/customer-invoice-search";
 import { SearchableSelect } from "@/components/app/searchable-select";
+import { ProductQuantityReportForm } from "@/components/app/product-quantity-report-form";
 import { completeProcessAction, reverseSalesInvoiceAction } from "@/app/(app)/actions";
 import { PersistedForm } from "@/components/app/persisted-form";
 import { PinProtectedSubmitButton } from "@/components/app/pin-protected-export";
@@ -295,6 +296,16 @@ export default async function SalesPage({
     salesCustomers(businessId),
     salesSuppliers(businessId),
   ]);
+  const products: { id: string; label: string }[] = [];
+  let productReportError = false;
+  if (businessId) {
+    for (let offset = 0; ; offset += 1000) {
+      const { data, error } = await supabase.from("products").select("id,product_name,sku").eq("business_id", businessId).order("product_name").order("id").range(offset, offset + 999);
+      if (error) { productReportError = true; break; }
+      products.push(...(data || []).map((product) => ({ id: product.id, label: `${product.product_name}${product.sku ? ` - ${product.sku}` : ""}` })));
+      if (!data || data.length < 1000) break;
+    }
+  }
   const today = todayIsoDate();
   const monthStart = `${today.slice(0, 7)}-01`;
   const vatPeriod = previousMonthWindow(today);
@@ -375,7 +386,6 @@ export default async function SalesPage({
         ))}
       </section>
 
-      <div className="mt-5"><Link href="/sales/product-sales" className="inline-flex min-h-11 items-center gap-2 rounded-md border border-blue-200 bg-white px-4 text-sm font-semibold text-blue-700"><FileText className="h-4 w-4" />Product sales report</Link></div>
       <section className="mt-6 rounded-lg border border-cyan-100 bg-white p-5 shadow-sm">
         <div className="grid gap-4 lg:grid-cols-4">
           <div>
@@ -494,6 +504,14 @@ export default async function SalesPage({
             <PinProtectedSubmitButton name="format" value="print" className="min-h-11 rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700">Print</PinProtectedSubmitButton>
           </div>
         </form>
+      </section>
+
+      <section id="product-quantity-reports" className="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
+          <div><p className="text-sm font-semibold text-[var(--solva-blue-700)]">Product quantities sold</p><h2 className="mt-1 text-xl font-semibold text-slate-950">Generate Product Sales Report</h2></div>
+          <Link href="/sales/product-sales" className="text-sm font-semibold text-[var(--solva-blue-700)]">View report</Link>
+        </div>
+        {productReportError ? <p role="alert" className="mt-4 text-sm text-red-700">Product selection could not load. Reload to try again.</p> : <ProductQuantityReportForm products={products} today={today} />}
       </section>
 
       <section id="supplier-sales-reports" className="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
