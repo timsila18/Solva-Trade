@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Download, Eye, PackagePlus, Pencil, Search, Trash2 } from "lucide-react";
 import { deleteProductAction } from "@/app/(app)/actions";
+import { ProductThumbnail } from "@/components/app/product-thumbnail";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getActiveBusinessId } from "@/lib/tenant";
@@ -14,6 +15,7 @@ type ProductRow = {
   sku: string | null;
   barcode: string | null;
   product_type: string | null;
+  image_path: string | null;
   active: boolean | null;
   default_selling_price_placeholder: number | string | null;
   standard_cost: number | string | null;
@@ -91,7 +93,7 @@ async function loadProducts(): Promise<ProductLoadResult> {
   const [productsResult, balancesResult] = await Promise.all([
     admin
       .from("products")
-      .select("id, product_name, product_code, sku, barcode, product_type, active, default_selling_price_placeholder, standard_cost, product_categories(category_name), brands(brand_name)")
+      .select("id, product_name, product_code, sku, barcode, product_type, image_path, active, default_selling_price_placeholder, standard_cost, product_categories(category_name), brands(brand_name)")
       .eq("business_id", businessId)
       .or("archived.is.null,archived.eq.false")
       .order("product_name", { ascending: true })
@@ -196,9 +198,12 @@ export default async function ProductsPage({
               const balance = balances.get(product.id) ?? { quantity: 0, value: 0 };
               return (
                 <div key={product.id} className="grid grid-cols-[1.5fr_0.85fr_0.95fr_1fr_1fr_0.85fr_0.9fr_0.75fr_1fr] items-center gap-3 border-b border-slate-100 px-4 py-3 text-sm last:border-b-0">
-                  <div>
-                    <p className="font-semibold text-slate-950">{product.product_name}</p>
-                    <p className="mt-0.5 text-xs text-slate-500">{product.product_code ?? titleCase(product.product_type)}</p>
+                  <div className="flex items-center gap-3">
+                    <ProductThumbnail src={product.image_path} name={product.product_name} />
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold text-slate-950">{product.product_name}</p>
+                      <p className="mt-0.5 truncate text-xs text-slate-500">{product.product_code ?? titleCase(product.product_type)}</p>
+                    </div>
                   </div>
                   <span className="text-slate-700">{product.sku || "-"}</span>
                   <span className="text-slate-700">{product.barcode || "-"}</span>

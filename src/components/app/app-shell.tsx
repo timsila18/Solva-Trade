@@ -12,6 +12,7 @@ import {
   MessageCircle,
 } from "lucide-react";
 import { QuickCommand } from "@/components/app/quick-command";
+import { PwaInstallButton } from "@/components/pwa-install-button";
 import { navigationItems } from "@/lib/navigation";
 import { canPerformAction } from "@/lib/permissions";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -348,6 +349,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
                   </Link>
                 );
               })}
+              <PwaInstallButton />
               <Link href="/support" className="grid h-10 w-10 shrink-0 place-items-center rounded-[6px] border border-slate-300 bg-white text-slate-600">
                 <CircleHelp className="h-4 w-4" />
               </Link>
@@ -367,7 +369,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
                     <LogIn className="h-4 w-4" />
                     Login
                   </Link>
-                  <Link href="/create-account" className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-md bg-[var(--solva-blue-700)] px-3 text-sm font-semibold text-white shadow-sm">
+                  <Link href="/sign-up" className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-md bg-[var(--solva-blue-700)] px-3 text-sm font-semibold text-white shadow-sm">
                     Sign up
                   </Link>
                 </>

@@ -17,6 +17,7 @@ type ProductOption = {
   default_selling_price_placeholder: number | string | null;
   vat_status: string | null;
   tax_category: string | null;
+  image_path: string | null;
   active: boolean | null;
 };
 
@@ -39,7 +40,7 @@ async function loadCatalogueData() {
       .limit(300),
     supabase
       .from("products")
-      .select("id, product_name, product_code, sku, default_selling_price_placeholder, vat_status, tax_category, active")
+      .select("id, product_name, product_code, sku, default_selling_price_placeholder, vat_status, tax_category, image_path, active")
       .eq("business_id", businessId)
       .eq("active", true)
       .eq("archived", false)

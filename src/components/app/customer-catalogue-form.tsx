@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { FileText, Printer, Search, X } from "lucide-react";
+import { ProductThumbnail } from "@/components/app/product-thumbnail";
 
 type CustomerOption = {
   id: string;
@@ -19,6 +20,7 @@ type ProductOption = {
   default_selling_price_placeholder: number | string | null;
   vat_status: string | null;
   tax_category: string | null;
+  image_path: string | null;
   active: boolean | null;
 };
 
@@ -176,7 +178,12 @@ export function CustomerCatalogueForm({ customers, products }: CustomerCatalogue
                         <input type="checkbox" name={`include_${index}`} value="yes" defaultChecked className="h-4 w-4" />
                         <input type="hidden" name={`product_id_${index}`} value={product.id} />
                       </td>
-                      <td className="px-3 py-2 font-semibold text-slate-950">{product.product_name}</td>
+                      <td className="px-3 py-2 font-semibold text-slate-950">
+                        <div className="flex items-center gap-3">
+                          <ProductThumbnail src={product.image_path} name={product.product_name} className="h-10 w-10" />
+                          <span>{product.product_name}</span>
+                        </div>
+                      </td>
                       <td className="px-3 py-2 text-slate-600">{product.sku || product.product_code || "-"}</td>
                       <td className="px-3 py-2">
                         <input

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { ArrowRight, ShieldCheck, Sparkles } from "lucide-react";
+import { PwaInstallButton } from "@/components/pwa-install-button";
 
 export function AuthCard({
   title,
@@ -46,7 +47,10 @@ export function AuthCard({
           <p className="mt-5 max-w-xl text-base leading-7 text-slate-300">
             Sales, stock receipts, customer balances, cash, VAT treatment and daily reports stay in one tenant-controlled workspace.
           </p>
-          <div className="mt-8 grid gap-3">
+          <div className="mt-8">
+            <PwaInstallButton variant="dark" />
+          </div>
+          <div className="mt-6 grid gap-3">
             <div className="border border-white/10 bg-white/[0.06] p-4">
               <Sparkles className="h-5 w-5 text-emerald-300" />
               <p className="mt-3 text-sm font-semibold">Daily operating clarity</p>
@@ -109,7 +113,7 @@ export function AuthCard({
           </button>
           <div className="mt-5 flex flex-wrap justify-between gap-3 text-sm text-slate-600">
             <Link href="/sign-in">Sign in</Link>
-            <Link href="/create-account">Create account</Link>
+            <Link href="/sign-up">Sign up</Link>
             <Link href="/forgot-password">Forgot password</Link>
           </div>
         </form>
