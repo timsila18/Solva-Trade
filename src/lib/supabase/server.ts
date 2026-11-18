@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
+import { cache } from "react";
 
 export async function createSupabaseServerClient() {
   const cookieStore = await cookies();
@@ -28,3 +29,9 @@ export async function createSupabaseServerClient() {
     },
   });
 }
+
+// Reuse verification only within one server render; never across users or requests.
+export const getSupabaseUser = cache(async () => {
+  const supabase = await createSupabaseServerClient();
+  return supabase.auth.getUser();
+});

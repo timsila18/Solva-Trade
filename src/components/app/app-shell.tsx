@@ -15,7 +15,7 @@ import { QuickCommand } from "@/components/app/quick-command";
 import { navigationItems } from "@/lib/navigation";
 import { canPerformAction } from "@/lib/permissions";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getSupabaseUser } from "@/lib/supabase/server";
 import type { CoreRole, Membership } from "@/lib/types";
 
 const priorityNav = [
@@ -163,9 +163,8 @@ function displayBusinessName(name: string | null | undefined) {
 }
 
 export async function AppShell({ children }: { children: React.ReactNode }) {
-  const supabase = await createSupabaseServerClient();
   const admin = createSupabaseAdminClient();
-  const { data: userData } = await supabase.auth.getUser();
+  const { data: userData } = await getSupabaseUser();
   const user = userData.user;
   const activeBusinessId = typeof user?.app_metadata?.active_business_id === "string" ? user.app_metadata.active_business_id : null;
   const metadataRole = typeof user?.app_metadata?.business_role === "string" ? user.app_metadata.business_role : "owner";
@@ -182,6 +181,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
     legalName: metadataBusinessName,
   };
   let branch = { name: "Main workspace", code: "HQ" };
+  let navBadges: Record<string, string> = defaultNavBadges;
   let membership: Membership = {
     userId: user?.id ?? "guest-user",
     businessId: business.id,
@@ -212,11 +212,17 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
         branchIds: membershipData.branch_ids ?? [],
       };
 
-      const { data: businessData } = await admin
+      const [{ data: businessData }, { data: branchData }, badges] = await Promise.all([admin
         .from("businesses")
         .select("id, trading_name, legal_name")
         .eq("id", membershipData.business_id)
-        .maybeSingle();
+        .maybeSingle(),
+        admin.from("branches").select("branch_name, branch_code")
+          .eq("business_id", membershipData.business_id).eq("active", true)
+          .order("is_default", { ascending: false }).limit(1).maybeSingle(),
+        loadNavBadges(admin, membershipData.business_id),
+      ]);
+      navBadges = badges;
       if (businessData) {
         business = {
           id: businessData.id,
@@ -225,14 +231,6 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
         };
       }
 
-      const { data: branchData } = await admin
-        .from("branches")
-        .select("branch_name, branch_code")
-        .eq("business_id", membershipData.business_id)
-        .eq("active", true)
-        .order("is_default", { ascending: false })
-        .limit(1)
-        .maybeSingle();
       if (branchData) branch = { name: branchData.branch_name, code: branchData.branch_code };
     }
   }
@@ -241,7 +239,6 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
     (item) => !item.permission || canPerformAction(membership, item.permission),
   );
   const mainNav = nav.filter((item) => priorityNav.includes(item.label));
-  const navBadges = await loadNavBadges(admin, business.id);
 
   return (
     <div className="min-h-screen bg-[#f3f6fa] text-slate-950">
@@ -278,6 +275,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
                       <Link
                         key={item.href}
                         href={item.href}
+                        prefetch={false}
                         className={`flex min-h-10 items-center justify-between rounded-[6px] px-3 py-2 text-sm font-medium transition ${
                           index === 0 && group.label === "Command"
                             ? "bg-white/12 text-white ring-1 ring-cyan-200/20"
@@ -384,7 +382,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
       </div>
       <nav className="fixed inset-x-0 bottom-0 grid grid-cols-5 border-t border-slate-200 bg-white/95 backdrop-blur lg:hidden">
         {mainNav.slice(0, 5).map((item) => (
-          <Link key={item.href} href={item.href} className="px-2 py-3 text-center text-xs font-semibold text-slate-700">
+          <Link key={item.href} href={item.href} prefetch={false} className="px-2 py-3 text-center text-xs font-semibold text-slate-700">
             {item.label}
           </Link>
         ))}

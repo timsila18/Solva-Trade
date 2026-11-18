@@ -3,10 +3,13 @@
 import { Search } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CustomerLookup, ProductLookup, SupplierLookup } from "@/lib/workflow-live-data";
 
 type Mode = "sale" | "goods-received";
+
+const EMPTY_CUSTOMERS: CustomerLookup[] = [];
+const EMPTY_SUPPLIERS: SupplierLookup[] = [];
 
 type Props = {
   mode: Mode;
@@ -77,7 +80,144 @@ function searchScore(values: unknown[], query: string, prefixOnly = false) {
     : 1;
 }
 
-export function MultiLineTransactionForm({ mode, customers = [], suppliers = [], products, today }: Props) {
+
+const TransactionRow = memo(function TransactionRow({ product, index, mode, rowVisible, selected, setLineSelected, recalculate }: {
+  product: ProductLookup;
+  index: number;
+  mode: Mode;
+  rowVisible: boolean;
+  selected: boolean;
+  setLineSelected: (index: number, selected: boolean) => void;
+  recalculate: (target: EventTarget | null) => void;
+}) {
+  const productName = product.name || "Unnamed product";
+  const productCode = product.code || "";
+  const defaultUnitValue = mode === "sale" && product.price > 0 ? product.price : 0;
+  const saleTotal = 0;
+  return (
+    <tr
+      hidden={!rowVisible}
+      className="border-b border-slate-100 odd:bg-white even:bg-slate-50"
+    >
+      <td className="px-3 py-2 align-middle">
+        <input
+          type="checkbox"
+          name={`field_line_${index}_selected`}
+          value="yes"
+          checked={selected}
+          onChange={(event) => {
+            setLineSelected(index, event.currentTarget.checked);
+            recalculate(event.currentTarget);
+          }}
+          className="h-4 w-4"
+        />
+        <input type="hidden" name={`field_line_${index}_product_id`} value={product.id || ""} />
+        <input type="hidden" name={`field_line_${index}_product_name`} value={productName} />
+        <input type="hidden" name={`field_line_${index}_product_code`} value={productCode} />
+        <input type="hidden" name={`field_line_${index}_tax_rate`} value={product.vatRate ?? 0} />
+        <input type="hidden" name={`field_line_${index}_tax_amount`} />
+        <input type="hidden" name={`field_line_${index}_line_subtotal`} />
+        <input type="hidden" name={`field_line_${index}_line_total`} />
+      </td>
+      <td className="px-3 py-2 align-middle">
+        <p className="font-semibold text-slate-950">{productName}</p>
+        <p className="text-xs text-slate-500">{productCode || "No code"} {product.vatCode ? `- ${product.vatCode}` : ""}</p>
+      </td>
+      <td className="px-3 py-2 align-middle text-slate-600">{product.trackInventory ? money(product.available) : "Service"}</td>
+      <td className="px-3 py-2 align-middle">
+        <input
+          name={`field_line_${index}_quantity`}
+          type="number"
+          min="0"
+          step="0.01"
+          inputMode="decimal"
+          defaultValue=""
+          onChange={(event) => {
+            const value = event.currentTarget.value;
+            const form = event.currentTarget.form;
+            const checkbox = form?.elements.namedItem(`field_line_${index}_selected`);
+            if (numberValue(value) > 0 && checkbox instanceof HTMLInputElement) {
+              checkbox.checked = true;
+              setLineSelected(index, true);
+            }
+            recalculate(event.currentTarget);
+          }}
+          className="w-28 rounded-md border border-slate-300 px-2 py-2"
+        />
+      </td>
+      <td className="px-3 py-2 align-middle">
+        <input
+          name={`field_line_${index}_${mode === "sale" ? "unit_price" : "unit_cost"}`}
+          type="number"
+          min="0"
+          step="0.01"
+          inputMode="decimal"
+          defaultValue={defaultUnitValue ? String(defaultUnitValue) : ""}
+          onChange={(event) => recalculate(event.currentTarget)}
+          className="w-32 rounded-md border border-slate-300 px-2 py-2"
+        />
+      </td>
+      {mode === "sale" ? (
+        <td className="px-3 py-2 align-middle">
+          <input
+            name={`field_line_${index}_discount`}
+            type="number"
+            min="0"
+            step="0.01"
+            inputMode="decimal"
+            defaultValue=""
+            onChange={(event) => recalculate(event.currentTarget)}
+            className="w-28 rounded-md border border-slate-300 px-2 py-2"
+          />
+        </td>
+      ) : (
+        <td className="px-3 py-2 align-middle">
+          <input
+            name={`field_line_${index}_rejected_quantity`}
+            type="number"
+            min="0"
+            step="0.01"
+            inputMode="decimal"
+            defaultValue=""
+            onChange={(event) => recalculate(event.currentTarget)}
+            className="w-28 rounded-md border border-slate-300 px-2 py-2"
+          />
+        </td>
+      )}
+      {mode === "sale" ? (
+        <td className="px-3 py-2 align-middle text-slate-600"><span data-line-tax={index}>Included</span></td>
+      ) : (
+        <td className="px-3 py-2 align-middle">
+          <input name={`field_line_${index}_batch`} placeholder="Batch" className="w-32 rounded-md border border-slate-300 px-2 py-2" />
+        </td>
+      )}
+      {mode === "sale" ? (
+        <td className="px-3 py-2 align-middle">
+          <select
+            name={`field_line_${index}_source_choice`}
+            defaultValue="auto_fifo"
+            className="w-40 rounded-md border border-slate-300 bg-white px-2 py-2 text-xs"
+          >
+            <option value="auto_fifo">Auto/FIFO</option>
+            <option value="direct_supplier">Direct supplier</option>
+            <option value="local_market">Local market</option>
+            <option value="tz_supplier">Tanzania Supplier</option>
+          </select>
+        </td>
+      ) : null}
+      {mode === "sale" ? (
+        <td className="px-3 py-2 align-middle font-semibold"><span data-line-total={index}>{money(saleTotal)}</span></td>
+      ) : (
+        <td className="px-3 py-2 align-middle">
+          <input name={`field_line_${index}_expiry_date`} type="date" className="w-36 rounded-md border border-slate-300 px-2 py-2" />
+        </td>
+      )}
+    </tr>
+  );
+
+});
+
+export function MultiLineTransactionForm({ mode, customers = EMPTY_CUSTOMERS, suppliers = EMPTY_SUPPLIERS, products, today }: Props) {
   const [search, setSearch] = useState("");
   const [partySearch, setPartySearch] = useState("");
   const [selectedPartyId, setSelectedPartyId] = useState("");
@@ -124,9 +264,10 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
         setField(form, `field_line_${index}_tax_amount`, lineTax.toFixed(2));
         setField(form, `field_line_${index}_line_total`, lineTotal.toFixed(2));
         setField(form, `field_line_${index}_line_subtotal`, lineSubtotal.toFixed(2));
-        const taxDisplay = form.querySelector(`[data-line-tax="${index}"]`);
+        const row = checkbox instanceof HTMLInputElement ? checkbox.closest("tr") : null;
+        const taxDisplay = row?.querySelector(`[data-line-tax="${index}"]`);
         if (taxDisplay) taxDisplay.textContent = mode === "sale" ? "Included" : money(lineTax);
-        const display = form.querySelector(`[data-line-total="${index}"]`);
+        const display = row?.querySelector(`[data-line-total="${index}"]`);
         if (display) display.textContent = money(lineTotal);
         if (isSelected) {
           lineSummaries.current.set(index, {
@@ -200,7 +341,7 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
   }, [matchingIndexes, products]);
   const visibleIndexSet = useMemo(() => new Set(visibleIndexes), [visibleIndexes]);
 
-  function setLineSelected(index: number, selected: boolean) {
+  const setLineSelected = useCallback((index: number, selected: boolean) => {
     setSelectedIndexes((current) => {
       if (current.has(index) === selected) return current;
       const next = new Set(current);
@@ -208,7 +349,7 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
       else next.delete(index);
       return next;
     });
-  }
+  }, []);
 
   const previewLines = useMemo(() => {
     return Array.from(selectedIndexes)
@@ -547,134 +688,11 @@ export function MultiLineTransactionForm({ mode, customers = [], suppliers = [],
             </tr>
           </thead>
           <tbody>
-            {products.map((product, index) => {
-              const rowVisible = visibleIndexSet.has(index);
-              const productName = product.name || "Unnamed product";
-              const productCode = product.code || "";
-              const defaultUnitValue = mode === "sale" && product.price > 0 ? product.price : 0;
-              const saleTotal = 0;
-              return (
-                <tr
-                  key={product.id || index}
-                  hidden={!rowVisible}
-                  className="border-b border-slate-100 odd:bg-white even:bg-slate-50"
-                >
-                  <td className="px-3 py-2 align-middle">
-                    <input
-                      type="checkbox"
-                      name={`field_line_${index}_selected`}
-                      value="yes"
-                      checked={selectedIndexes.has(index)}
-                      onChange={(event) => {
-                        setLineSelected(index, event.currentTarget.checked);
-                        recalculate(event.currentTarget);
-                      }}
-                      className="h-4 w-4"
-                    />
-                    <input type="hidden" name={`field_line_${index}_product_id`} value={product.id || ""} />
-                    <input type="hidden" name={`field_line_${index}_product_name`} value={productName} />
-                    <input type="hidden" name={`field_line_${index}_product_code`} value={productCode} />
-                    <input type="hidden" name={`field_line_${index}_tax_rate`} value={product.vatRate ?? 0} />
-                    <input type="hidden" name={`field_line_${index}_tax_amount`} />
-                    <input type="hidden" name={`field_line_${index}_line_subtotal`} />
-                    <input type="hidden" name={`field_line_${index}_line_total`} />
-                  </td>
-                  <td className="px-3 py-2 align-middle">
-                    <p className="font-semibold text-slate-950">{productName}</p>
-                    <p className="text-xs text-slate-500">{productCode || "No code"} {product.vatCode ? `- ${product.vatCode}` : ""}</p>
-                  </td>
-                  <td className="px-3 py-2 align-middle text-slate-600">{product.trackInventory ? money(product.available) : "Service"}</td>
-                  <td className="px-3 py-2 align-middle">
-                    <input
-                      name={`field_line_${index}_quantity`}
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      inputMode="decimal"
-                      defaultValue=""
-                      onChange={(event) => {
-                        const value = event.currentTarget.value;
-                        const form = event.currentTarget.form;
-                        const checkbox = form?.elements.namedItem(`field_line_${index}_selected`);
-                        if (numberValue(value) > 0 && checkbox instanceof HTMLInputElement) {
-                          checkbox.checked = true;
-                          setLineSelected(index, true);
-                        }
-                        recalculate(event.currentTarget);
-                      }}
-                      className="w-28 rounded-md border border-slate-300 px-2 py-2"
-                    />
-                  </td>
-                  <td className="px-3 py-2 align-middle">
-                    <input
-                      name={`field_line_${index}_${mode === "sale" ? "unit_price" : "unit_cost"}`}
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      inputMode="decimal"
-                      defaultValue={defaultUnitValue ? String(defaultUnitValue) : ""}
-                      onChange={(event) => recalculate(event.currentTarget)}
-                      className="w-32 rounded-md border border-slate-300 px-2 py-2"
-                    />
-                  </td>
-                  {mode === "sale" ? (
-                    <td className="px-3 py-2 align-middle">
-                      <input
-                        name={`field_line_${index}_discount`}
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        inputMode="decimal"
-                        defaultValue=""
-                        onChange={(event) => recalculate(event.currentTarget)}
-                        className="w-28 rounded-md border border-slate-300 px-2 py-2"
-                      />
-                    </td>
-                  ) : (
-                    <td className="px-3 py-2 align-middle">
-                      <input
-                        name={`field_line_${index}_rejected_quantity`}
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        inputMode="decimal"
-                        defaultValue=""
-                        onChange={(event) => recalculate(event.currentTarget)}
-                        className="w-28 rounded-md border border-slate-300 px-2 py-2"
-                      />
-                    </td>
-                  )}
-                  {mode === "sale" ? (
-                    <td className="px-3 py-2 align-middle text-slate-600"><span data-line-tax={index}>Included</span></td>
-                  ) : (
-                    <td className="px-3 py-2 align-middle">
-                      <input name={`field_line_${index}_batch`} placeholder="Batch" className="w-32 rounded-md border border-slate-300 px-2 py-2" />
-                    </td>
-                  )}
-                  {mode === "sale" ? (
-                    <td className="px-3 py-2 align-middle">
-                      <select
-                        name={`field_line_${index}_source_choice`}
-                        defaultValue="auto_fifo"
-                        className="w-40 rounded-md border border-slate-300 bg-white px-2 py-2 text-xs"
-                      >
-                        <option value="auto_fifo">Auto/FIFO</option>
-                        <option value="direct_supplier">Direct supplier</option>
-                        <option value="local_market">Local market</option>
-                        <option value="tz_supplier">Tanzania Supplier</option>
-                      </select>
-                    </td>
-                  ) : null}
-                  {mode === "sale" ? (
-                    <td className="px-3 py-2 align-middle font-semibold"><span data-line-total={index}>{money(saleTotal)}</span></td>
-                  ) : (
-                    <td className="px-3 py-2 align-middle">
-                      <input name={`field_line_${index}_expiry_date`} type="date" className="w-36 rounded-md border border-slate-300 px-2 py-2" />
-                    </td>
-                  )}
-                </tr>
-              );
-            })}
+            {products.map((product, index) => (
+              <TransactionRow key={product.id || index} product={product} index={index} mode={mode}
+                rowVisible={visibleIndexSet.has(index)} selected={selectedIndexes.has(index)}
+                setLineSelected={setLineSelected} recalculate={recalculate} />
+            ))}
             {!visibleIndexes.length ? (
               <tr>
                 <td colSpan={mode === "sale" ? 9 : 8} className="bg-white px-4 py-8 text-center text-sm text-slate-600">

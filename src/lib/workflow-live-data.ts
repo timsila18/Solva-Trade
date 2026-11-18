@@ -1,5 +1,5 @@
 import "server-only";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseServerClient, getSupabaseUser } from "@/lib/supabase/server";
 import { getActiveBusinessId } from "@/lib/tenant";
 
 export type CustomerLookup = {
@@ -46,13 +46,30 @@ export type SalesWorkflowLookups = {
 };
 
 async function currentBusinessId() {
-  const supabase = await createSupabaseServerClient();
-  const { data } = await supabase.auth.getUser();
+  const activeBusinessId = await getActiveBusinessId();
+  if (activeBusinessId) return activeBusinessId;
+  const { data } = await getSupabaseUser();
   const user = data.user;
   return (
-    (await getActiveBusinessId()) ||
     (typeof user?.app_metadata?.active_business_id === "string" ? user.app_metadata.active_business_id : null)
   );
+}
+
+// Advance by returned rows, not requested size: deployments may have a smaller API row limit.
+async function loadAllRows<T>(
+  queryPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null; count?: number | null }>,
+  label: string,
+) {
+  const rows: T[] = [];
+  let total: number | null = null;
+  while (true) {
+    const result = await queryPage(rows.length, rows.length + 999);
+    if (result.error) throw new Error(`Could not load ${label}. ${result.error.message}`);
+    if (typeof result.count === "number") total = result.count;
+    if (!result.data?.length) return { data: rows };
+    rows.push(...result.data);
+    if (total !== null && rows.length >= total) return { data: rows };
+  }
 }
 
 async function loadProductTaxes(
@@ -61,16 +78,13 @@ async function loadProductTaxes(
 ) {
   const today = new Date().toISOString().slice(0, 10);
   const [rates, mappings, codes] = await Promise.all([
-    admin.from("tax_rates").select("id, tax_code, rate").eq("business_id", businessId).eq("active", true)
-      .lte("effective_start_date", today).or(`effective_end_date.is.null,effective_end_date.gte.${today}`),
-    admin.from("product_tax_mappings").select("product_id, sales_vat_code_id").eq("business_id", businessId)
-      .eq("active", true).not("product_id", "is", null).order("precedence", { ascending: true }),
-    admin.from("vat_codes").select("id, business_id, vat_code, rate").or(`business_id.eq.${businessId},business_id.is.null`)
-      .eq("active", true).order("effective_start_date", { ascending: false }),
+    loadAllRows((from, to) => admin.from("tax_rates").select("id, tax_code, rate", { count: from === 0 ? "exact" : undefined }).eq("business_id", businessId).eq("active", true)
+      .lte("effective_start_date", today).or(`effective_end_date.is.null,effective_end_date.gte.${today}`).order("id", { ascending: true }).range(from, to), "product tax settings"),
+    loadAllRows((from, to) => admin.from("product_tax_mappings").select("product_id, sales_vat_code_id", { count: from === 0 ? "exact" : undefined }).eq("business_id", businessId)
+      .eq("active", true).not("product_id", "is", null).order("precedence", { ascending: true }).order("id", { ascending: true }).range(from, to), "product tax settings"),
+    loadAllRows((from, to) => admin.from("vat_codes").select("id, business_id, vat_code, rate", { count: from === 0 ? "exact" : undefined }).or(`business_id.eq.${businessId},business_id.is.null`)
+      .eq("active", true).order("effective_start_date", { ascending: false }).order("id", { ascending: true }).range(from, to), "product tax settings"),
   ]);
-  for (const result of [rates, mappings, codes]) {
-    if (result.error) throw new Error(`Could not load product tax settings. ${result.error.message}`);
-  }
   const rateById = new Map((rates.data ?? []).map((rate) => [String(rate.id), rate]));
   const codeById = new Map((codes.data ?? []).map((code) => [String(code.id), code]));
   const mappingByProduct = new Map<string, string | null>();
@@ -107,43 +121,41 @@ export async function getSalesWorkflowLookups({ includeCustomers = true, include
       .limit(1)
       .maybeSingle(),
   ]).then(async ([{ data: branch }, { data: warehouse }]) => {
-    let balanceQuery = admin.from("stock_balances").select("product_id, available_quantity").eq("business_id", businessId);
-    if (branch?.id) balanceQuery = balanceQuery.eq("branch_id", branch.id);
-    if (warehouse?.id) balanceQuery = balanceQuery.eq("warehouse_id", warehouse.id);
-    return await balanceQuery;
+    return loadAllRows((from, to) => {
+      let balanceQuery = admin.from("stock_balances").select("product_id, available_quantity", { count: from === 0 ? "exact" : undefined }).eq("business_id", businessId);
+      if (branch?.id) balanceQuery = balanceQuery.eq("branch_id", branch.id);
+      if (warehouse?.id) balanceQuery = balanceQuery.eq("warehouse_id", warehouse.id);
+      return balanceQuery.order("product_id").order("id").range(from, to);
+    }, "stock balances");
   });
   const [{ data: customers }, { data: products }, { data: balances }, { data: invoices }, { data: suppliers }, taxForProduct] = await Promise.all([
-    includeCustomers ? admin
+    includeCustomers ? loadAllRows((from, to) => admin
       .from("customers")
-      .select("id, customer_name, customer_code, phone, current_balance")
+      .select("id, customer_name, customer_code, phone, current_balance", { count: from === 0 ? "exact" : undefined })
       .eq("business_id", businessId)
       .eq("active", true)
-      .order("customer_name", { ascending: true })
-      .limit(1000) : Promise.resolve({ data: [] }),
-    admin
+      .order("customer_name", { ascending: true }).order("id", { ascending: true }).range(from, to), "customers") : Promise.resolve({ data: [] }),
+    loadAllRows((from, to) => admin
       .from("products")
-      .select("id, product_name, product_code, sku, track_inventory, default_selling_price_placeholder, default_sales_tax_id, vat_status, tax_category")
+      .select("id, product_name, product_code, sku, track_inventory, default_selling_price_placeholder, default_sales_tax_id, vat_status, tax_category", { count: from === 0 ? "exact" : undefined })
       .eq("business_id", businessId)
       .eq("active", true)
       .eq("archived", false)
-      .order("product_name", { ascending: true })
-      .limit(300),
+      .order("product_name", { ascending: true }).order("id", { ascending: true }).range(from, to), "products"),
     balancesPromise,
-    includeInvoices ? admin
+    includeInvoices ? loadAllRows((from, to) => admin
       .from("sales_invoices")
-      .select("id, invoice_number, customer_id, total_amount, balance_due, customers(customer_name)")
+      .select("id, invoice_number, customer_id, total_amount, balance_due, customers(customer_name)", { count: from === 0 ? "exact" : undefined })
       .eq("business_id", businessId)
       .gt("balance_due", 0)
       .in("status", ["posted", "partially_paid", "overdue"])
-      .order("invoice_date", { ascending: false })
-      .limit(200) : Promise.resolve({ data: [] }),
-    admin
+      .order("invoice_date", { ascending: false }).order("id", { ascending: true }).range(from, to), "sales_invoices") : Promise.resolve({ data: [] }),
+    loadAllRows((from, to) => admin
       .from("suppliers")
-      .select("id, legal_name, trading_name, supplier_code, primary_phone, supplier_type")
+      .select("id, legal_name, trading_name, supplier_code, primary_phone, supplier_type", { count: from === 0 ? "exact" : undefined })
       .eq("business_id", businessId)
       .in("status", ["approved", "draft", "pending_approval"])
-      .order("legal_name", { ascending: true })
-      .limit(200),
+      .order("legal_name", { ascending: true }).order("id", { ascending: true }).range(from, to), "suppliers"),
     loadProductTaxes(admin, businessId),
   ]);
 

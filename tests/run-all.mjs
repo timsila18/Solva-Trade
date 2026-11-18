@@ -13,9 +13,14 @@ const suites = [
   "business-intelligence",
   "saas-platform",
   "workflow-loading",
+  "transaction-form",
   "global-search",
   "service-worker",
   "sales-metrics",
+  "dashboard-loading",
+  "sales-dashboard-data",
+  "sales-history",
+  "map-with-concurrency",
 ];
 
 for (const suite of suites) {

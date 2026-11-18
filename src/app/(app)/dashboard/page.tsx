@@ -13,8 +13,9 @@ import {
 } from "@/lib/business-intelligence-data";
 import { generateRecommendations, rankAlerts } from "@/lib/business-intelligence";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getSupabaseUser } from "@/lib/supabase/server";
 import { collectedPayments, RECEIVED_PAYMENT_STATUSES, type CollectedPayment } from "@/lib/sales-metrics";
+import { fetchAllPages } from "@/lib/dashboard-loading";
 
 const alerts = rankAlerts(alertExamples);
 const recommendations = generateRecommendations(alertExamples).slice(0, 3);
@@ -96,20 +97,6 @@ type ExpenseRow = {
   total_paid: number | string | null;
 };
 
-async function fetchAllPages<T>(
-  fetchPage: (from: number, to: number) => Promise<{ data: T[]; error: { message: string } | null }>,
-) {
-  const pageSize = 1000;
-  const rows: T[] = [];
-
-  for (let from = 0; ; from += pageSize) {
-    const { data, error } = await fetchPage(from, from + pageSize - 1);
-    if (error) throw new Error(`Unable to load dashboard profit data: ${error.message}`);
-    rows.push(...data);
-    if (data.length < pageSize) return rows;
-  }
-}
-
 function workflowAmount(payload: WorkflowPayload | null | undefined) {
   const fields = payload?.fields ?? {};
   return numeric(fields.total?.value ?? fields.amount?.value ?? fields.subtotal?.value);
@@ -162,10 +149,8 @@ function expenseTotalForPeriod(rows: { expense_date: string | null; total_paid: 
 }
 
 export default async function DashboardPage() {
-  const supabase = await createSupabaseServerClient();
   const admin = createSupabaseAdminClient();
-  const { data: userData } = await supabase.auth.getUser();
-  const user = userData.user;
+  const { data: { user } } = await getSupabaseUser();
   const userName =
     typeof user?.user_metadata?.full_name === "string"
       ? user.user_metadata.full_name
@@ -178,6 +163,7 @@ export default async function DashboardPage() {
   let businessName = metadataBusinessName;
   let branchName = "Main workspace";
   let businessId = metadataBusinessId;
+  let workspaceLabels: Promise<void> = Promise.resolve();
 
   if (user) {
     const { data: membership } = await admin
@@ -190,34 +176,35 @@ export default async function DashboardPage() {
     businessId = membership?.business_id ?? businessId;
 
     if (businessId) {
-      const { data: business } = await admin
-        .from("businesses")
-        .select("trading_name, legal_name")
-        .eq("id", businessId)
-        .maybeSingle();
-      businessName = displayBusinessName(business?.trading_name ?? business?.legal_name ?? businessName);
-
-      const { data: branch } = await admin
-        .from("branches")
-        .select("branch_name")
-        .eq("business_id", businessId)
-        .eq("active", true)
-        .order("is_default", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      branchName = branch?.branch_name ?? branchName;
+      workspaceLabels = Promise.all([
+        admin.from("businesses")
+          .select("trading_name, legal_name")
+          .eq("id", businessId)
+          .maybeSingle(),
+        admin.from("branches")
+          .select("branch_name")
+          .eq("business_id", businessId)
+          .eq("active", true)
+          .order("is_default", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ]).then(([business, branch]) => {
+        businessName = displayBusinessName(business.data?.trading_name ?? business.data?.legal_name ?? businessName);
+        branchName = branch.data?.branch_name ?? branchName;
+      });
     }
   }
 
   const today = todayInNairobi();
   const tomorrow = new Date(`${today}T00:00:00+03:00`);
-  tomorrow.setDate(tomorrow.getDate() + 1);
+  tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
   const tomorrowIso = tomorrow.toISOString();
   const todayStartIso = new Date(`${today}T00:00:00+03:00`).toISOString();
   const weekStartDate = startOfWeekDate(today);
   const monthStartDate = startOfMonthDate(today);
   const yearStartDate = today.slice(0, 4) + "-01-01";
-  const yearStartIso = new Date(`${yearStartDate}T00:00:00+03:00`).toISOString();
+  // A Monday-based week can start in the previous calendar year.
+  const profitStartDate = weekStartDate < yearStartDate ? weekStartDate : yearStartDate;
   let todaySales = 0;
   let todayInvoiceCount = 0;
   let cashCollected = 0;
@@ -252,79 +239,87 @@ export default async function DashboardPage() {
       profitAllocationsResult,
       expensesResult,
       workflowResult,
+      recentWorkflowResult,
     ] = await Promise.all([
       fetchAllPages<{
         id: string;
-        invoice_number: string | null;
         invoice_date: string | null;
-        subtotal: number | string | null;
         tax_total: number | string | null;
         total_amount: number | string | null;
-        amount_paid: number | string | null;
         balance_due: number | string | null;
         status: string | null;
-        created_at: string;
       }>(async (from, to) => {
         const result = await admin
           .from("sales_invoices")
-          .select("id, invoice_number, invoice_date, subtotal, tax_total, total_amount, amount_paid, balance_due, status, created_at")
+          .select("id, invoice_date, tax_total, total_amount, balance_due, status", { count: from === 0 ? "exact" : undefined })
           .eq("business_id", businessId)
+          // Keep historical debt, but omit settled invoices outside every profit period.
+          .or(`and(invoice_date.gte.${profitStartDate},invoice_date.lte.${today}),balance_due.gt.0`)
           .order("created_at", { ascending: true })
           .order("id", { ascending: true })
           .range(from, to);
-        return { data: result.data ?? [], error: result.error };
+        return { data: result.data ?? [], error: result.error, count: result.count };
       }),
       fetchAllPages<CollectedPayment>(async (from, to) => {
         const result = await admin.from("customer_payments")
-          .select("id, payment_date, amount_received, status, created_at")
+          .select("id, payment_date, amount_received, status, created_at", { count: from === 0 ? "exact" : undefined })
           .eq("business_id", businessId)
           .in("status", RECEIVED_PAYMENT_STATUSES)
           .gte("payment_date", todayStartIso).lt("payment_date", tomorrowIso)
           .order("payment_date", { ascending: true }).order("id", { ascending: true }).range(from, to);
-        return { data: result.data ?? [], error: result.error };
+        return { data: result.data ?? [], error: result.error, count: result.count };
       }),
-      admin
+      fetchAllPages(async (from, to) => admin
         .from("customers")
-        .select("id, active, status, current_balance, created_at")
-        .eq("business_id", businessId),
-      admin
+        .select("active, status", { count: from === 0 ? "exact" : undefined })
+        .eq("business_id", businessId).order("id").range(from, to)),
+      fetchAllPages(async (from, to) => admin
         .from("products")
-        .select("id, active, track_inventory, reorder_level, product_name, created_at")
-        .eq("business_id", businessId),
-      admin
+        .select("id, active, track_inventory, reorder_level", { count: from === 0 ? "exact" : undefined })
+        .eq("business_id", businessId).order("id").range(from, to)),
+      fetchAllPages(async (from, to) => admin
         .from("stock_balances")
-        .select("product_id, quantity_on_hand, available_quantity, total_inventory_value, reorder_status")
-        .eq("business_id", businessId),
+        .select("product_id, quantity_on_hand, available_quantity, total_inventory_value, reorder_status", { count: from === 0 ? "exact" : undefined })
+        .eq("business_id", businessId).order("id").range(from, to)),
       fetchAllPages<ProfitAllocationRow>(async (from, to) => {
         const result = await admin
           .from("sales_source_allocations")
-          .select("id, sales_invoice_id, quantity, unit_cost, total_cost")
+          .select("id, sales_invoice_id, quantity, unit_cost, total_cost, sales_invoices!inner(invoice_date)", { count: from === 0 ? "exact" : undefined })
           .eq("business_id", businessId)
-          .gte("allocated_at", yearStartIso)
-          .lt("allocated_at", tomorrowIso)
+          .eq("sales_invoices.business_id", businessId)
+          .gte("sales_invoices.invoice_date", profitStartDate)
+          .lte("sales_invoices.invoice_date", today)
           .order("allocated_at", { ascending: true })
           .order("id", { ascending: true })
           .range(from, to);
-        return { data: (result.data ?? []) as ProfitAllocationRow[], error: result.error };
+        return { data: (result.data ?? []) as ProfitAllocationRow[], error: result.error, count: result.count };
       }),
       fetchAllPages<ExpenseRow>(async (from, to) => {
         const result = await admin
           .from("expenses")
-          .select("id, expense_date, total_paid")
+          .select("id, expense_date, total_paid", { count: from === 0 ? "exact" : undefined })
           .eq("business_id", businessId)
-          .gte("expense_date", yearStartDate)
+          .gte("expense_date", profitStartDate)
           .lte("expense_date", today)
           .order("expense_date", { ascending: true })
           .order("id", { ascending: true })
           .range(from, to);
-        return { data: (result.data ?? []) as ExpenseRow[], error: result.error };
+        return { data: (result.data ?? []) as ExpenseRow[], error: result.error, count: result.count };
       }),
+      fetchAllPages(async (from, to) => admin
+        .from("workflow_records")
+        .select("module_name, process_name, record_payload, created_at", { count: from === 0 ? "exact" : undefined })
+        .eq("business_id", businessId)
+        .gte("created_at", todayStartIso).lt("created_at", tomorrowIso)
+        .in("module_name", ["Sales", "Purchasing"])
+        .order("created_at").order("id").range(from, to)),
       admin
         .from("workflow_records")
-        .select("module_name, process_name, document_name, reference_number, record_payload, created_at")
+        .select("module_name, process_name, reference_number, created_at")
         .eq("business_id", businessId)
         .order("created_at", { ascending: false })
-        .limit(20),
+        .order("id", { ascending: false })
+        .limit(5).throwOnError(),
     ]);
 
     const invoices = invoicesResult.filter((invoice) => {
@@ -345,13 +340,13 @@ export default async function DashboardPage() {
     cashCollected = collection.amount;
     paymentCount = collection.count;
 
-    const customers = customersResult.data ?? [];
+    const customers = customersResult;
     activeCustomers = customers.filter((customer) => customer.active !== false && customer.status !== "archived").length;
 
-    const products = productsResult.data ?? [];
+    const products = productsResult;
     productsInCatalogue = products.filter((product) => product.active !== false).length;
 
-    const balances = balancesResult.data ?? [];
+    const balances = balancesResult;
     const availableByProduct = new Map<string, number>();
     for (const balance of balances) {
       const productId = String(balance.product_id ?? "");
@@ -370,24 +365,14 @@ export default async function DashboardPage() {
       }
     }
 
-    const workflows = (workflowResult.data ?? []) as {
-      module_name: string;
-      process_name: string;
-      document_name: string | null;
-      reference_number: string;
-      record_payload: WorkflowPayload | null;
-      created_at: string;
-    }[];
-    const todayWorkflowSales = workflows.filter((record) => {
-      const createdDate = String(record.created_at ?? "").slice(0, 10);
-      return record.module_name === "Sales" && createdDate === today;
-    });
+    const workflows = workflowResult;
+    const todayWorkflowSales = workflows.filter((record) => record.module_name === "Sales");
     if (todaySales <= 0 && todayWorkflowSales.length > 0) {
       todaySales = todayWorkflowSales.reduce((sum, record) => sum + workflowAmount(record.record_payload), 0);
       todayInvoiceCount = todayWorkflowSales.length;
     }
-    grnsToday = workflows.filter((record) => record.module_name === "Purchasing" && record.process_name.includes("Goods Received") && String(record.created_at ?? "").slice(0, 10) === today).length;
-    recentActivity = workflows.slice(0, 5).map((record) => ({
+    grnsToday = workflows.filter((record) => record.module_name === "Purchasing" && record.process_name.includes("Goods Received")).length;
+    recentActivity = (recentWorkflowResult.data ?? []).map((record) => ({
       time: new Intl.DateTimeFormat("en-KE", { dateStyle: "medium", timeStyle: "short", timeZone: "Africa/Nairobi" }).format(new Date(record.created_at)),
       module: record.module_name,
       title: `${record.process_name} ${record.reference_number}`,
@@ -411,6 +396,7 @@ export default async function DashboardPage() {
     annualProfit = profitForPeriod(invoices, costByInvoice, yearStartDate, today) - expensesYear;
   }
 
+  await workspaceLabels;
   const profitPin = businessName.toLowerCase().includes("cymereg") ? "2027" : "2027";
   const profitPeriods = [
     { label: "Today", value: "today", amount: todayProfit, caption: profitCaption(todayProfit, "Today") },

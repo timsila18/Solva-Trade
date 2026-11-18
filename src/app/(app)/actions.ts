@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getActiveBusinessId } from "@/lib/tenant";
+import { mapWithConcurrency } from "@/lib/map-with-concurrency";
 
 type SupabaseWorkspaceClient = ReturnType<typeof createSupabaseAdminClient> | Awaited<ReturnType<typeof createSupabaseServerClient>>;
 
@@ -339,12 +340,11 @@ async function findSupplierByName(admin: SupabaseWorkspaceClient, businessId: st
 }
 
 async function sourceOverrideForSaleLine(
-  admin: SupabaseWorkspaceClient,
-  businessId: string,
   lineChoice: string,
   defaultSourceOverride: string,
   defaultSupplierId: string | null,
   defaultSupplierName: string | null,
+  resolveTzSupplier: () => ReturnType<typeof findSupplierByName>,
 ) {
   const choice = lineChoice && lineChoice !== "auto_fifo" ? lineChoice : defaultSourceOverride;
   if (!choice || choice === "auto_fifo") {
@@ -352,7 +352,7 @@ async function sourceOverrideForSaleLine(
   }
 
   if (choice === "tz_supplier") {
-    const supplier = await findSupplierByName(admin, businessId, "TZ Supplier");
+    const supplier = await resolveTzSupplier();
     return {
       sourceType: "alternative_supplier",
       supplierId: supplier?.id ?? defaultSupplierId,
@@ -638,10 +638,12 @@ async function postSalesInvoice(formData: FormData, userId: string, fallbackBusi
   const trackedLines = lines
     .map((line, linePosition) => ({ line, linePosition, product: productsById.get(line.productId) }))
     .filter(({ product }) => product?.track_inventory);
+  let tzSupplierPromise: ReturnType<typeof findSupplierByName> | undefined;
+  const resolveTzSupplier = () => (tzSupplierPromise ??= findSupplierByName(admin, businessId, "TZ Supplier"));
   const preparedMovements = await Promise.all(
     trackedLines.map(async ({ line, linePosition, product }) => {
       const unitCost = Number(product?.standard_cost ?? 0);
-      const lineSource = await sourceOverrideForSaleLine(admin, businessId, line.sourceChoice, saleSourceOverride, saleSourceSupplierId, saleSourceSupplierName);
+      const lineSource = await sourceOverrideForSaleLine(line.sourceChoice, saleSourceOverride, saleSourceSupplierId, saleSourceSupplierName, resolveTzSupplier);
       const invoiceItem = items[linePosition] ?? items.find((item) => String(item.product_id) === line.productId);
       if (!invoiceItem?.id) throw new Error("Could not match a posted invoice item to its stock movement.");
       return { line, unitCost, lineSource, invoiceItem };
@@ -681,8 +683,10 @@ async function postSalesInvoice(formData: FormData, userId: string, fallbackBusi
     });
   }
 
-  await Promise.all(
-    movementWork.map(async ({ line, unitCost, lineSource, invoiceItem, movementId }) => {
+  await mapWithConcurrency(
+    movementWork,
+    8,
+    async ({ line, unitCost, lineSource, invoiceItem, movementId }) => {
       const saleUnitPrice = line.quantity > 0 ? line.lineTotal / line.quantity : 0;
       const { error: allocationError } = await (admin as SolvaRpcClient).rpc("allocate_sale_fifo_source", {
         target_business_id: businessId,
@@ -723,7 +727,7 @@ async function postSalesInvoice(formData: FormData, userId: string, fallbackBusi
           .eq("sales_invoice_item_id", invoiceItem.id);
         if (allocationSourceError) console.warn("Solva Trade sale source override skipped", allocationSourceError);
       }
-    }),
+    },
   );
 
   const payment = paid > 0 ? await postCustomerPayment(formData, userId, fallbackBusinessId, invoice.id, paid) : null;

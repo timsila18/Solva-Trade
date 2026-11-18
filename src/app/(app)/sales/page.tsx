@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { AlertTriangle, CheckCircle2, Clock3, Eye, FileText, ReceiptText, UserPlus } from "lucide-react";
 import { CustomerInvoiceSearch } from "@/components/app/customer-invoice-search";
+import { SalesHistory } from "@/components/app/sales-history";
 import { SearchableSelect } from "@/components/app/searchable-select";
 import { ProductQuantityReportForm } from "@/components/app/product-quantity-report-form";
 import { completeProcessAction, reverseSalesInvoiceAction } from "@/app/(app)/actions";
@@ -9,8 +10,9 @@ import { PinProtectedSubmitButton } from "@/components/app/pin-protected-export"
 import { EmptyState, MetricCard, PageHero, PlainCard } from "@/components/ui/premium";
 import { salesWorkflows } from "@/lib/sales-data";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseServerClient, getSupabaseUser } from "@/lib/supabase/server";
 import { getActiveBusinessId } from "@/lib/tenant";
+import { loadSalesDashboardRows } from "@/lib/sales-dashboard-data";
 
 export const dynamic = "force-dynamic";
 
@@ -205,26 +207,9 @@ function salesDocumentHref(invoice: SalesInvoiceRow, process: "Sales Receipt" | 
 }
 
 async function recentSales(businessId: string | null) {
-  try {
-    const admin = createSupabaseAdminClient();
-    if (!businessId) return [];
-
-    const { data, error } = await admin
-      .from("sales_invoices")
-      .select("id, customer_id, invoice_number, invoice_date, created_at, total_amount, amount_paid, balance_due, status, delivery_status, customers(customer_name, phone)")
-      .eq("business_id", businessId)
-      .order("created_at", { ascending: false })
-      .limit(5000);
-
-    if (error) {
-      console.warn("Could not load sales invoice desk", error);
-      return [];
-    }
-    return (data ?? []) as SalesInvoiceRow[];
-  } catch (error) {
-    console.warn("Sales invoice desk skipped", error);
-    return [];
-  }
+  if (!businessId) return [];
+  return loadSalesDashboardRows<SalesInvoiceRow>(createSupabaseAdminClient(), "sales_invoices",
+    "id, customer_id, invoice_number, invoice_date, created_at, total_amount, amount_paid, balance_due, status, delivery_status, customers(customer_name, phone)", businessId);
 }
 
 async function activeSalesBusinessId(userId: string | undefined, metadataBusinessIdValue: unknown) {
@@ -248,36 +233,26 @@ async function activeSalesBusinessId(userId: string | undefined, metadataBusines
 }
 
 async function salesCustomers(businessId: string | null) {
-  try {
-    const admin = createSupabaseAdminClient();
-    if (!businessId) return [] as CustomerOption[];
-    const { data } = await admin
-      .from("customers")
-      .select("id, customer_name, customer_code")
-      .eq("business_id", businessId)
-      .order("customer_name", { ascending: true })
-      .limit(2000);
-    return (data ?? []) as CustomerOption[];
-  } catch (error) {
-    console.warn("Could not load sales report customers", error);
-    return [] as CustomerOption[];
-  }
+  if (!businessId) return [];
+  const rows = await loadSalesDashboardRows<CustomerOption>(createSupabaseAdminClient(), "customers", "id, customer_name, customer_code", businessId);
+  return rows.sort((a, b) => (a.customer_name ?? "").localeCompare(b.customer_name ?? ""));
 }
 
 async function salesSuppliers(businessId: string | null) {
+  if (!businessId) return [];
+  const rows = await loadSalesDashboardRows<SupplierOption>(createSupabaseAdminClient(), "suppliers", "id, trading_name, legal_name, supplier_code", businessId);
+  return rows.sort((a, b) => (a.trading_name ?? "").localeCompare(b.trading_name ?? ""));
+}
+
+async function salesProducts(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, businessId: string | null) {
+  if (!businessId) return { products: [], productReportError: false };
   try {
-    const admin = createSupabaseAdminClient();
-    if (!businessId) return [] as SupplierOption[];
-    const { data } = await admin
-      .from("suppliers")
-      .select("id, trading_name, legal_name, supplier_code")
-      .eq("business_id", businessId)
-      .order("trading_name", { ascending: true })
-      .limit(2000);
-    return (data ?? []) as SupplierOption[];
+    const rows = await loadSalesDashboardRows<{ id: string; product_name: string; sku: string | null }>(supabase, "products", "id,product_name,sku", businessId);
+    rows.sort((a, b) => a.product_name.localeCompare(b.product_name) || a.id.localeCompare(b.id));
+    return { products: rows.map((product) => ({ id: product.id, label: `${product.product_name}${product.sku ? ` - ${product.sku}` : ""}` })), productReportError: false };
   } catch (error) {
-    console.warn("Could not load sales report suppliers", error);
-    return [] as SupplierOption[];
+    console.warn("Could not load sales report products", error);
+    return { products: [], productReportError: true };
   }
 }
 
@@ -289,23 +264,14 @@ export default async function SalesPage({
   const params = searchParams ? await searchParams : {};
   const historyCustomerQuery = typeof params.historyCustomer === "string" ? params.historyCustomer : "";
   const supabase = await createSupabaseServerClient();
-  const { data: userData } = await supabase.auth.getUser();
-  const businessId = await activeSalesBusinessId(userData.user?.id, userData.user?.app_metadata?.active_business_id);
-  const [invoices, customers, suppliers] = await Promise.all([
+  const { data: { user } } = await getSupabaseUser();
+  const businessId = await activeSalesBusinessId(user?.id, user?.app_metadata?.active_business_id);
+  const [invoices, customers, suppliers, { products, productReportError }] = await Promise.all([
     recentSales(businessId),
     salesCustomers(businessId),
     salesSuppliers(businessId),
+    salesProducts(supabase, businessId),
   ]);
-  const products: { id: string; label: string }[] = [];
-  let productReportError = false;
-  if (businessId) {
-    for (let offset = 0; ; offset += 1000) {
-      const { data, error } = await supabase.from("products").select("id,product_name,sku").eq("business_id", businessId).order("product_name").order("id").range(offset, offset + 999);
-      if (error) { productReportError = true; break; }
-      products.push(...(data || []).map((product) => ({ id: product.id, label: `${product.product_name}${product.sku ? ` - ${product.sku}` : ""}` })));
-      if (!data || data.length < 1000) break;
-    }
-  }
   const today = todayIsoDate();
   const monthStart = `${today.slice(0, 7)}-01`;
   const vatPeriod = previousMonthWindow(today);
@@ -394,47 +360,15 @@ export default async function SalesPage({
             <p className="mt-2 text-sm leading-6 text-slate-600">
               Paid and concluded sales stay here. Only invoices still waiting for payment remain in the follow-up list below.
             </p>
-            <details className="mt-4 rounded-md border border-slate-200 bg-white" open={Boolean(historyCustomerQuery)}>
-              <summary className="flex min-h-11 cursor-pointer items-center justify-between gap-3 rounded-md bg-[var(--solva-blue-700)] px-4 text-sm font-semibold text-white shadow-sm hover:bg-[var(--solva-blue-800)]">
-                <span className="inline-flex items-center gap-2">
-                  <FileText className="h-4 w-4" />
-                  Sales History
-                </span>
-                <span className="rounded-full bg-white/15 px-2 py-1 text-xs">{completedInvoices.length}</span>
-              </summary>
-              <div className="max-h-[72vh] overflow-auto p-4">
-                <CustomerInvoiceSearch label="Search Sales History" initialQuery={historyCustomerQuery}
-                  items={completedInvoices.map((invoice) => ({
-                    id: invoice.id,
-                    customerName: customerName(invoice),
-                    invoiceNumber: invoice.invoice_number ?? "",
-                    otherDetails: `${invoice.invoice_date ?? ""} ${asNumber(invoice.total_amount)} ${asNumber(invoice.amount_paid)} ${Array.isArray(invoice.customers) ? invoice.customers[0]?.phone ?? "" : invoice.customers?.phone ?? ""}`,
-                    content: (
-                      <div key={invoice.id} className="grid gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div>
-                            <p className="font-semibold text-slate-950">{invoice.invoice_number || "Sale without number"}</p>
-                            <p className="text-xs text-slate-500">{customerName(invoice)} - {invoice.invoice_date || "not dated"}</p>
-                          </div>
-                          <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-black text-emerald-800">PAID</span>
-                        </div>
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <p className="font-semibold text-slate-800">{money(asNumber(invoice.total_amount))}</p>
-                          <div className="flex flex-wrap gap-2">
-                            <a href={salesDocumentHref(invoice, "Invoice")} className="inline-flex min-h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700">
-                              Invoice
-                            </a>
-                            <a href={receiptHref(invoice)} className="inline-flex min-h-9 items-center justify-center rounded-md bg-emerald-700 px-3 text-xs font-semibold text-white">
-                              Receipt
-                            </a>
-                          </div>
-                        </div>
-                      </div>
-                    ),
-                  }))}
-                />
-              </div>
-            </details>
+            <SalesHistory initialQuery={historyCustomerQuery} rows={completedInvoices.map((invoice) => ({
+              id: invoice.id,
+              customerName: customerName(invoice),
+              invoiceNumber: invoice.invoice_number ?? "",
+              invoiceDate: invoice.invoice_date ?? "",
+              total: asNumber(invoice.total_amount),
+              paid: asNumber(invoice.amount_paid),
+              phone: (Array.isArray(invoice.customers) ? invoice.customers[0]?.phone : invoice.customers?.phone) ?? "",
+            }))} />
           </div>
           <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
             <p className="text-sm font-semibold text-emerald-700">Customer Sales Reports</p>
