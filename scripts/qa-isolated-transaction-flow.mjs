@@ -41,18 +41,22 @@ try {
   const runtimeErrors = [];
   page.on("pageerror", (error) => runtimeErrors.push(error.message));
   async function complete(buttonName) {
+    const start = performance.now();
     await page.getByRole("button", { name: buttonName, exact: true }).click();
     await page.waitForURL(/\/action-complete\?/, { timeout: 90000 });
     const params = new URL(page.url()).searchParams;
     assert.equal(params.get("error"), null, params.get("error") || "Posting failed");
     await page.getByRole("link", { name: "Download PDF", exact: true }).waitFor();
+    console.log(JSON.stringify({ step: buttonName, submitMs: Math.round(performance.now() - start) }));
     return params;
   }
   async function documentCheck(path, label, requireAllProducts = true) {
+    const start = performance.now();
     const response = await context.request.get(new URL(path, base).href, { timeout: 90000 });
     assert.equal(response.status(), 200, `${label} HTTP status`);
     assert.ok(response.headers()["content-type"].includes("pdf"), `${label} must be PDF`);
     const pdf = await response.body();
+    console.log(JSON.stringify({ step: `${label} PDF`, totalMs: Math.round(performance.now() - start) }));
     assert.ok(pdf.subarray(0, 5).toString() === "%PDF-");
     if (requireAllProducts) {
       const htmlUrl = new URL(path, base); htmlUrl.searchParams.set("format", "print");

@@ -445,17 +445,15 @@ async function getWorkspaceContextForClient(client: SupabaseWorkspaceClient, use
   const businessId = (await getActiveBusinessId()) || fallbackBusinessId;
   if (!businessId) throw new Error("No active business was selected.");
 
-  const { data: branch } = await client
+  const [{ data: branch }, { data: warehouse }] = await Promise.all([client
     .from("branches")
     .select("id")
     .eq("business_id", businessId)
     .eq("active", true)
     .order("is_default", { ascending: false })
     .limit(1)
-    .maybeSingle();
-  if (!branch?.id) throw new Error("Set up a branch before posting transactions.");
-
-  const { data: warehouse } = await client
+    .maybeSingle(),
+    client
     .from("warehouses")
     .select("id")
     .eq("business_id", businessId)
@@ -463,7 +461,9 @@ async function getWorkspaceContextForClient(client: SupabaseWorkspaceClient, use
     .eq("allow_sales_dispatch", true)
     .order("is_default", { ascending: false })
     .limit(1)
-    .maybeSingle();
+    .maybeSingle(),
+  ]);
+  if (!branch?.id) throw new Error("Set up a branch before posting transactions.");
   if (!warehouse?.id) throw new Error("Set up a sales warehouse before posting transactions.");
 
   return { businessId, branchId: branch.id as string, warehouseId: warehouse.id as string, userId };

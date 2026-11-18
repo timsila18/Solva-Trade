@@ -21,6 +21,7 @@ const suites = [
   "sales-dashboard-data",
   "sales-history",
   "map-with-concurrency",
+  "export-performance",
 ];
 
 for (const suite of suites) {

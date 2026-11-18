@@ -7,6 +7,12 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { productSalesPeriod } from "@/lib/sales-metrics";
 import { loadProductSales } from "@/lib/product-sales-data";
+import { memoInRequest, withRequestMemo } from "@/lib/request-memo";
+import { loadDocumentRows } from "@/lib/document-rows";
+
+function exportUser() {
+  return memoInRequest("export-user", async () => (await createSupabaseServerClient()).auth.getUser());
+}
 
 type ReportLine = {
   sku: string;
@@ -1289,8 +1295,12 @@ function sourceLabel(value: string | null | undefined) {
 }
 
 async function activeReportBusinessId() {
+  return memoInRequest("export-business", resolveActiveReportBusinessId);
+}
+
+async function resolveActiveReportBusinessId() {
   const supabase = await createSupabaseServerClient();
-  const { data } = await supabase.auth.getUser();
+  const { data } = await exportUser();
   const user = data.user;
   if (!user) return null;
   const preferredBusinessId = await getActiveBusinessId();
@@ -2655,13 +2665,13 @@ async function salesInvoiceDocumentLines(invoiceId: string | null): Promise<Repo
       .eq("business_id", businessId)
       .eq("id", invoiceId)
       .limit(1),
-    supabase
+    loadDocumentRows((from, to) => supabase
       .from("sales_invoice_items")
-      .select("invoice_id, product_id, invoice_quantity, unit_price, tax_amount, line_total, products(product_name, product_code, sku, standard_cost)")
+      .select("invoice_id, product_id, invoice_quantity, unit_price, tax_amount, line_total, products(product_name, product_code, sku, standard_cost)", { count: from === 0 ? "exact" : undefined })
       .eq("business_id", businessId)
       .eq("invoice_id", invoiceId)
       .order("id", { ascending: true })
-      .limit(200),
+      .range(from, to)),
   ]);
   if (invoiceResult.error) {
     console.error("Sales invoice export invoice query failed", {
@@ -2670,14 +2680,6 @@ async function salesInvoiceDocumentLines(invoiceId: string | null): Promise<Repo
       message: invoiceResult.error.message,
     });
     throw new Error(`Could not load this invoice. ${invoiceResult.error.message}`);
-  }
-  if (itemResult.error) {
-    console.error("Sales invoice export item query failed", {
-      invoiceId,
-      businessId,
-      message: itemResult.error.message,
-    });
-    throw new Error(`Could not load the invoice line items. ${itemResult.error.message}`);
   }
   const invoice = ((invoiceResult.data ?? [])[0] ?? undefined) as SalesInvoiceRow | undefined;
   if (!invoice) {
@@ -2737,13 +2739,14 @@ async function goodsReceivedDocumentLines(grnId: string | null): Promise<ReportL
       .eq("business_id", businessId)
       .eq("id", grnId)
       .limit(1),
-    supabase
+    loadDocumentRows((from, to) => supabase
       .from("goods_received_note_items")
-      .select("grn_id, supplier_batch, expiry_date, delivered_quantity, accepted_quantity, rejected_quantity, unit_cost, source_type, source_reason, products(product_name, product_code, sku)")
+      .select("grn_id, supplier_batch, expiry_date, delivered_quantity, accepted_quantity, rejected_quantity, unit_cost, source_type, source_reason, products(product_name, product_code, sku)", { count: from === 0 ? "exact" : undefined })
       .eq("business_id", businessId)
       .eq("grn_id", grnId)
       .order("created_at", { ascending: true })
-      .limit(300),
+      .order("id", { ascending: true })
+      .range(from, to)),
   ]);
   const grn = ((grns ?? [])[0] ?? undefined) as GoodsReceivedNoteRow | undefined;
   const supplier = relatedOne(grn?.suppliers);
@@ -4344,7 +4347,7 @@ async function tenantContext() {
 
   try {
     const supabase = await createSupabaseServerClient();
-    const { data: userData } = await supabase.auth.getUser();
+    const { data: userData } = await exportUser();
     const user = userData.user;
     if (!user) return fallback;
 
@@ -4870,7 +4873,7 @@ async function imageBufferFromPath(imagePath: string | null | undefined) {
   if (!imagePath) return null;
   try {
     if (imagePath.startsWith("http://") || imagePath.startsWith("https://")) {
-      const response = await fetch(imagePath, { cache: "no-store" });
+      const response = await fetch(imagePath, { cache: "no-store", signal: AbortSignal.timeout(5000) });
       if (!response.ok) return null;
       return Buffer.from(await response.arrayBuffer());
     }
@@ -4897,8 +4900,10 @@ async function makePdfImage(name: string, source: string | null | undefined, max
 }
 
 async function pdfAssets(report: Report, layout: "portrait" | "landscape") {
-  const tenant = await makePdfImage("TenantLogo", report.businessLogoPath, layout === "landscape" ? 112 : 92, layout === "landscape" ? 58 : 72);
-  const solva = await makePdfImage("SolvaLogo", "/solva-trade-logo.png", layout === "landscape" ? 120 : 136, layout === "landscape" ? 42 : 42);
+  const [tenant, solva] = await Promise.all([
+    makePdfImage("TenantLogo", report.businessLogoPath, layout === "landscape" ? 112 : 92, layout === "landscape" ? 58 : 72),
+    makePdfImage("SolvaLogo", "/solva-trade-logo.png", layout === "landscape" ? 120 : 136, 42),
+  ]);
   return [tenant, solva].filter(Boolean) as PdfImageResource[];
 }
 
@@ -7185,7 +7190,7 @@ async function recordDocumentGeneration(report: Report, format: string) {
 
   try {
     const supabase = await createSupabaseServerClient();
-    const { data: userData } = await supabase.auth.getUser();
+    const { data: userData } = await exportUser();
     const userId = userData.user?.id;
     if (!userId) return;
 
@@ -7246,16 +7251,17 @@ async function exportResponse(searchParams: URLSearchParams) {
     return Response.json(report);
   }
 
-  await recordDocumentGeneration(report, format);
-
   if (format === "pdf") {
-    return new Response(await pdf(report), {
+    const [, document] = await Promise.all([recordDocumentGeneration(report, format), pdf(report)]);
+    return new Response(document, {
       headers: {
         "Content-Type": "application/pdf",
         "Content-Disposition": `attachment; filename="${filename}.pdf"`,
       },
     });
   }
+
+  await recordDocumentGeneration(report, format);
 
   if (format === "excel") {
     return new Response(htmlDocument(report), {
@@ -7285,7 +7291,7 @@ async function exportResponse(searchParams: URLSearchParams) {
 
 export async function GET(request: NextRequest) {
   try {
-    return await exportResponse(request.nextUrl.searchParams);
+    return await withRequestMemo(() => exportResponse(request.nextUrl.searchParams));
   } catch (error) {
     console.error("Solva export GET failed", {
       module: request.nextUrl.searchParams.get("module"),
@@ -7310,7 +7316,7 @@ export async function POST(request: NextRequest) {
       if (key === "format") searchParams.set(key, value);
       else searchParams.append(key, value);
     }
-    return exportResponse(searchParams);
+    return await withRequestMemo(() => exportResponse(searchParams));
   } catch (error) {
     console.error("Solva export POST failed", {
       message: error instanceof Error ? error.message : String(error),

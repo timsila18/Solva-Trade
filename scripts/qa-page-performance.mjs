@@ -30,6 +30,26 @@ try {
     }
     console.log(JSON.stringify({ route, samples }));
   }
+  if (process.env.SOLVA_QA_DOCUMENTS === "yes") {
+    const { data: membership, error: membershipError } = await admin.from("business_memberships").select("business_id").eq("user_id", link.user.id).eq("active", true).limit(1).single();
+    if (membershipError) throw membershipError;
+    for (const [table, key, processName] of [["sales_invoices", "invoiceId", "Invoice"], ["goods_received_notes", "grnId", "Goods Received Note (GRN)"]]) {
+      const { data: rows, error: rowError } = await admin.from(table).select("id").eq("business_id", membership.business_id).order("created_at", { ascending: false }).limit(1);
+      if (rowError) throw rowError;
+      if (!rows.length) continue;
+      const route = `/api/exports?${new URLSearchParams({ module: table === "sales_invoices" ? "Sales" : "Purchasing", process: processName, format: "pdf", [key]: rows[0].id })}`;
+      const samples = [];
+      for (let run = 0; run < Number(process.env.SOLVA_QA_RUNS || 3); run++) {
+        const start = performance.now();
+        const response = await fetch(`${base}${route}`, { headers: { Cookie: Array.from(jar, ([name, value]) => `${name}=${value}`).join("; ") }, signal: AbortSignal.timeout(60000) });
+        const body = Buffer.from(await response.arrayBuffer());
+        assert.equal(response.status, 200, `${processName} status`);
+        assert.equal(body.subarray(0, 5).toString(), "%PDF-", `${processName} PDF`);
+        samples.push({ totalMs: Math.round(performance.now() - start), bytes: body.length });
+      }
+      console.log(JSON.stringify({ document: processName, documentId: rows[0].id, samples }));
+    }
+  }
 } finally {
   // Revoke only this QA session, never the customer's other sessions.
   await client.auth.signOut({ scope: "local" });
