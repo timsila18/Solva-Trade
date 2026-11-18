@@ -45,4 +45,5 @@ assert.match(page, /suppliers, \{ products, productReportError \}\] = await Prom
 assert.doesNotMatch(page, /\.limit\((5000|2000)\)/);
 assert.match(page, /\.eq\("active", true\)/);
 assert.match(page, /export const dynamic = "force-dynamic"/);
+assert.doesNotMatch(page, /label_invoice_number:/, "Document links must use invoice IDs, not duplicate invoice details in every URL");
 console.log("ok - full invoice totals beyond 5000, smaller server caps, tenant filters, cursor batches, errors, and concurrent product loading");

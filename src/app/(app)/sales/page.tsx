@@ -174,34 +174,11 @@ function receiptHref(invoice: SalesInvoiceRow) {
 }
 
 function salesDocumentHref(invoice: SalesInvoiceRow, process: "Sales Receipt" | "Invoice") {
-  const total = asNumber(invoice.total_amount);
-  const paid = asNumber(invoice.amount_paid);
-  const balance = asNumber(invoice.balance_due);
   const params = new URLSearchParams({
     module: "Sales",
     process,
     format: "pdf",
     invoiceId: invoice.id,
-    label_invoice_number: "Invoice number",
-    field_invoice_number: invoice.invoice_number || invoice.id,
-    label_receipt_number: "Receipt number",
-    field_receipt_number: invoice.invoice_number || invoice.id,
-    label_customer: "Customer",
-    field_customer: customerName(invoice),
-    label_invoice_date: "Invoice date",
-    field_invoice_date: invoice.invoice_date || "",
-    label_delivery_date: "Delivery date",
-    field_delivery_date: invoice.invoice_date || "",
-    label_delivery_status: "Delivery status",
-    field_delivery_status: "Ready for delivery",
-    label_amount_paid: "Amount paid",
-    field_amount_paid: paid.toFixed(2),
-    label_total: "Total",
-    field_total: total.toFixed(2),
-    label_balance_due: "Balance due",
-    field_balance_due: balance.toFixed(2),
-    label_payment_status: "Payment status",
-    field_payment_status: balance <= 0 ? "Paid" : paid > 0 ? "Part paid" : "Unpaid",
   });
   return `/api/exports?${params.toString()}`;
 }
