@@ -40,6 +40,11 @@ try {
   const page = await context.newPage();
   const runtimeErrors = [];
   page.on("pageerror", (error) => runtimeErrors.push(error.message));
+  page.on("requestfinished", (request) => {
+    if (!request.isNavigationRequest() && request.method() !== "POST") return;
+    const timing = request.timing();
+    console.log(JSON.stringify({ request: new URL(request.url()).pathname, method: request.method(), networkMs: Math.round(timing.responseEnd), firstByteMs: Math.round(timing.responseStart) }));
+  });
   async function complete(buttonName) {
     const start = performance.now();
     await page.getByRole("button", { name: buttonName, exact: true }).click();
